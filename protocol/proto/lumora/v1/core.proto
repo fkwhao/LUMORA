@@ -1,0 +1,105 @@
+syntax = "proto3";
+
+package lumora.v1;
+
+import "google/protobuf/timestamp.proto";
+import "lumora/v1/common.proto";
+
+option java_multiple_files = true;
+option java_package = "com.lumora.protocol.v1";
+
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  CREATED = 1;
+  PLANNING = 2;
+  RUNNING = 3;
+  WAITING_APPROVAL = 4;
+  COMPLETED = 5;
+  REJECTED = 6;
+  INTERRUPTED = 7;
+  FAILED = 8;
+}
+
+enum TaskEventType {
+  TASK_EVENT_TYPE_UNSPECIFIED = 0;
+  TASK_CREATED = 1;
+  STATUS_CHANGED = 2;
+  PLAN_STEP_STARTED = 3;
+  PLAN_STEP_COMPLETED = 4;
+  APPROVAL_REQUESTED = 5;
+  APPROVAL_DECIDED = 6;
+  RESULT_AVAILABLE = 7;
+  TASK_ERROR = 8;
+}
+
+enum ApprovalDecision {
+  APPROVAL_DECISION_UNSPECIFIED = 0;
+  ALLOW_ONCE = 1;
+  REJECT = 2;
+}
+
+message TaskSnapshot {
+  string task_id = 1;
+  string goal = 2;
+  TaskStatus status = 3;
+  uint64 last_event_sequence = 4;
+  string active_step = 5;
+  string result_summary = 6;
+  ErrorDetail error = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+}
+
+message ApprovalRequest {
+  string approval_id = 1;
+  string task_id = 2;
+  string action = 3;
+  string impact_summary = 4;
+  string risk_level = 5;
+  bool reversible = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+
+message TaskEvent {
+  string task_id = 1;
+  uint64 sequence = 2;
+  TaskEventType type = 3;
+  TaskStatus status = 4;
+  string title = 5;
+  string user_message = 6;
+  ApprovalRequest approval = 7;
+  ErrorDetail error = 8;
+  google.protobuf.Timestamp occurred_at = 9;
+}
+
+message CreateTaskRequest {
+  RequestContext context = 1;
+  string goal = 2;
+}
+
+message GetTaskRequest {
+  RequestContext context = 1;
+  string task_id = 2;
+}
+
+message SubscribeTaskEventsRequest {
+  RequestContext context = 1;
+  string task_id = 2;
+  uint64 after_sequence = 3;
+}
+
+message DecideApprovalRequest {
+  RequestContext context = 1;
+  string task_id = 2;
+  string approval_id = 3;
+  ApprovalDecision decision = 4;
+}
+
+service CoreService {
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc CreateTask(CreateTaskRequest) returns (TaskSnapshot);
+  rpc GetTask(GetTaskRequest) returns (TaskSnapshot);
+  rpc SubscribeTaskEvents(SubscribeTaskEventsRequest) returns (stream TaskEvent);
+  rpc DecideApproval(DecideApprovalRequest) returns (TaskSnapshot);
+}
+

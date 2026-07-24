@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package lumora.v1;
+
+option java_multiple_files = true;
+option java_package = "com.lumora.protocol.v1";
+
+message RequestContext {
+  string protocol_version = 1;
+  string startup_token = 2;
+  string correlation_id = 3;
+}
+
+message HealthRequest {
+  RequestContext context = 1;
+}
+
+message HealthResponse {
+  string service_name = 1;
+  string service_version = 2;
+  string protocol_version = 3;
+}
+
+message ErrorDetail {
+  string code = 1;
+  string user_message = 2;
+  bool retryable = 3;
+  string correlation_id = 4;
+  string developer_detail = 5;
+}
+

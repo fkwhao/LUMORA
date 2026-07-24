@@ -11,5 +11,24 @@ LUMORA 跨进程接口的唯一协议源。
 
 协议包使用 `lumora.v1` 命名空间。运行时不得共享业务源码，只能依赖生成的协议代码。
 
-生成和检查命令将在协议任务完成后补充。
+## 目录
 
+```text
+proto/lumora/v1/common.proto  公共认证、健康检查和错误
+proto/lumora/v1/core.proto    任务、事件、审批和 CoreService
+proto/lumora/v1/agent.proto   规划消息和 AgentService
+```
+
+## 检查
+
+不依赖外部工具的结构检查：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File protocol/tests/contract-shape.ps1
+```
+
+配置 Buf CLI 后执行完整 Lint 和代码生成：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File protocol/generate.ps1
+```

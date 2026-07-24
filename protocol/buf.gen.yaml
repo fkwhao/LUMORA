@@ -1,0 +1,18 @@
+version: v2
+clean: true
+plugins:
+  - remote: buf.build/protocolbuffers/java:v31.1
+    out: ../core/generated/main/java
+  - remote: buf.build/grpc/java:v1.74.0
+    out: ../core/generated/main/java
+  - remote: buf.build/protocolbuffers/python:v31.1
+    out: ../agent/generated
+  - remote: buf.build/grpc/python:v1.74.0
+    out: ../agent/generated
+  - remote: buf.build/community/stephenh-ts-proto:v2.7.5
+    out: ../desktop/generated
+    opt:
+      - outputServices=grpc-js
+      - esModuleInterop=true
+      - useExactTypes=false
+
