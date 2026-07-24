@@ -1,6 +1,6 @@
 import unittest
 
-from lumora_agent.service import (
+from app.controller.grpc.agent_servicer import (
     AuthenticationError,
     ProtocolMismatchError,
     validate_request_context,

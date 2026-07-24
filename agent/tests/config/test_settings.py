@@ -2,7 +2,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from lumora_agent.settings import AgentSettings
+from app.config.settings import AgentSettings
 
 
 class AgentSettingsTest(unittest.TestCase):

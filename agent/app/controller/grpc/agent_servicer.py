@@ -1,16 +1,19 @@
 import hmac
 from typing import Any
 
-from lumora_agent.planner import build_plan
-from lumora_agent.settings import AgentSettings
+from app.config.settings import AgentSettings
+from app.exception.runtime_errors import (
+    AuthenticationError,
+    ProtocolMismatchError,
+)
+from app.service.planner_service import PlannerService
 
-
-class AuthenticationError(ValueError):
-    pass
-
-
-class ProtocolMismatchError(ValueError):
-    pass
+__all__ = [
+    "AuthenticationError",
+    "ProtocolMismatchError",
+    "create_agent_servicer",
+    "validate_request_context",
+]
 
 
 def validate_request_context(
@@ -20,20 +23,27 @@ def validate_request_context(
     expected_protocol_version: str,
     expected_startup_token: str,
 ) -> None:
-    """在进入规划逻辑前统一校验本地进程身份和协议兼容性。"""
+    """业务逻辑执行前统一校验进程身份和协议兼容性。"""
     if not hmac.compare_digest(startup_token, expected_startup_token):
         raise AuthenticationError("启动令牌无效")
     if protocol_version != expected_protocol_version:
         raise ProtocolMismatchError("协议版本不兼容")
 
 
-def create_grpc_servicer(settings: AgentSettings) -> Any:
-    # 延迟导入让规划器单元测试不依赖尚未生成的 Protobuf 代码。
+def create_agent_servicer(
+    settings: AgentSettings,
+    planner_service: PlannerService,
+) -> Any:
+    # 延迟导入让 Service 单元测试不依赖尚未生成的 Protobuf 代码。
     import grpc
     from lumora.v1 import agent_pb2, agent_pb2_grpc, common_pb2
 
-    class AgentGrpcService(agent_pb2_grpc.AgentServiceServicer):
-        def _validate(self, request: Any, context: grpc.ServicerContext) -> None:
+    class AgentGrpcController(agent_pb2_grpc.AgentServiceServicer):
+        async def _validate(
+            self,
+            request: Any,
+            context: grpc.aio.ServicerContext,
+        ) -> None:
             try:
                 validate_request_context(
                     protocol_version=request.context.protocol_version,
@@ -42,24 +52,39 @@ def create_grpc_servicer(settings: AgentSettings) -> Any:
                     expected_startup_token=settings.startup_token,
                 )
             except AuthenticationError as error:
-                context.abort(grpc.StatusCode.UNAUTHENTICATED, str(error))
+                await context.abort(grpc.StatusCode.UNAUTHENTICATED, str(error))
             except ProtocolMismatchError as error:
-                context.abort(grpc.StatusCode.FAILED_PRECONDITION, str(error))
+                await context.abort(
+                    grpc.StatusCode.FAILED_PRECONDITION,
+                    str(error),
+                )
 
-        def Health(self, request: Any, context: grpc.ServicerContext) -> Any:
-            self._validate(request, context)
+        async def Health(
+            self,
+            request: Any,
+            context: grpc.aio.ServicerContext,
+        ) -> Any:
+            await self._validate(request, context)
             return common_pb2.HealthResponse(
                 service_name="lumora-agent",
                 service_version="0.1.0",
                 protocol_version=settings.protocol_version,
             )
 
-        def PlanTask(self, request: Any, context: grpc.ServicerContext) -> Any:
-            self._validate(request, context)
+        async def PlanTask(
+            self,
+            request: Any,
+            context: grpc.aio.ServicerContext,
+        ) -> Any:
+            await self._validate(request, context)
             try:
-                steps = build_plan(request.goal)
+                steps = planner_service.build_plan(request.goal)
             except ValueError as error:
-                context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(error))
+                await context.abort(
+                    grpc.StatusCode.INVALID_ARGUMENT,
+                    str(error),
+                )
+                raise
 
             return agent_pb2.PlanTaskResponse(
                 task_id=request.task_id,
@@ -74,4 +99,4 @@ def create_grpc_servicer(settings: AgentSettings) -> Any:
                 ],
             )
 
-    return AgentGrpcService()
+    return AgentGrpcController()

@@ -1,11 +1,11 @@
 import unittest
 
-from lumora_agent.planner import build_plan
+from app.service.planner_service import PlannerService
 
 
-class BuildPlanTest(unittest.TestCase):
-    def test_sensitive_demo_step_requires_approval(self) -> None:
-        steps = build_plan("整理下载目录")
+class PlannerServiceTest(unittest.TestCase):
+    def test_sensitive_step_requires_approval(self) -> None:
+        steps = PlannerService().build_plan("整理下载目录")
 
         self.assertEqual(
             [step.title for step in steps],
@@ -15,9 +15,8 @@ class BuildPlanTest(unittest.TestCase):
 
     def test_blank_goal_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "目标不能为空"):
-            build_plan("   ")
+            PlannerService().build_plan("   ")
 
 
 if __name__ == "__main__":
     unittest.main()
-
