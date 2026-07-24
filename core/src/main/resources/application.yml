@@ -1,0 +1,19 @@
+spring:
+  application:
+    name: lumora-local-core
+  main:
+    web-application-type: none
+  datasource:
+    url: jdbc:sqlite:${LUMORA_DATABASE_PATH:./runtime/lumora.db}
+    driver-class-name: org.sqlite.JDBC
+
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+
+lumora:
+  protocol-version: ${LUMORA_PROTOCOL_VERSION:1}
+  startup-token: ${LUMORA_STARTUP_TOKEN:}
+  core-port: ${LUMORA_CORE_PORT:0}
+  agent-port: ${LUMORA_AGENT_PORT:0}
+
