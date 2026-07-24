@@ -16,6 +16,9 @@
 powershell -ExecutionPolicy Bypass -File protocol/generate.ps1
 ```
 
+该命令生成 Python 和 TypeScript 协议代码。Java 协议代码由 `core/pom.xml` 的
+Protobuf Maven Plugin 在 Maven 构建期间生成。
+
 ## Python
 
 ```powershell

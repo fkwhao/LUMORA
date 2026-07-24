@@ -2,6 +2,11 @@ import { ipcMain, type WebContents } from "electron";
 
 import type { ApprovalDecisionInput } from "../shared/task-contract";
 import type { TaskGateway } from "./task-gateway";
+import {
+  validateApprovalDecisionInput,
+  validateGoal,
+  validateTaskId,
+} from "../shared/validation";
 
 const channels = {
   create: "tasks:create",
@@ -15,14 +20,25 @@ const channels = {
 export function registerTaskIpc(gateway: TaskGateway): () => void {
   const subscriptions = new Map<string, () => void>();
 
-  ipcMain.handle(channels.create, (_event, goal: string) => gateway.create(goal));
-  ipcMain.handle(channels.get, (_event, taskId: string) => gateway.get(taskId));
+  ipcMain.handle(channels.create, (_event, goal: unknown) =>
+    gateway.create(validateGoal(goal)),
+  );
+  ipcMain.handle(channels.get, (_event, taskId: unknown) =>
+    gateway.get(validateTaskId(taskId)),
+  );
   ipcMain.handle(
     channels.decideApproval,
-    (_event, input: ApprovalDecisionInput) => gateway.decideApproval(input),
+    (_event, input: ApprovalDecisionInput) =>
+      gateway.decideApproval(validateApprovalDecisionInput(input)),
   );
 
-  ipcMain.on(channels.subscribe, (event, taskId: string) => {
+  ipcMain.on(channels.subscribe, (event, untrustedTaskId: unknown) => {
+    // Send-style IPC cannot return validation errors to the renderer. Ignore malformed
+    // subscription messages here so untrusted input cannot become a Main-process crash.
+    const taskId = tryValidateTaskId(untrustedTaskId);
+    if (!taskId) {
+      return;
+    }
     const key = subscriptionKey(event.sender, taskId);
     subscriptions.get(key)?.();
     subscriptions.set(
@@ -35,7 +51,11 @@ export function registerTaskIpc(gateway: TaskGateway): () => void {
     );
   });
 
-  ipcMain.on(channels.unsubscribe, (event, taskId: string) => {
+  ipcMain.on(channels.unsubscribe, (event, untrustedTaskId: unknown) => {
+    const taskId = tryValidateTaskId(untrustedTaskId);
+    if (!taskId) {
+      return;
+    }
     const key = subscriptionKey(event.sender, taskId);
     subscriptions.get(key)?.();
     subscriptions.delete(key);
@@ -58,5 +78,12 @@ function subscriptionKey(webContents: WebContents, taskId: string): string {
   return `${webContents.id}:${taskId}`;
 }
 
-export { channels as taskIpcChannels };
+function tryValidateTaskId(input: unknown): string | undefined {
+  try {
+    return validateTaskId(input);
+  } catch {
+    return undefined;
+  }
+}
 
+export { channels as taskIpcChannels };

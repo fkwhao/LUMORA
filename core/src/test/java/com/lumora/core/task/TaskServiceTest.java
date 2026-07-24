@@ -49,5 +49,46 @@ class TaskServiceTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("must not be blank");
     }
-}
 
+    @Test
+    void allowsRejectionOnlyWhileWaitingForApproval() {
+        AgentTask running = service.transition(
+                service.transition(
+                        service.transition(
+                                service.create("整理下载目录"),
+                                TaskStatus.PLANNING
+                        ),
+                        TaskStatus.RUNNING
+                ),
+                TaskStatus.WAITING_APPROVAL
+        );
+
+        AgentTask rejected = service.transition(running, TaskStatus.REJECTED);
+        assertThat(rejected.status()).isEqualTo(TaskStatus.REJECTED);
+
+        AgentTask anotherRunning = service.transition(
+                service.transition(
+                        service.create("整理下载目录"),
+                        TaskStatus.PLANNING
+                ),
+                TaskStatus.RUNNING
+        );
+        assertThatThrownBy(
+                () -> service.transition(anotherRunning, TaskStatus.REJECTED)
+        ).isInstanceOf(IllegalTaskTransitionException.class);
+    }
+
+    @Test
+    void interruptionPreservesTaskIdentityAndGoal() {
+        AgentTask task = service.create("整理下载目录");
+
+        AgentTask interrupted = service.transition(
+                task,
+                TaskStatus.INTERRUPTED
+        );
+
+        assertThat(interrupted.id()).isEqualTo(task.id());
+        assertThat(interrupted.goal()).isEqualTo(task.goal());
+        assertThat(interrupted.status()).isEqualTo(TaskStatus.INTERRUPTED);
+    }
+}

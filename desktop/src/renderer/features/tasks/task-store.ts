@@ -90,7 +90,10 @@ function applyEvent(
       status: event.status,
       lastEventSequence: event.sequence,
       activeStep: event.title,
-      approval: event.approval ?? current.approval,
+      approval:
+        event.status === "WAITING_APPROVAL"
+          ? event.approval ?? current.approval
+          : undefined,
       errorMessage: event.errorMessage,
       resultSummary:
         event.type === "RESULT_AVAILABLE"

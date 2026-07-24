@@ -15,7 +15,11 @@ def serve() -> None:
         create_grpc_servicer(settings),
         server,
     )
-    server.add_insecure_port(f"{settings.host}:{settings.port}")
+    bound_port = server.add_insecure_port(f"{settings.host}:{settings.port}")
+    if bound_port == 0:
+        raise RuntimeError(
+            f"Agent Runtime 无法绑定 {settings.host}:{settings.port}"
+        )
     server.start()
     server.wait_for_termination()
 

@@ -5,6 +5,7 @@ import type {
   TaskEvent,
   TaskSnapshot,
 } from "../shared/task-contract";
+import { validateApprovalDecisionInput } from "../shared/validation";
 
 export interface TaskGateway {
   create(goal: string): Promise<TaskSnapshot>;
@@ -82,8 +83,16 @@ export class DemoTaskGateway implements TaskGateway {
   async decideApproval(
     input: ApprovalDecisionInput,
   ): Promise<TaskSnapshot> {
-    const task = this.requireTask(input.taskId);
-    const status = input.decision === "ALLOW_ONCE" ? "COMPLETED" : "REJECTED";
+    const decision = validateApprovalDecisionInput(input);
+    const task = this.requireTask(decision.taskId);
+    if (task.status !== "WAITING_APPROVAL" || !task.approval) {
+      throw new Error("当前任务没有待处理的审批");
+    }
+    if (task.approval.approvalId !== decision.approvalId) {
+      throw new Error("审批请求不匹配");
+    }
+
+    const status = decision.decision === "ALLOW_ONCE" ? "COMPLETED" : "REJECTED";
     const updated: TaskSnapshot = {
       ...task,
       status,
@@ -93,10 +102,10 @@ export class DemoTaskGateway implements TaskGateway {
           ? "任务材料已整理完成"
           : "任务已按你的决定停止",
     };
-    this.tasks.set(input.taskId, updated);
-    this.clearTimers(input.taskId);
-    this.emit(input.taskId, {
-      taskId: input.taskId,
+    this.tasks.set(decision.taskId, updated);
+    this.clearTimers(decision.taskId);
+    this.emit(decision.taskId, {
+      taskId: decision.taskId,
       sequence: task.lastEventSequence + 1,
       type: status === "COMPLETED" ? "RESULT_AVAILABLE" : "APPROVAL_DECIDED",
       status,
@@ -158,4 +167,3 @@ export class DemoTaskGateway implements TaskGateway {
     return task;
   }
 }
-

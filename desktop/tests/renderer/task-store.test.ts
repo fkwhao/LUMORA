@@ -40,6 +40,32 @@ describe("task store", () => {
     expect(store.getState().activeTask?.lastEventSequence).toBe(2);
     expect(store.getState().activeTask?.activeStep).toBe("整理任务材料");
   });
+
+  it("clears a pending approval when a terminal event arrives", async () => {
+    const api = createApi();
+    const store = createTaskStore(api);
+    await store.getState().createTask("整理下载目录");
+    const applyEvent = vi.mocked(api.subscribe).mock.calls[0]?.[1];
+
+    applyEvent?.({
+      ...event(1, "WAITING_APPROVAL", "确认敏感操作"),
+      type: "APPROVAL_REQUESTED",
+      approval: {
+        approvalId: "approval-1",
+        taskId: "task-1",
+        action: "整理文件",
+        impactSummary: "移动 12 个文件",
+        riskLevel: "MEDIUM",
+        reversible: true,
+      },
+    });
+    applyEvent?.({
+      ...event(2, "COMPLETED", "任务已完成"),
+      type: "RESULT_AVAILABLE",
+    });
+
+    expect(store.getState().activeTask?.approval).toBeUndefined();
+  });
 });
 
 function createApi(): LumoraTaskApi {
