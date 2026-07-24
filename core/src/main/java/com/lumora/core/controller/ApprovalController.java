@@ -1,0 +1,40 @@
+package com.lumora.core.controller;
+
+import com.lumora.core.dto.request.ApprovalDecisionRequest;
+import com.lumora.core.dto.response.TaskResponse;
+import com.lumora.core.entity.AgentTask;
+import com.lumora.core.service.ApprovalService;
+import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+/**
+ * 审批 REST 入口，审批合法性由 ApprovalService 统一判断。
+ */
+@RestController
+@RequestMapping("/api/v1/tasks/{taskId}/approvals")
+public class ApprovalController {
+
+    private final ApprovalService approvalService;
+
+    public ApprovalController(ApprovalService approvalService) {
+        this.approvalService = approvalService;
+    }
+
+    @PostMapping("/{approvalId}")
+    public TaskResponse decideApproval(
+            @PathVariable String taskId,
+            @PathVariable String approvalId,
+            @Valid @RequestBody ApprovalDecisionRequest request
+    ) {
+        AgentTask task = approvalService.decideApproval(
+                taskId,
+                approvalId,
+                request.getDecision()
+        );
+        return TaskResponse.fromEntity(task);
+    }
+}
