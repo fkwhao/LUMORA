@@ -1,4 +1,4 @@
-package com.lumora.core.task;
+package com.lumora.core.entity;
 
 public enum TaskStatus {
     CREATED,
@@ -10,4 +10,3 @@ public enum TaskStatus {
     INTERRUPTED,
     FAILED
 }
-
