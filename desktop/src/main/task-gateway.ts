@@ -12,11 +12,12 @@ export interface TaskGateway {
   get(taskId: string): Promise<TaskSnapshot>;
   subscribe(taskId: string, listener: (event: TaskEvent) => void): () => void;
   decideApproval(input: ApprovalDecisionInput): Promise<TaskSnapshot>;
+  dispose(): void;
 }
 
 /**
  * Java Core 接入前的本地演示实现。
- * Renderer 只依赖 TaskGateway，因此换成 gRPC Client 时不需要修改页面代码。
+ * Renderer 只依赖 TaskGateway，因此换成 REST Client 时不需要修改页面代码。
  */
 export class DemoTaskGateway implements TaskGateway {
   private readonly tasks = new Map<string, TaskSnapshot>();

@@ -2,14 +2,15 @@ import path from "node:path";
 import { app, BrowserWindow, shell } from "electron";
 
 import { registerTaskIpc } from "./ipc";
-import { DemoTaskGateway } from "./task-gateway";
+import { RestTaskGateway } from "./rest-task-gateway";
+import { DemoTaskGateway, type TaskGateway } from "./task-gateway";
 import { createMainWindowOptions } from "./window-options";
 import { WindowReference } from "./window-reference";
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
 
-const gateway = new DemoTaskGateway();
+const gateway = createTaskGateway();
 // BrowserWindow 必须保留强引用，否则窗口可能在函数返回后被垃圾回收。
 const mainWindow = new WindowReference<BrowserWindow>();
 let unregisterIpc: (() => void) | undefined;
@@ -65,3 +66,14 @@ app.on("before-quit", () => {
   unregisterIpc?.();
   gateway.dispose();
 });
+
+function createTaskGateway(): TaskGateway {
+  const baseUrl = process.env.LUMORA_CORE_URL;
+  const sessionToken = process.env.LUMORA_STARTUP_TOKEN;
+  if (baseUrl && sessionToken) {
+    return new RestTaskGateway({ baseUrl, sessionToken });
+  }
+
+  // Java 未启动时保留可演示界面的开发降级，生产通信只使用 REST/SSE。
+  return new DemoTaskGateway();
+}
