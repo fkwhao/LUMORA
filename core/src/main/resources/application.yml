@@ -9,8 +9,7 @@ server:
   address: 127.0.0.1
   port: ${LUMORA_CORE_PORT:0}
 
-mybatis:
-  mapper-locations: classpath:mapper/*.xml
+mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
 

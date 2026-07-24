@@ -61,8 +61,11 @@ public class TaskServiceImpl implements TaskService {
         if (taskId == null || taskId.isBlank()) {
             throw new IllegalArgumentException("任务 ID 不能为空");
         }
-        return taskMapper.findById(taskId)
-                .orElseThrow(() -> new TaskNotFoundException(taskId));
+        AgentTask task = taskMapper.selectById(taskId);
+        if (task == null) {
+            throw new TaskNotFoundException(taskId);
+        }
+        return task;
     }
 
     @Override
@@ -79,7 +82,7 @@ public class TaskServiceImpl implements TaskService {
 
         task.setStatus(nextStatus);
         task.setUpdatedAt(clock.instant());
-        taskMapper.update(task);
+        taskMapper.updateById(task);
         return task;
     }
 

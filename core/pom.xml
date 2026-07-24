@@ -21,7 +21,7 @@
         <java.version>21</java.version>
         <grpc.version>1.74.0</grpc.version>
         <protobuf.version>4.31.1</protobuf.version>
-        <mybatis.version>3.0.4</mybatis.version>
+        <mybatis-plus.version>3.5.7</mybatis-plus.version>
         <sqlite.version>3.50.3.0</sqlite.version>
     </properties>
 
@@ -35,9 +35,9 @@
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.mybatis.spring.boot</groupId>
-            <artifactId>mybatis-spring-boot-starter</artifactId>
-            <version>${mybatis.version}</version>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+            <version>${mybatis-plus.version}</version>
         </dependency>
         <dependency>
             <groupId>org.xerial</groupId>

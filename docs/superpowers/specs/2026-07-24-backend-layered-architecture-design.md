@@ -60,14 +60,14 @@ core/src/main/java/com/lumora/core/
 
 - `controller`：接收 REST/SSE 请求，校验输入并转换 DTO，不写业务规则。
 - `service`：定义业务能力；`service.impl` 负责状态转换、事务和跨服务编排。
-- `mapper`：只定义 MyBatis 数据访问，不判断任务能否转换状态。
+- `mapper`：只定义 MyBatis-Plus 数据访问，不判断任务能否转换状态。
 - `entity`：与 SQLite 表字段对应的普通 Java `class`。
 - `dto`：REST 请求和响应模型，不直接暴露数据库实体。
 - `grpc.client`：Java 调用 Python Agent Runtime。
 - `grpc.server`：向 Python 暴露经过权限控制的本地工具。
 - `config`、`security`、`exception`：分别管理配置、启动令牌认证和统一异常映射。
 
-初始任务链路采用 `TaskController → TaskService → TaskServiceImpl → TaskMapper`。`AgentTask` 改为普通类，提供明确字段、构造方法、getter 和 setter。MyBatis SQL 放在 `core/src/main/resources/mapper/`，便于从 Mapper 接口快速定位到查询语句。
+初始任务链路采用 `TaskController → TaskService → TaskServiceImpl → TaskMapper`。`AgentTask` 改为普通类，提供明确字段、构造方法、getter 和 setter。基础 CRUD 使用 MyBatis-Plus `BaseMapper`，复杂查询需要手写 SQL 时再放入 `core/src/main/resources/mapper/`，并保持 Mapper 接口与 XML 文件同名，便于快速定位。
 
 ## 4. REST 与 SSE 约定
 

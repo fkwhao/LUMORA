@@ -1,20 +1,42 @@
 package com.lumora.core.entity;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import com.lumora.core.mapper.typehandler.SqliteInstantTypeHandler;
+
 import java.time.Instant;
 
 /**
  * 与 agent_task 表一一对应的任务实体。
  */
+@TableName(value = "agent_task", autoResultMap = true)
 public class AgentTask {
 
+    @TableId(value = "task_id", type = IdType.INPUT)
     private String taskId;
+    @TableField("goal")
     private String goal;
+    @TableField("status")
     private TaskStatus status;
+    @TableField("last_event_sequence")
     private long lastEventSequence;
+    @TableField("active_step")
     private String activeStep;
+    @TableField("result_summary")
     private String resultSummary;
+    @TableField("failure_reason")
     private String failureReason;
+    @TableField(
+            value = "created_at",
+            typeHandler = SqliteInstantTypeHandler.class
+    )
     private Instant createdAt;
+    @TableField(
+            value = "updated_at",
+            typeHandler = SqliteInstantTypeHandler.class
+    )
     private Instant updatedAt;
 
     public AgentTask() {

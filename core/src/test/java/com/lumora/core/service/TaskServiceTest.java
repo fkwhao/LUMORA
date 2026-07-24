@@ -7,16 +7,21 @@ import com.lumora.core.exception.IllegalTaskTransitionException;
 import com.lumora.core.mapper.TaskMapper;
 import com.lumora.core.service.impl.TaskServiceImpl;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class TaskServiceTest {
 
@@ -24,12 +29,31 @@ class TaskServiceTest {
             "11111111-1111-1111-1111-111111111111";
     private static final Instant NOW = Instant.parse("2026-07-24T00:00:00Z");
 
-    private final InMemoryTaskMapper mapper = new InMemoryTaskMapper();
-    private final TaskService service = new TaskServiceImpl(
-            mapper,
-            Clock.fixed(NOW, ZoneOffset.UTC),
-            new FixedTaskIdGenerator(TASK_ID)
-    );
+    private final Map<String, AgentTask> tasks = new LinkedHashMap<>();
+    private TaskMapper mapper;
+    private TaskService service;
+
+    @BeforeEach
+    void setUp() {
+        mapper = mock(TaskMapper.class);
+        when(mapper.selectById(anyString()))
+                .thenAnswer(invocation -> tasks.get(invocation.getArgument(0)));
+        doAnswer(invocation -> {
+            AgentTask task = invocation.getArgument(0);
+            tasks.put(task.getTaskId(), task);
+            return 1;
+        }).when(mapper).insert(any(AgentTask.class));
+        doAnswer(invocation -> {
+            AgentTask task = invocation.getArgument(0);
+            tasks.put(task.getTaskId(), task);
+            return 1;
+        }).when(mapper).updateById(any(AgentTask.class));
+        service = new TaskServiceImpl(
+                mapper,
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                new FixedTaskIdGenerator(TASK_ID)
+        );
+    }
 
     @Test
     void createsAndPersistsATask() {
@@ -38,7 +62,7 @@ class TaskServiceTest {
         assertThat(task.getTaskId()).isEqualTo(TASK_ID);
         assertThat(task.getGoal()).isEqualTo("整理下载目录");
         assertThat(task.getStatus()).isEqualTo(TaskStatus.CREATED);
-        assertThat(mapper.findById(TASK_ID)).contains(task);
+        assertThat(mapper.selectById(TASK_ID)).isSameAs(task);
     }
 
     @Test
@@ -87,28 +111,6 @@ class TaskServiceTest {
         assertThat(interrupted.getTaskId()).isEqualTo(task.getTaskId());
         assertThat(interrupted.getGoal()).isEqualTo(task.getGoal());
         assertThat(interrupted.getStatus()).isEqualTo(TaskStatus.INTERRUPTED);
-    }
-
-    static class InMemoryTaskMapper implements TaskMapper {
-
-        private final Map<String, AgentTask> tasks = new LinkedHashMap<>();
-
-        @Override
-        public int insert(AgentTask task) {
-            tasks.put(task.getTaskId(), task);
-            return 1;
-        }
-
-        @Override
-        public Optional<AgentTask> findById(String taskId) {
-            return Optional.ofNullable(tasks.get(taskId));
-        }
-
-        @Override
-        public int update(AgentTask task) {
-            tasks.put(task.getTaskId(), task);
-            return 1;
-        }
     }
 
     static class FixedTaskIdGenerator extends TaskIdGenerator {

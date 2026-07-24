@@ -1,6 +1,6 @@
 # LUMORA Local Core
 
-Java 21、Spring Boot、MyBatis 和 SQLite 本地核心。
+Java 21、Spring Boot、MyBatis-Plus 和 SQLite 本地核心。
 
 ## 职责
 
@@ -25,14 +25,19 @@ dto/             REST 请求与响应对象
 entity/          与 SQLite 表对应的普通 Java class
 service/         业务接口
 service/impl/    状态规则、审批校验和事务
-mapper/          MyBatis Mapper 接口
+mapper/          MyBatis-Plus Mapper 接口
+mapper/typehandler/
+                 SQLite 特有的字段类型转换
 grpc/client/     Java 调用 Python Agent
 config/          Spring 配置
 exception/       业务异常和统一 REST 异常响应
 security/        本机 REST 启动令牌校验
 ```
 
-SQL 位于 `src/main/resources/mapper/`。Controller 不写业务规则，Mapper 不判断状态转换。
+基础 CRUD 由 MyBatis-Plus `BaseMapper` 提供；复杂查询需要手写 SQL 时，再放入
+`src/main/resources/mapper/`。SQLite 的 `TEXT` 时间列统一通过
+`SqliteInstantTypeHandler` 按 ISO-8601 格式读写。Controller 不写业务规则，
+Mapper 不判断状态转换。
 
 ## IDE 配置
 

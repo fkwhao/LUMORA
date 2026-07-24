@@ -1,20 +1,42 @@
 package com.lumora.core.entity;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import com.lumora.core.mapper.typehandler.SqliteInstantTypeHandler;
+
 import java.time.Instant;
 
 /**
  * 与 approval_request 表对应的审批记录。
  */
+@TableName(value = "approval_request", autoResultMap = true)
 public class ApprovalRecord {
 
+    @TableId(value = "approval_id", type = IdType.INPUT)
     private String approvalId;
+    @TableField("task_id")
     private String taskId;
+    @TableField("action")
     private String action;
+    @TableField("impact_summary")
     private String impactSummary;
+    @TableField("risk_level")
     private String riskLevel;
+    @TableField("reversible")
     private boolean reversible;
+    @TableField("decision")
     private ApprovalDecision decision;
+    @TableField(
+            value = "created_at",
+            typeHandler = SqliteInstantTypeHandler.class
+    )
     private Instant createdAt;
+    @TableField(
+            value = "decided_at",
+            typeHandler = SqliteInstantTypeHandler.class
+    )
     private Instant decidedAt;
 
     public ApprovalRecord() {

@@ -13,10 +13,12 @@ $requiredFiles = @(
     'core/src/main/java/com/lumora/core/service/impl/TaskServiceImpl.java',
     'core/src/main/java/com/lumora/core/mapper/TaskMapper.java',
     'core/src/main/java/com/lumora/core/mapper/ApprovalMapper.java',
+    'core/src/main/java/com/lumora/core/mapper/typehandler/SqliteInstantTypeHandler.java',
     'core/src/main/java/com/lumora/core/entity/AgentTask.java',
     'core/src/main/java/com/lumora/core/grpc/client/AgentRuntimeClient.java',
     'core/src/main/resources/db/migration/V1__initial_schema.sql',
-    'core/src/test/java/com/lumora/core/service/TaskServiceTest.java'
+    'core/src/test/java/com/lumora/core/service/TaskServiceTest.java',
+    'core/src/test/java/com/lumora/core/mapper/MyBatisPlusMapperTest.java'
 )
 
 foreach ($relativePath in $requiredFiles) {
@@ -40,12 +42,33 @@ if (
 $pom = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'core/pom.xml')
 foreach ($requiredText in @(
     '<java.version>21</java.version>',
-    'mybatis-spring-boot-starter',
+    'mybatis-plus-spring-boot3-starter',
     'sqlite-jdbc',
     'grpc-netty-shaded',
     'protobuf-maven-plugin'
 )) {
     if ($pom -notmatch [regex]::Escape($requiredText)) {
         throw "Java build is missing: $requiredText"
+    }
+}
+
+foreach ($mapperFile in @(
+    'core/src/main/java/com/lumora/core/mapper/TaskMapper.java',
+    'core/src/main/java/com/lumora/core/mapper/ApprovalMapper.java'
+)) {
+    $mapper = Get-Content -Raw -Encoding UTF8 (
+        Join-Path $repositoryRoot $mapperFile
+    )
+    if ($mapper -notmatch 'extends\s+BaseMapper<') {
+        throw "Mapper must use MyBatis-Plus BaseMapper: $mapperFile"
+    }
+}
+
+foreach ($obsoleteXml in @(
+    'core/src/main/resources/mapper/TaskMapper.xml',
+    'core/src/main/resources/mapper/ApprovalMapper.xml'
+)) {
+    if (Test-Path -LiteralPath (Join-Path $repositoryRoot $obsoleteXml)) {
+        throw "Basic CRUD XML must be removed: $obsoleteXml"
     }
 }

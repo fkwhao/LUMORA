@@ -20,7 +20,7 @@ LUMORA will use one Git repository containing four independent project roots:
 ```text
 LUMORA/
 |-- desktop/                    # Electron + React + TypeScript
-|-- core/                       # Java 21 + Spring Boot + MyBatis
+|-- core/                       # Java 21 + Spring Boot + MyBatis-Plus
 |-- agent/                      # Python 3.12 + LangGraph
 |-- protocol/                   # Protobuf contracts and generation config
 |-- integration/                # Joint startup, packaging, and local config
@@ -134,7 +134,7 @@ Initial responsibilities:
 - Server-streamed task events for Electron Main.
 - A minimal tool boundary for later file, browser, and system tools.
 
-Domain services contain business rules. MyBatis mappers only perform database
+Domain services contain business rules. MyBatis-Plus mappers only perform database
 access. Database entities, domain objects, Protobuf messages, and UI DTOs remain
 separate.
 
@@ -289,4 +289,3 @@ stable:
 - Auto-update and production installer hardening.
 - Full Agent Office animation system.
 - Splitting the four project roots into separate Git repositories.
-
