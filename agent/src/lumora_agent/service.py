@@ -20,6 +20,7 @@ def validate_request_context(
     expected_protocol_version: str,
     expected_startup_token: str,
 ) -> None:
+    """在进入规划逻辑前统一校验本地进程身份和协议兼容性。"""
     if not hmac.compare_digest(startup_token, expected_startup_token):
         raise AuthenticationError("启动令牌无效")
     if protocol_version != expected_protocol_version:
@@ -27,6 +28,7 @@ def validate_request_context(
 
 
 def create_grpc_servicer(settings: AgentSettings) -> Any:
+    # 延迟导入让规划器单元测试不依赖尚未生成的 Protobuf 代码。
     import grpc
     from lumora.v1 import agent_pb2, agent_pb2_grpc, common_pb2
 
@@ -73,4 +75,3 @@ def create_grpc_servicer(settings: AgentSettings) -> Any:
             )
 
     return AgentGrpcService()
-

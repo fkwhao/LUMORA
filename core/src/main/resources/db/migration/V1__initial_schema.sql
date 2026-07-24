@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS agent_task (
 
 CREATE TABLE IF NOT EXISTS task_event (
     task_id TEXT NOT NULL,
+    -- 单任务内递增，用于事件重放和客户端去重。
     sequence INTEGER NOT NULL,
     event_type TEXT NOT NULL,
     status TEXT NOT NULL,
@@ -39,6 +40,7 @@ CREATE TABLE IF NOT EXISTS approval_request (
 );
 
 CREATE TABLE IF NOT EXISTS audit_log (
+    -- 审计记录只保存用户可理解的影响摘要，不保存启动令牌或模型密钥。
     audit_id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL,
     action TEXT NOT NULL,
@@ -48,4 +50,3 @@ CREATE TABLE IF NOT EXISTS audit_log (
     occurred_at TEXT NOT NULL,
     FOREIGN KEY (task_id) REFERENCES agent_task(task_id)
 );
-

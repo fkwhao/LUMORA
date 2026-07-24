@@ -8,6 +8,7 @@ import "lumora/v1/common.proto";
 option java_multiple_files = true;
 option java_package = "com.lumora.protocol.v1";
 
+// Java Core 持久化的任务状态，其他运行时只消费，不自行扩展状态值。
 enum TaskStatus {
   TASK_STATUS_UNSPECIFIED = 0;
   CREATED = 1;
@@ -60,6 +61,7 @@ message ApprovalRequest {
   google.protobuf.Timestamp created_at = 7;
 }
 
+// sequence 在单个任务内严格递增，客户端据此去重并在断线后继续订阅。
 message TaskEvent {
   string task_id = 1;
   uint64 sequence = 2;
@@ -85,6 +87,7 @@ message GetTaskRequest {
 message SubscribeTaskEventsRequest {
   RequestContext context = 1;
   string task_id = 2;
+  // 重连时只重放该序号之后的事件。
   uint64 after_sequence = 3;
 }
 
@@ -95,6 +98,7 @@ message DecideApprovalRequest {
   ApprovalDecision decision = 4;
 }
 
+// Electron Main 是该服务唯一的桌面端调用方，Renderer 不得直接连接。
 service CoreService {
   rpc Health(HealthRequest) returns (HealthResponse);
   rpc CreateTask(CreateTaskRequest) returns (TaskSnapshot);
@@ -102,4 +106,3 @@ service CoreService {
   rpc SubscribeTaskEvents(SubscribeTaskEventsRequest) returns (stream TaskEvent);
   rpc DecideApproval(DecideApprovalRequest) returns (TaskSnapshot);
 }
-

@@ -5,6 +5,7 @@ from lumora_agent.settings import AgentSettings
 
 
 def serve() -> None:
+    """启动由 Java Core 管理的本机 gRPC 服务，并阻塞至父进程关闭。"""
     import grpc
     from lumora.v1 import agent_pb2_grpc
 
@@ -21,4 +22,3 @@ def serve() -> None:
 
 if __name__ == "__main__":
     serve()
-

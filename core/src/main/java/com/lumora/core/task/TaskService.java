@@ -12,6 +12,7 @@ import java.util.function.Supplier;
 
 public final class TaskService {
 
+    // 合法迁移集中定义，避免 gRPC、数据库和 UI 各自判断任务状态。
     private static final Map<TaskStatus, Set<TaskStatus>> ALLOWED_TRANSITIONS =
             createAllowedTransitions();
 
@@ -81,4 +82,3 @@ public final class TaskService {
         return Map.copyOf(transitions);
     }
 }
-

@@ -25,8 +25,8 @@ message PlanTaskResponse {
   repeated PlanStep steps = 2;
 }
 
+// Java Core 管理该本地服务的生命周期和调用权限。
 service AgentService {
   rpc Health(HealthRequest) returns (HealthResponse);
   rpc PlanTask(PlanTaskRequest) returns (PlanTaskResponse);
 }
-
