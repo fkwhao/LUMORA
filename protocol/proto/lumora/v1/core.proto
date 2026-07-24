@@ -73,36 +73,3 @@ message TaskEvent {
   ErrorDetail error = 8;
   google.protobuf.Timestamp occurred_at = 9;
 }
-
-message CreateTaskRequest {
-  RequestContext context = 1;
-  string goal = 2;
-}
-
-message GetTaskRequest {
-  RequestContext context = 1;
-  string task_id = 2;
-}
-
-message SubscribeTaskEventsRequest {
-  RequestContext context = 1;
-  string task_id = 2;
-  // 重连时只重放该序号之后的事件。
-  uint64 after_sequence = 3;
-}
-
-message DecideApprovalRequest {
-  RequestContext context = 1;
-  string task_id = 2;
-  string approval_id = 3;
-  ApprovalDecision decision = 4;
-}
-
-// Electron Main 是该服务唯一的桌面端调用方，Renderer 不得直接连接。
-service CoreService {
-  rpc Health(HealthRequest) returns (HealthResponse);
-  rpc CreateTask(CreateTaskRequest) returns (TaskSnapshot);
-  rpc GetTask(GetTaskRequest) returns (TaskSnapshot);
-  rpc SubscribeTaskEvents(SubscribeTaskEventsRequest) returns (stream TaskEvent);
-  rpc DecideApproval(DecideApprovalRequest) returns (TaskSnapshot);
-}

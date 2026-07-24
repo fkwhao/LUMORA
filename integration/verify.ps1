@@ -32,9 +32,12 @@ try {
     Invoke-ProjectCheck 'Java scaffold' {
         powershell -ExecutionPolicy Bypass -File integration/tests/java-scaffold.ps1
     }
+    Invoke-ProjectCheck 'Python scaffold' {
+        powershell -ExecutionPolicy Bypass -File integration/tests/python-scaffold.ps1
+    }
 
     $pythonExecutable = (Get-Command $PythonCommand -ErrorAction Stop).Source
-    $env:PYTHONPATH = (Resolve-Path 'agent/src').Path
+    $env:PYTHONPATH = (Resolve-Path 'agent').Path
     Invoke-ProjectCheck 'Python core tests' {
         & $pythonExecutable -m unittest discover -s agent/tests -v
     }
@@ -68,4 +71,3 @@ try {
 finally {
     Pop-Location
 }
-

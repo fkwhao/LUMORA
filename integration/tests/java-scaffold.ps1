@@ -6,10 +6,13 @@ $repositoryRoot = [System.IO.Path]::GetFullPath(
 $requiredFiles = @(
     'core/pom.xml',
     'core/src/main/java/com/lumora/core/CoreApplication.java',
-    'core/src/main/java/com/lumora/core/task/TaskStatus.java',
-    'core/src/main/java/com/lumora/core/task/TaskService.java',
+    'core/src/main/java/com/lumora/core/controller/TaskController.java',
+    'core/src/main/java/com/lumora/core/service/TaskService.java',
+    'core/src/main/java/com/lumora/core/service/impl/TaskServiceImpl.java',
+    'core/src/main/java/com/lumora/core/mapper/TaskMapper.java',
+    'core/src/main/java/com/lumora/core/entity/AgentTask.java',
     'core/src/main/resources/db/migration/V1__initial_schema.sql',
-    'core/src/test/java/com/lumora/core/task/TaskServiceTest.java'
+    'core/src/test/java/com/lumora/core/service/TaskServiceTest.java'
 )
 
 foreach ($relativePath in $requiredFiles) {
@@ -17,6 +20,17 @@ foreach ($relativePath in $requiredFiles) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Missing Java scaffold file: $relativePath"
     }
+}
+
+$agentTask = Get-Content -Raw -Encoding UTF8 (
+    Join-Path $repositoryRoot `
+        'core/src/main/java/com/lumora/core/entity/AgentTask.java'
+)
+if (
+    $agentTask -notmatch 'public\s+class\s+AgentTask' -or
+    $agentTask -match 'record\s+AgentTask'
+) {
+    throw 'AgentTask must be a regular Java class.'
 }
 
 $pom = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'core/pom.xml')

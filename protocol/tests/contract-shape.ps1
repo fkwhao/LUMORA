@@ -21,12 +21,7 @@ $requiredDefinitions = @(
     'package lumora.v1',
     'message RequestContext',
     'message ErrorDetail',
-    'service CoreService',
     'rpc Health',
-    'rpc CreateTask',
-    'rpc GetTask',
-    'rpc SubscribeTaskEvents',
-    'rpc DecideApproval',
     'service AgentService',
     'rpc PlanTask',
     'message TaskSnapshot',
@@ -47,4 +42,16 @@ $requestContextCount = (
 ).Count
 if ($requestContextCount -ne 1) {
     throw "RequestContext must have exactly one definition."
+}
+
+foreach ($obsoleteDefinition in @(
+    'service CoreService',
+    'rpc CreateTask',
+    'rpc GetTask',
+    'rpc SubscribeTaskEvents',
+    'rpc DecideApproval'
+)) {
+    if ($protoText -match [regex]::Escape($obsoleteDefinition)) {
+        throw "Frontend REST contract must not remain in Protobuf: $obsoleteDefinition"
+    }
 }
