@@ -7,10 +7,14 @@ $requiredFiles = @(
     'core/pom.xml',
     'core/src/main/java/com/lumora/core/CoreApplication.java',
     'core/src/main/java/com/lumora/core/controller/TaskController.java',
+    'core/src/main/java/com/lumora/core/controller/ApprovalController.java',
     'core/src/main/java/com/lumora/core/service/TaskService.java',
+    'core/src/main/java/com/lumora/core/service/ApprovalService.java',
     'core/src/main/java/com/lumora/core/service/impl/TaskServiceImpl.java',
     'core/src/main/java/com/lumora/core/mapper/TaskMapper.java',
+    'core/src/main/java/com/lumora/core/mapper/ApprovalMapper.java',
     'core/src/main/java/com/lumora/core/entity/AgentTask.java',
+    'core/src/main/java/com/lumora/core/grpc/client/AgentRuntimeClient.java',
     'core/src/main/resources/db/migration/V1__initial_schema.sql',
     'core/src/test/java/com/lumora/core/service/TaskServiceTest.java'
 )

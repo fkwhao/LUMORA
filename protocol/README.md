@@ -31,7 +31,7 @@ proto/lumora/v1/agent.proto   规划消息和 AgentService
 powershell -ExecutionPolicy Bypass -File protocol/tests/contract-shape.ps1
 ```
 
-配置 Buf CLI 后执行完整 Lint，并生成 Python、TypeScript 代码：
+配置 Buf CLI 后执行完整 Lint，并生成 Python 代码：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File protocol/generate.ps1

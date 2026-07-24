@@ -16,15 +16,30 @@ Python 3.12 Agent 推理与编排运行时。
 
 ## IDE 配置
 
-在 IDE 中选择 Python 3.12，并以 `pyproject.toml` 安装开发依赖。协议生成目录
-`agent/generated` 需要加入 Sources Root。
+在 IDE 中选择 Python 3.12，并以 `requirements-dev.txt` 安装开发依赖。将 `agent/`
+工程根目录和协议生成目录 `agent/generated` 加入 Sources Root。
+
+```powershell
+python -m pip install -r requirements-dev.txt
+```
+
+## 代码结构
+
+```text
+app/controller/grpc/   gRPC 请求、认证和状态码转换
+app/service/           Agent 规划与编排业务
+app/model/             Pydantic 数据模型
+app/config/            环境变量和运行配置
+app/exception/         运行时异常
+app/main.py            grpc.aio Server 生命周期
+```
 
 ## 测试
 
 未安装项目开发依赖时，可以使用 Python 3.12 标准库运行核心测试：
 
 ```powershell
-$env:PYTHONPATH = "$(Resolve-Path agent/src)"
+$env:PYTHONPATH = "$(Resolve-Path agent)"
 python -m unittest discover -s agent/tests -v
 ```
 
@@ -32,9 +47,10 @@ python -m unittest discover -s agent/tests -v
 
 ```powershell
 cd agent
-python -m pytest -q
-python -m ruff check .
-python -m mypy src
+$env:PYTHONPATH = (Resolve-Path '.').Path
+python -m unittest discover -s tests -v
+python -m ruff check app tests
+python -m mypy app
 ```
 
 ## 启动
@@ -50,5 +66,5 @@ LUMORA_PROTOCOL_VERSION
 启动命令：
 
 ```powershell
-python -m lumora_agent.server
+python -m app.main
 ```

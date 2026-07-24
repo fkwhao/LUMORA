@@ -12,8 +12,12 @@ foreach ($projectRoot in $projectRoots) {
     }
 }
 
-$runtimeRoots = @('desktop', 'core', 'agent') |
-    ForEach-Object { Join-Path $repositoryRoot "$_\src" } |
+$runtimeRoots = @(
+    'desktop/src',
+    'core/src',
+    'agent/app'
+) |
+    ForEach-Object { Join-Path $repositoryRoot $_ } |
     Where-Object { Test-Path -LiteralPath $_ -PathType Container }
 
 $forbiddenImports = Get-ChildItem -LiteralPath $runtimeRoots -Recurse -File |

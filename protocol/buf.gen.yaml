@@ -5,9 +5,3 @@ plugins:
     out: ../agent/generated
   - remote: buf.build/grpc/python:v1.74.0
     out: ../agent/generated
-  - remote: buf.build/community/stephenh-ts-proto:v2.7.5
-    out: ../desktop/generated
-    opt:
-      - outputServices=grpc-js
-      - esModuleInterop=true
-      - useExactTypes=false
