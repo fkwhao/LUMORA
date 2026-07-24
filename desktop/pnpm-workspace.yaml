@@ -1,0 +1,12 @@
+# Electron Forge 打包时需要从顶层解析桌面工程依赖。
+nodeLinker: hoisted
+allowBuilds:
+  electron: true
+  electron-winstaller: true
+  esbuild: true
+  protobufjs: true
+onlyBuiltDependencies:
+  - electron
+  - electron-winstaller
+  - esbuild
+  - protobufjs

@@ -4,6 +4,7 @@
 node_modules/
 dist/
 out/
+.vite/
 target/
 
 .venv/
@@ -23,4 +24,3 @@ logs/
 
 integration/runtime/
 .worktrees/
-
