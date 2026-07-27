@@ -1,0 +1,13 @@
+{
+  "name": "lumora-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "dev": "node integration/dev.mjs",
+    "test:launcher": "node --test integration/tests/dev/*.test.mjs"
+  },
+  "devDependencies": {
+    "@bufbuild/buf": "1.72.0"
+  }
+}

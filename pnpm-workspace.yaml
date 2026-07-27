@@ -1,6 +1,9 @@
-# Electron Forge 打包时需要从顶层解析桌面工程依赖。
+packages:
+  - desktop
+
 nodeLinker: hoisted
 allowBuilds:
+  '@bufbuild/buf': true
   electron: true
   electron-winstaller: true
   esbuild: true

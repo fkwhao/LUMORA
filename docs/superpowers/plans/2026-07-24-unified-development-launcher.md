@@ -194,6 +194,7 @@ packages:
 
 nodeLinker: hoisted
 allowBuilds:
+  '@bufbuild/buf': true
   electron: true
   electron-winstaller: true
   esbuild: true
