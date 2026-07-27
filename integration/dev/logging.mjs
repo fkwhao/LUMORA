@@ -42,6 +42,12 @@ export function createProcessLogger(options) {
   function close() {
     if (closePromise) return closePromise;
     closing = true;
+    let resolveClose;
+    let rejectClose;
+    closePromise = new Promise((resolve, reject) => {
+      resolveClose = resolve;
+      rejectClose = reject;
+    });
     for (const stream of Object.keys(pending)) {
       append(stream, decoders[stream].end());
       if (pending[stream]) {
@@ -49,10 +55,8 @@ export function createProcessLogger(options) {
         pending[stream] = "";
       }
     }
-    closePromise = new Promise((resolve, reject) => {
-      file.once("error", reject);
-      file.end(resolve);
-    });
+    file.once("error", rejectClose);
+    file.end(resolveClose);
     return closePromise;
   }
 

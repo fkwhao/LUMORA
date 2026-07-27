@@ -145,3 +145,34 @@ test("process logger rejects writes after closing and close remains idempotent",
   assert.throws(() => logger.write("stderr", "late after close"), /closed/i);
   assert.equal(await readFile(path.join(logDirectory, "core.log"), "utf8"), "[core] final line\n");
 });
+
+test("process logger reuses its close promise during synchronous output reentry", async () => {
+  const logDirectory = await mkdtemp(path.join(tmpdir(), "lumora-logs-reentry-"));
+  const consoleLines = [];
+  let logger;
+  let nestedClose;
+  let reentered = false;
+  logger = createProcessLogger({
+    name: "core",
+    logDirectory,
+    console: {
+      log: (line) => {
+        consoleLines.push(line);
+        if (!reentered) {
+          reentered = true;
+          nestedClose = logger.close();
+        }
+      },
+      error: (line) => consoleLines.push(line),
+    },
+  });
+
+  logger.write("stdout", "final line");
+  const firstClose = logger.close();
+
+  assert.strictEqual(nestedClose, firstClose);
+  await firstClose;
+  assert.deepEqual(consoleLines, ["[core] final line"]);
+  assert.throws(() => logger.write("stdout", "late after close"), /closed/i);
+  assert.equal(await readFile(path.join(logDirectory, "core.log"), "utf8"), "[core] final line\n");
+});
