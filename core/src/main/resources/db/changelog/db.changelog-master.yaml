@@ -1,0 +1,12 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-initial-schema
+      author: lumora
+      # V1 会切换 WAL；SQLite 不允许在事务中执行该 PRAGMA。
+      runInTransaction: false
+      changes:
+        - sqlFile:
+            path: db/migration/V1__initial_schema.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

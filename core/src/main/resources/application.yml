@@ -4,6 +4,11 @@ spring:
   datasource:
     url: jdbc:sqlite:${LUMORA_DATABASE_PATH:./runtime/lumora.db}
     driver-class-name: org.sqlite.JDBC
+    hikari:
+      # SQLite 的外键开关属于连接状态，每个池连接都必须初始化。
+      connection-init-sql: PRAGMA foreign_keys=ON
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
 
 server:
   address: 127.0.0.1

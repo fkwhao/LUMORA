@@ -1,8 +1,17 @@
 import asyncio
+import json
 
 from app.config.settings import AgentSettings
 from app.controller.grpc.agent_servicer import create_agent_servicer
 from app.service.planner_service import PlannerService
+
+
+def format_ready_event(port: int) -> str:
+    payload = json.dumps(
+        {"service": "agent", "port": port},
+        separators=(",", ":"),
+    )
+    return f"LUMORA_READY {payload}"
 
 
 async def serve() -> None:
@@ -24,6 +33,8 @@ async def serve() -> None:
 
     # Java 负责进程生命周期；收到终止信号时 aio Server 会释放活动 RPC。
     await server.start()
+    # 仅在 gRPC 服务启动成功后通知父进程，避免发布虚假就绪状态。
+    print(format_ready_event(bound_port), flush=True)
     await server.wait_for_termination()
 
 
