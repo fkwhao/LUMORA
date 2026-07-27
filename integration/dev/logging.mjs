@@ -17,8 +17,10 @@ export function createProcessLogger(options) {
   const decoders = { stdout: new StringDecoder("utf8"), stderr: new StringDecoder("utf8") };
   const pending = { stdout: "", stderr: "" };
   let closePromise;
+  let closing = false;
 
   function write(stream, chunk) {
+    if (closing) throw new Error("Process logger is closed or closing and cannot accept writes");
     if (!(stream in pending)) throw new Error(`Unknown process stream: ${stream}`);
     append(stream, decoders[stream].write(chunk));
   }
@@ -39,6 +41,7 @@ export function createProcessLogger(options) {
 
   function close() {
     if (closePromise) return closePromise;
+    closing = true;
     for (const stream of Object.keys(pending)) {
       append(stream, decoders[stream].end());
       if (pending[stream]) {

@@ -127,3 +127,21 @@ test("process logger redacts complete UTF-8 lines and flushes its final chunk on
     "[agent] 状态 ready [REDACTED]\n[agent] failure [REDACTED]\n[agent] next line\n",
   );
 });
+
+test("process logger rejects writes after closing and close remains idempotent", async () => {
+  const logDirectory = await mkdtemp(path.join(tmpdir(), "lumora-logs-close-"));
+  const logger = createProcessLogger({
+    name: "core",
+    logDirectory,
+    console: { log: () => {}, error: () => {} },
+  });
+
+  logger.write("stdout", "final line");
+  const firstClose = logger.close();
+
+  assert.strictEqual(logger.close(), firstClose);
+  assert.throws(() => logger.write("stdout", "late during close"), /closed/i);
+  await firstClose;
+  assert.throws(() => logger.write("stderr", "late after close"), /closed/i);
+  assert.equal(await readFile(path.join(logDirectory, "core.log"), "utf8"), "[core] final line\n");
+});
