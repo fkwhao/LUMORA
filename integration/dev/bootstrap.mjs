@@ -91,47 +91,38 @@ export async function bootstrapRepository(options = {}) {
   const nodeFiles = [path.join(repoRoot, "package.json"), path.join(repoRoot, "pnpm-lock.yaml")];
   const requirementsFiles = [path.join(repoRoot, "agent", "requirements.txt"), path.join(repoRoot, "agent", "requirements-dev.txt")];
   const protocolDirectory = path.join(repoRoot, "protocol");
-  const protoFiles = await listFiles(path.join(protocolDirectory, "proto"), (file) => file.endsWith(".proto"));
-  const protocolFiles = [...protoFiles, path.join(protocolDirectory, "buf.yaml"), path.join(protocolDirectory, "buf.gen.yaml")];
-  const nodeFingerprint = await hashFiles(nodeFiles);
-  const python = await discoverPython({ runner, environment, platform });
-  const java = await discoverJava({ runner, environment, platform });
-  const requirementsFingerprint = fingerprintWithVersion(await hashFiles(requirementsFiles), python.version);
-  const protocolFingerprint = await hashFiles(protocolFiles);
   const nodeStamp = path.join(stampsDirectory, "node-dependencies.sha256");
   const requirementsStamp = path.join(stampsDirectory, "requirements.sha256");
   const protocolStamp = path.join(stampsDirectory, "protocol.sha256");
-  const virtualEnvironmentExists = await exists(pythonExecutable);
-  const generatedProtocolExists = await exists(path.join(repoRoot, "agent", "generated"));
-  const state = {
-    rootDependenciesChanged: await needsRefresh({ fingerprint: nodeFingerprint, stampPath: nodeStamp, outputs: [bufExecutable] }),
-    virtualEnvironmentExists,
-    requirementsChanged: await needsRefresh({ fingerprint: requirementsFingerprint, stampPath: requirementsStamp, outputs: [pythonExecutable] }),
-    protocolChanged: await needsRefresh({ fingerprint: protocolFingerprint, stampPath: protocolStamp, outputs: [path.join(repoRoot, "agent", "generated")] }),
-    generatedProtocolExists,
-  };
-
-  for (const step of planBootstrap(state)) {
-    if (step === "install-root-dependencies") {
-      await ensureSuccess(runner(pnpmExecutable, ["install"], { cwd: repoRoot, environment }), "pnpm install");
-      // 仅在命令成功后落 stamp，失败的安装下次必须重试。
-      await writeStamp(nodeStamp, nodeFingerprint);
-    }
-    if (step === "create-python-venv") {
-      await ensureSuccess(runner(python.executable, [...python.args, "-m", "venv", path.join(repoRoot, "agent", ".venv")], { cwd: repoRoot, environment }), "创建 Python 虚拟环境");
-    }
-    if (step === "install-python-requirements") {
-      await ensureSuccess(runner(pythonExecutable, ["-m", "pip", "install", "-r", "requirements-dev.txt"], { cwd: path.join(repoRoot, "agent"), environment }), "安装 Python 依赖");
-      await writeStamp(requirementsStamp, requirementsFingerprint);
-    }
-    if (step === "generate-protocol") {
-      await ensureSuccess(runner(bufExecutable, ["lint"], { cwd: protocolDirectory, environment }), "Buf lint");
-      await ensureSuccess(runner(bufExecutable, ["generate"], { cwd: protocolDirectory, environment }), "Buf generate");
-      await writeStamp(protocolStamp, protocolFingerprint);
-    }
+  const nodeFingerprint = await hashFiles(nodeFiles);
+  if (await needsRefresh({ fingerprint: nodeFingerprint, stampPath: nodeStamp, outputs: [bufExecutable] })) {
+    await ensureSuccess(runner(pnpmExecutable, ["install"], { cwd: repoRoot, environment }), "pnpm install");
+    // 仅在命令成功后落 stamp，失败的安装下次必须重试。
+    await writeStamp(nodeStamp, nodeFingerprint);
   }
 
-  return { pythonExecutable: python.executable, javaHome: java.javaHome, bufExecutable, mavenWrapper };
+  const python = await discoverPython({ runner, environment, platform });
+  if (!await exists(pythonExecutable)) {
+    await ensureSuccess(runner(python.executable, [...python.args, "-m", "venv", path.join(repoRoot, "agent", ".venv")], { cwd: repoRoot, environment }), "创建 Python 虚拟环境");
+  }
+
+  const requirementsFingerprint = fingerprintWithVersion(await hashFiles(requirementsFiles), python.version);
+  if (await needsRefresh({ fingerprint: requirementsFingerprint, stampPath: requirementsStamp, outputs: [pythonExecutable] })) {
+    await ensureSuccess(runner(pythonExecutable, ["-m", "pip", "install", "-r", "requirements-dev.txt"], { cwd: path.join(repoRoot, "agent"), environment }), "安装 Python 依赖");
+    await writeStamp(requirementsStamp, requirementsFingerprint);
+  }
+
+  const protoFiles = await listFiles(path.join(protocolDirectory, "proto"), (file) => file.endsWith(".proto"));
+  const protocolFiles = [...protoFiles, path.join(protocolDirectory, "buf.yaml"), path.join(protocolDirectory, "buf.gen.yaml")];
+  const protocolFingerprint = await hashFiles(protocolFiles);
+  if (await needsRefresh({ fingerprint: protocolFingerprint, stampPath: protocolStamp, outputs: [path.join(repoRoot, "agent", "generated")] })) {
+    await ensureSuccess(runner(bufExecutable, ["lint"], { cwd: protocolDirectory, environment }), "Buf lint");
+    await ensureSuccess(runner(bufExecutable, ["generate"], { cwd: protocolDirectory, environment }), "Buf generate");
+    await writeStamp(protocolStamp, protocolFingerprint);
+  }
+
+  const java = await discoverJava({ runner, environment, platform });
+  return { pythonExecutable, javaHome: java.javaHome, bufExecutable, mavenWrapper };
 }
 
 async function tryCommand(runner, command, args, options) {

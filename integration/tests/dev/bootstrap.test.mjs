@@ -81,6 +81,35 @@ test("Java discovery accepts a bare JDK 21 major version", async () => {
   assert.deepEqual(runtime, { executable: "java", javaHome: null, version: "21" });
 });
 
+test("bootstrap installs root dependencies before discovering Python", async () => {
+  const repoRoot = await createRepository();
+  const calls = [];
+
+  await assert.rejects(
+    () => bootstrapRepository({
+      repoRoot,
+      platform: "win32",
+      runner: async (command, args) => {
+        calls.push([command, args]);
+        return { exitCode: 0, stdout: "", stderr: "" };
+      },
+      hashFiles: async () => "fingerprint",
+      needsRefresh: async ({ stampPath }) => stampPath.endsWith("node-dependencies.sha256"),
+      writeStamp: async () => {},
+      discoverPython: async () => {
+        calls.push(["discover-python"]);
+        throw new Error("Python unavailable");
+      },
+    }),
+    /Python unavailable/,
+  );
+
+  assert.deepEqual(calls, [
+    ["pnpm.cmd", ["install"]],
+    ["discover-python"],
+  ]);
+});
+
 test("bootstrap uses only changed dependency stages and persists their stamps", async () => {
   const repoRoot = await createRepository();
   const calls = [];
@@ -111,7 +140,7 @@ test("bootstrap uses only changed dependency stages and persists their stamps", 
     [path.join(repoRoot, "node_modules", ".bin", "buf.cmd"), ["generate"], path.join(repoRoot, "protocol")],
   ]);
   assert.equal(stampWrites.length, 2);
-  assert.equal(result.pythonExecutable, "py");
+  assert.equal(result.pythonExecutable, path.join(repoRoot, "agent", ".venv", "Scripts", "python.exe"));
   assert.equal(result.javaHome, "C:\\jdk-21");
   assert.equal(result.bufExecutable, path.join(repoRoot, "node_modules", ".bin", "buf.cmd"));
 });
@@ -157,7 +186,7 @@ test("bootstrap invokes pnpm without a Windows suffix on non-Windows platforms",
     discoverJava: async () => ({ executable: "java", javaHome: null, version: "21" }),
   });
 
-  assert.deepEqual(calls[1], ["pnpm", ["install"]]);
+  assert.ok(calls.some(([command, args]) => command === "pnpm" && args[0] === "install"));
 });
 
 async function createRepository() {
