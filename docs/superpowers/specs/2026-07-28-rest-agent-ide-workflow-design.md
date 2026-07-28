@@ -44,10 +44,9 @@ WebStorm/IDEA  -> Electron Desktop
 ```
 
 启动顺序为 Python、Java、Electron。IDE 调试使用同一个仅限本机开发的启动
-令牌。Java 将真实开发令牌写入被 Git 忽略的
-`application-dev-local.yml`；Python 和 Electron 分别在 IDE Run
-Configuration 中配置同一个值。仓库只提交不含真实值的 Java 示例文件。真实
-令牌不得写入可跟踪配置、日志或 Git。
+令牌。Java、Python 和 Electron 各自在模块内读取被 Git 忽略的本机
+`dev-local.yml`。三个文件使用同一个开发令牌，仓库只提交不含真实值的示例
+文件。真实令牌不得写入可跟踪配置、日志或 Git。
 
 ## 4. 仓库边界
 
@@ -238,10 +237,38 @@ lumora:
   agent-startup-token: lumora-local-debug-token-change-me
 ```
 
-仓库提交 `application-dev-local.example.yml`，并通过 `.gitignore` 排除
-`application-dev-local.yml`。Python 和 Electron 在各自 IDE Run
-Configuration 中设置相同的 `LUMORA_STARTUP_TOKEN`，三处开发 Token 必须
-一致；正式打包后改为每次启动随机生成并通过子进程环境变量传递。
+三个模块分别使用：
+
+```text
+core/src/main/resources/application-dev-local.yml
+agent/config/dev-local.yml
+desktop/config/dev-local.yml
+```
+
+Python 本机配置结构：
+
+```yaml
+server:
+  host: 127.0.0.1
+  port: 45101
+lumora:
+  startup-token: lumora-local-debug-token-change-me
+  protocol-version: "1"
+```
+
+Electron 本机配置结构：
+
+```yaml
+lumora:
+  core-url: http://127.0.0.1:45102
+  startup-token: lumora-local-debug-token-change-me
+```
+
+仓库提交对应的 `.example.yml`，并通过 `.gitignore` 排除真实
+`application-dev-local.yml` 和 `dev-local.yml`。三个本机文件中的开发 Token
+必须一致。Python 使用专用配置加载器把 YAML 转换为 `AgentSettings`；
+Electron 只允许 Main Process 读取 YAML，Renderer 不接触配置文件或 Token。
+正式打包后不读取这些开发文件，改为每次启动随机生成并通过子进程环境变量传递。
 
 ## 7. IDE 启动
 
@@ -250,7 +277,7 @@ Configuration 中设置相同的 `LUMORA_STARTUP_TOKEN`，三处开发 Token 必
 - Interpreter：`agent/.venv/Scripts/python.exe`
 - Module：`app.main`
 - Working directory：`agent/`
-- IDE 环境变量：Agent 端口、启动 Token、协议版本
+- 本机配置：`agent/config/dev-local.yml`
 
 ### 7.2 Java
 
@@ -266,7 +293,7 @@ Configuration 中设置相同的 `LUMORA_STARTUP_TOKEN`，三处开发 Token 必
 - package：`desktop/package.json`
 - script：`start`
 - Working directory：`desktop/`
-- IDE 环境变量：Java Core URL、Java 启动 Token
+- 本机配置：`desktop/config/dev-local.yml`
 
 IDE Compound Configuration 不作为标准入口，因为它不能保证三个服务的就绪
 顺序。开发者依次点击三个 Run/Debug Configuration。
