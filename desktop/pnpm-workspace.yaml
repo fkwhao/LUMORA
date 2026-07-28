@@ -1,15 +1,11 @@
-packages:
-  - desktop
-
 nodeLinker: hoisted
+blockExoticSubdeps: false
 allowBuilds:
-  '@bufbuild/buf': true
   electron: true
   electron-winstaller: true
   esbuild: true
-  protobufjs: true
+  protobufjs: set this to true or false
 onlyBuiltDependencies:
   - electron
   - electron-winstaller
   - esbuild
-  - protobufjs
