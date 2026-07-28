@@ -9,7 +9,7 @@ public class CoreProperties {
 
     private String protocolVersion = "1";
     private String startupToken = "";
-    private int agentPort;
+    private String agentUrl = "http://127.0.0.1:45101";
     private String agentStartupToken = "";
 
     public String getProtocolVersion() {
@@ -28,12 +28,12 @@ public class CoreProperties {
         this.startupToken = startupToken;
     }
 
-    public int getAgentPort() {
-        return agentPort;
+    public String getAgentUrl() {
+        return agentUrl;
     }
 
-    public void setAgentPort(int agentPort) {
-        this.agentPort = agentPort;
+    public void setAgentUrl(String agentUrl) {
+        this.agentUrl = agentUrl;
     }
 
     public String getAgentStartupToken() {

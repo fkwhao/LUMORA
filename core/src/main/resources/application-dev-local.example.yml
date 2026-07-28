@@ -1,0 +1,7 @@
+server:
+  port: 45102
+
+lumora:
+  startup-token: replace-with-at-least-32-local-characters
+  agent-url: http://127.0.0.1:45101
+  agent-startup-token: replace-with-at-least-32-local-characters

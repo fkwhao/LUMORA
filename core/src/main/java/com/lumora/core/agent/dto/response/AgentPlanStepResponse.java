@@ -1,17 +1,21 @@
-package com.lumora.core.grpc.client;
+package com.lumora.core.agent.dto.response;
 
-public class AgentPlanStep {
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+public class AgentPlanStepResponse {
 
     private final String stepId;
     private final String title;
     private final String description;
     private final boolean requiresApproval;
 
-    public AgentPlanStep(
-            String stepId,
-            String title,
-            String description,
-            boolean requiresApproval
+    @JsonCreator
+    public AgentPlanStepResponse(
+            @JsonProperty("stepId") String stepId,
+            @JsonProperty("title") String title,
+            @JsonProperty("description") String description,
+            @JsonProperty("requiresApproval") boolean requiresApproval
     ) {
         this.stepId = stepId;
         this.title = title;

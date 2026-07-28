@@ -87,7 +87,7 @@ public class TaskServiceImpl implements TaskService {
     }
 
     /**
-     * 状态规则集中在 Service，防止 REST、gRPC 和 Mapper 各自维护一份。
+     * 状态规则集中在 Service，防止 REST、Agent Client 和 Mapper 各自维护一份。
      */
     private boolean isAllowedTransition(
             TaskStatus currentStatus,

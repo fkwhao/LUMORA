@@ -21,5 +21,5 @@ mybatis-plus:
 lumora:
   protocol-version: ${LUMORA_PROTOCOL_VERSION:1}
   startup-token: ${LUMORA_STARTUP_TOKEN:}
-  agent-port: ${LUMORA_AGENT_PORT:0}
+  agent-url: ${LUMORA_AGENT_URL:http://127.0.0.1:45101}
   agent-startup-token: ${LUMORA_AGENT_STARTUP_TOKEN:${LUMORA_STARTUP_TOKEN:}}
