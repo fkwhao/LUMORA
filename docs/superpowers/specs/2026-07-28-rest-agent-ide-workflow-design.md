@@ -43,9 +43,11 @@ IntelliJ IDEA  -> Java Core，127.0.0.1:45102
 WebStorm/IDEA  -> Electron Desktop
 ```
 
-启动顺序为 Python、Java、Electron。IDE 调试配置使用同一个仅限本机开发的
-启动令牌。令牌只配置在 IDE Run Configuration 的环境变量中，不写入 YAML、
-`.env`、日志或 Git。
+启动顺序为 Python、Java、Electron。IDE 调试使用同一个仅限本机开发的启动
+令牌。Java 将真实开发令牌写入被 Git 忽略的
+`application-dev-local.yml`；Python 和 Electron 分别在 IDE Run
+Configuration 中配置同一个值。仓库只提交不含真实值的 Java 示例文件。真实
+令牌不得写入可跟踪配置、日志或 Git。
 
 ## 4. 仓库边界
 
@@ -221,7 +223,25 @@ lumora:
   agent-startup-token: ${LUMORA_AGENT_STARTUP_TOKEN:${LUMORA_STARTUP_TOKEN:}}
 ```
 
-YAML 只保存环境变量占位和 loopback 默认地址，不保存真实 Token。
+被 Git 跟踪的 `application.yml` 只保存环境变量占位和 loopback 默认地址，
+不保存真实 Token。
+
+Java 本机调试可以额外创建不提交 Git 的：
+
+```text
+core/src/main/resources/application-dev-local.yml
+```
+
+```yaml
+lumora:
+  startup-token: lumora-local-debug-token-change-me
+  agent-startup-token: lumora-local-debug-token-change-me
+```
+
+仓库提交 `application-dev-local.example.yml`，并通过 `.gitignore` 排除
+`application-dev-local.yml`。Python 和 Electron 在各自 IDE Run
+Configuration 中设置相同的 `LUMORA_STARTUP_TOKEN`，三处开发 Token 必须
+一致；正式打包后改为每次启动随机生成并通过子进程环境变量传递。
 
 ## 7. IDE 启动
 
@@ -230,21 +250,23 @@ YAML 只保存环境变量占位和 loopback 默认地址，不保存真实 Toke
 - Interpreter：`agent/.venv/Scripts/python.exe`
 - Module：`app.main`
 - Working directory：`agent/`
-- 环境：Agent 端口、启动 Token、协议版本
+- IDE 环境变量：Agent 端口、启动 Token、协议版本
 
 ### 7.2 Java
 
 - Main class：`com.lumora.core.CoreApplication`
 - JDK：21
 - Working directory：`core/`
-- 环境：Core 端口、Agent URL、同一个 Agent Token、协议版本、SQLite 路径
+- Profile：`dev-local`
+- `application-dev-local.yml`：Core 端口、Agent URL、同一个 Agent Token、
+  协议版本、SQLite 路径
 
 ### 7.3 Electron
 
 - package：`desktop/package.json`
 - script：`start`
 - Working directory：`desktop/`
-- 环境：Java Core URL、Java 启动 Token
+- IDE 环境变量：Java Core URL、Java 启动 Token
 
 IDE Compound Configuration 不作为标准入口，因为它不能保证三个服务的就绪
 顺序。开发者依次点击三个 Run/Debug Configuration。
@@ -317,6 +339,28 @@ Desktop：
 
 - 本次不实现 Electron 正式版子进程托管。
 - 本次不提供新的根级一键启动命令。
+- 本次不实现用户注册、登录、Access Token、Refresh Token 或用户表。
+- 本次不实现套餐、订单、支付、云端余额或权威计费。
 - 本次不引入 Docker、服务发现、反向代理或远程 Agent。
 - 本次不引入 WebSocket、消息队列、JSON-RPC 或 OpenAPI 代码生成。
 - 本次不改变任务状态机、审批规则、SQLite 表结构或前端界面。
+
+## 12. 后续账户与商业化演进
+
+当前版本是纯本地单用户应用，本地会话、消息、任务和审批记录不关联用户身份。
+Windows 用户账户和本地文件权限作为当前用户边界。
+
+Java Core 继续作为状态、数据、审批和权限的唯一权威入口。未来加入账户体系时：
+
+1. 在 Java 中增加 Spring Security、用户会话和设备管理。
+2. 通过 Liquibase 为会话、任务和用量记录增加用户归属。
+3. Electron 持有用户 Access Token；Python 不处理用户密码或 Refresh Token。
+4. Java 与 Python 之间继续使用独立的内部服务启动令牌，不能复用用户 Token。
+
+Python 后续调用模型时可以返回 provider、model、inputTokens、outputTokens 和
+cachedTokens 等 usage 数据；Java 负责关联任务、会话、时间和预计成本并写入
+本地数据库。本次迁移不提前实现 usage 表或套餐逻辑。
+
+正式套餐、余额和计费必须由未来云端服务作为权威来源，不能只信任可被本机用户
+修改的 SQLite。这样可以先完成 Agent 功能与链路，再在不推翻本地核心架构的
+前提下增加登录、云同步、用量统计和套餐能力。
