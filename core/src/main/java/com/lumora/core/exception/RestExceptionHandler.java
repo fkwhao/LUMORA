@@ -1,5 +1,7 @@
 package com.lumora.core.exception;
 
+import com.lumora.core.agent.exception.AgentRuntimeException;
+import com.lumora.core.common.constant.ErrorCodeConstants;
 import com.lumora.core.dto.response.ErrorResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -19,7 +21,11 @@ public class RestExceptionHandler {
                 ? "请求参数无效"
                 : error.getBindingResult().getFieldErrors().get(0)
                         .getDefaultMessage();
-        return response(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", message);
+        return response(
+                HttpStatus.BAD_REQUEST,
+                ErrorCodeConstants.INVALID_REQUEST,
+                message
+        );
     }
 
     @ExceptionHandler({
@@ -29,7 +35,7 @@ public class RestExceptionHandler {
     public ResponseEntity<ErrorResponse> handleBadRequest(Exception error) {
         return response(
                 HttpStatus.BAD_REQUEST,
-                "INVALID_REQUEST",
+                ErrorCodeConstants.INVALID_REQUEST,
                 "请求参数无效"
         );
     }
@@ -40,7 +46,7 @@ public class RestExceptionHandler {
     ) {
         return response(
                 HttpStatus.NOT_FOUND,
-                "TASK_NOT_FOUND",
+                ErrorCodeConstants.TASK_NOT_FOUND,
                 error.getMessage()
         );
     }
@@ -52,7 +58,19 @@ public class RestExceptionHandler {
     public ResponseEntity<ErrorResponse> handleConflict(Exception error) {
         return response(
                 HttpStatus.CONFLICT,
-                "TASK_CONFLICT",
+                ErrorCodeConstants.TASK_CONFLICT,
+                error.getMessage()
+        );
+    }
+
+    @ExceptionHandler(AgentRuntimeException.class)
+    public ResponseEntity<ErrorResponse> handleAgentFailure(
+            AgentRuntimeException error
+    ) {
+        // Agent 内部异常统一转换为稳定的网关错误，不向 Electron 返回调用栈。
+        return response(
+                HttpStatus.BAD_GATEWAY,
+                ErrorCodeConstants.AGENT_UNAVAILABLE,
                 error.getMessage()
         );
     }

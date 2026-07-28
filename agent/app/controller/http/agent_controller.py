@@ -1,6 +1,24 @@
-from fastapi import APIRouter, Header
+from http import HTTPMethod
+
+from fastapi import APIRouter, Header, status
 
 from app.config.settings import AgentSettings
+from app.constants.api_paths import (
+    API_V1_PREFIX,
+    HEALTH_ROUTE,
+    PLAN_TASK_ROUTE,
+)
+from app.constants.error_codes import (
+    AUTHENTICATION_FAILED,
+    INVALID_REQUEST,
+    PROTOCOL_MISMATCH,
+)
+from app.constants.http_contract import (
+    AUTHORIZATION_HEADER,
+    CORRELATION_ID_HEADER,
+    PROTOCOL_VERSION_HEADER,
+)
+from app.constants.service_metadata import SERVICE_NAME, STATUS_UP
 from app.dto.request.plan_task_request import PlanTaskRequest
 from app.dto.response.health_response import HealthResponse
 from app.dto.response.plan_step_response import PlanStepResponse
@@ -37,53 +55,59 @@ class AgentHttpController:
         settings: AgentSettings,
         planner_service: PlannerService,
     ) -> None:
-        self.router = APIRouter(prefix="/api/v1")
+        self.router = APIRouter(prefix=API_V1_PREFIX)
         self._settings = settings
         self._planner_service = planner_service
         self._authenticator = RequestAuthenticator(settings)
         self.router.add_api_route(
-            "/health",
+            HEALTH_ROUTE,
             self.health,
-            methods=["GET"],
+            methods=[HTTPMethod.GET],
             response_model=HealthResponse,
         )
         self.router.add_api_route(
-            "/tasks/plan",
+            PLAN_TASK_ROUTE,
             self.plan_task,
-            methods=["POST"],
+            methods=[HTTPMethod.POST],
             response_model=PlanTaskResponse,
         )
 
     def health(
         self,
-        authorization: str | None = Header(default=None),
+        authorization: str | None = Header(
+            default=None,
+            alias=AUTHORIZATION_HEADER,
+        ),
         protocol_version: str | None = Header(
             default=None,
-            alias="X-Lumora-Protocol-Version",
+            alias=PROTOCOL_VERSION_HEADER,
         ),
         correlation_id: str | None = Header(
             default=None,
-            alias="X-Correlation-Id",
+            alias=CORRELATION_ID_HEADER,
         ),
     ) -> HealthResponse:
         self._authenticate(authorization, protocol_version, correlation_id)
         return HealthResponse(
-            status="UP",
-            service="lumora-agent",
+            status=STATUS_UP,
+            service=SERVICE_NAME,
             protocolVersion=self._settings.protocol_version,
         )
 
     def plan_task(
         self,
         request: PlanTaskRequest,
-        authorization: str | None = Header(default=None),
+        authorization: str | None = Header(
+            default=None,
+            alias=AUTHORIZATION_HEADER,
+        ),
         protocol_version: str | None = Header(
             default=None,
-            alias="X-Lumora-Protocol-Version",
+            alias=PROTOCOL_VERSION_HEADER,
         ),
         correlation_id: str | None = Header(
             default=None,
-            alias="X-Correlation-Id",
+            alias=CORRELATION_ID_HEADER,
         ),
     ) -> PlanTaskResponse:
         authenticated_correlation_id = self._authenticate(
@@ -95,8 +119,8 @@ class AgentHttpController:
             steps = self._planner_service.build_plan(request.goal)
         except ValueError as error:
             raise AgentHttpError(
-                400,
-                "INVALID_REQUEST",
+                status.HTTP_400_BAD_REQUEST,
+                INVALID_REQUEST,
                 str(error),
                 False,
                 authenticated_correlation_id,
@@ -118,9 +142,21 @@ class AgentHttpController:
             tuple[type[ValueError], int, str],
             ...,
         ] = (
-            (AuthenticationError, 401, "AUTHENTICATION_FAILED"),
-            (ProtocolMismatchError, 412, "PROTOCOL_MISMATCH"),
-            (InvalidRequestError, 400, "INVALID_REQUEST"),
+            (
+                AuthenticationError,
+                status.HTTP_401_UNAUTHORIZED,
+                AUTHENTICATION_FAILED,
+            ),
+            (
+                ProtocolMismatchError,
+                status.HTTP_412_PRECONDITION_FAILED,
+                PROTOCOL_MISMATCH,
+            ),
+            (
+                InvalidRequestError,
+                status.HTTP_400_BAD_REQUEST,
+                INVALID_REQUEST,
+            ),
         )
         try:
             return self._authenticator.authenticate(

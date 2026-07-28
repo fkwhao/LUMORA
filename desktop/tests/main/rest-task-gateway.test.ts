@@ -25,21 +25,38 @@ describe("Java REST task gateway", () => {
     let receivedMethod = "";
     let receivedUrl = "";
     let receivedAuthorization = "";
+    let receivedCorrelationId = "";
     let receivedBody = "";
     const baseUrl = await listen(async (request) => {
       receivedMethod = request.method ?? "";
       receivedUrl = request.url ?? "";
       receivedAuthorization = request.headers.authorization ?? "";
+      receivedCorrelationId =
+        request.headers["x-correlation-id"]?.toString() ?? "";
       receivedBody = await readBody(request);
       return {
         status: 201,
         body: {
           taskId: "task-1",
           goal: "整理下载目录",
-          status: "CREATED",
+          status: "PLANNING",
           lastEventSequence: 0,
           activeStep: "",
           resultSummary: "",
+          planSteps: [
+            {
+              stepId: "step-1",
+              title: "分析目录内容",
+              description: "识别下载目录中的文件类型",
+              requiresApproval: false,
+            },
+            {
+              stepId: "step-2",
+              title: "整理文件",
+              description: "按类型移动文件到分类目录",
+              requiresApproval: true,
+            },
+          ],
         },
       };
     });
@@ -51,9 +68,26 @@ describe("Java REST task gateway", () => {
     const task = await gateway.create("整理下载目录");
 
     expect(task.taskId).toBe("task-1");
+    expect(task.planSteps).toEqual([
+      {
+        stepId: "step-1",
+        title: "分析目录内容",
+        description: "识别下载目录中的文件类型",
+        requiresApproval: false,
+      },
+      {
+        stepId: "step-2",
+        title: "整理文件",
+        description: "按类型移动文件到分类目录",
+        requiresApproval: true,
+      },
+    ]);
     expect(receivedMethod).toBe("POST");
     expect(receivedUrl).toBe("/api/v1/tasks");
     expect(receivedAuthorization).toBe("Bearer test-token");
+    expect(receivedCorrelationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
     expect(JSON.parse(receivedBody)).toEqual({ goal: "整理下载目录" });
   });
 

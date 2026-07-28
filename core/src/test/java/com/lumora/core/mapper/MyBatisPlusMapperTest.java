@@ -1,8 +1,10 @@
 package com.lumora.core.mapper;
 
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.lumora.core.entity.AgentTask;
 import com.lumora.core.entity.ApprovalDecision;
 import com.lumora.core.entity.ApprovalRecord;
+import com.lumora.core.entity.TaskPlanStep;
 import com.lumora.core.entity.TaskStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,10 +40,15 @@ class MyBatisPlusMapperTest {
     private ApprovalMapper approvalMapper;
 
     @Autowired
+    private TaskPlanStepMapper taskPlanStepMapper;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @BeforeEach
     void resetSchema() {
+        // 计划步骤依赖任务外键，重建测试表时必须先删除子表。
+        jdbcTemplate.execute("DROP TABLE IF EXISTS task_plan_step");
         jdbcTemplate.execute("DROP TABLE IF EXISTS approval_request");
         jdbcTemplate.execute("DROP TABLE IF EXISTS agent_task");
         jdbcTemplate.execute("""
@@ -55,6 +62,19 @@ class MyBatisPlusMapperTest {
                     failure_reason TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
+                )
+                """);
+        jdbcTemplate.execute("""
+                CREATE TABLE task_plan_step (
+                    task_id TEXT NOT NULL,
+                    step_index INTEGER NOT NULL,
+                    step_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    requires_approval INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (task_id, step_index),
+                    UNIQUE (task_id, step_id),
+                    FOREIGN KEY (task_id) REFERENCES agent_task(task_id)
                 )
                 """);
         jdbcTemplate.execute("""
@@ -138,6 +158,53 @@ class MyBatisPlusMapperTest {
                 .isEqualTo(ApprovalDecision.ALLOW_ONCE);
         assertThat(decided.getDecidedAt()).isEqualTo(UPDATED_AT);
         assertThat(approvalMapper.findPendingByTaskId("task-2")).isEmpty();
+    }
+
+    @Test
+    void roundTripsOrderedTaskPlanSteps() {
+        taskMapper.insert(task("task-plan"));
+        TaskPlanStep secondStep = new TaskPlanStep(
+                "task-plan",
+                1,
+                "move",
+                "移动文件",
+                "按分类移动文件",
+                true
+        );
+        TaskPlanStep firstStep = new TaskPlanStep(
+                "task-plan",
+                0,
+                "scan",
+                "扫描下载目录",
+                "读取待整理文件",
+                false
+        );
+
+        assertThat(taskPlanStepMapper.insert(secondStep)).isEqualTo(1);
+        assertThat(taskPlanStepMapper.insert(firstStep)).isEqualTo(1);
+
+        assertThat(taskPlanStepMapper.selectList(
+                Wrappers.<TaskPlanStep>lambdaQuery()
+                        .eq(TaskPlanStep::getTaskId, "task-plan")
+                        .orderByAsc(TaskPlanStep::getStepIndex)
+        ))
+                .extracting(
+                        TaskPlanStep::getStepId,
+                        TaskPlanStep::getTitle,
+                        TaskPlanStep::isRequiresApproval
+                )
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(
+                                "scan",
+                                "扫描下载目录",
+                                false
+                        ),
+                        org.assertj.core.groups.Tuple.tuple(
+                                "move",
+                                "移动文件",
+                                true
+                        )
+                );
     }
 
     @Test

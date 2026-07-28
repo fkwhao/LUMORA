@@ -14,10 +14,24 @@ describe("visible task flow", () => {
     const createdTask: TaskSnapshot = {
       taskId: "task-1",
       goal: "整理下载目录",
-      status: "CREATED",
+      status: "PLANNING",
       lastEventSequence: 0,
       activeStep: "",
       resultSummary: "",
+      planSteps: [
+        {
+          stepId: "step-1",
+          title: "分析目录内容",
+          description: "识别下载目录中的文件类型",
+          requiresApproval: false,
+        },
+        {
+          stepId: "step-2",
+          title: "整理文件",
+          description: "按类型移动文件到分类目录",
+          requiresApproval: true,
+        },
+      ],
     };
     const api: LumoraTaskApi = {
       create: vi.fn(async () => createdTask),
@@ -46,6 +60,8 @@ describe("visible task flow", () => {
         name: "整理下载目录",
       }),
     ).toBeVisible();
+    expect(screen.getByText("分析目录内容")).toBeVisible();
+    expect(screen.getByText("整理文件")).toBeVisible();
 
     act(() => {
       onEvent?.({

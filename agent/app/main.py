@@ -1,11 +1,14 @@
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.config.settings import AgentSettings
+from app.constants.error_codes import INTERNAL_ERROR, INVALID_REQUEST
+from app.constants.http_contract import CORRELATION_ID_HEADER
+from app.constants.service_metadata import SERVICE_TITLE, SERVICE_VERSION
 from app.controller.http.agent_controller import (
     AgentHttpController,
     AgentHttpError,
@@ -22,7 +25,7 @@ def create_app(
     settings: AgentSettings,
     planner_service: PlannerService,
 ) -> FastAPI:
-    app = FastAPI(title="LUMORA Agent", version="1.0.0")
+    app = FastAPI(title=SERVICE_TITLE, version=SERVICE_VERSION)
     controller = AgentHttpController(settings, planner_service)
     app.include_router(controller.router)
 
@@ -46,10 +49,13 @@ def create_app(
         error: RequestValidationError,
     ) -> JSONResponse:
         del error
-        correlation_id = request.headers.get("X-Correlation-Id", "").strip()
+        correlation_id = request.headers.get(
+            CORRELATION_ID_HEADER,
+            "",
+        ).strip()
         return _error_response(
-            400,
-            "INVALID_REQUEST",
+            status.HTTP_400_BAD_REQUEST,
+            INVALID_REQUEST,
             "请求参数无效",
             False,
             correlation_id,
@@ -61,11 +67,14 @@ def create_app(
         error: Exception,
     ) -> JSONResponse:
         del error
-        correlation_id = request.headers.get("X-Correlation-Id", "").strip()
+        correlation_id = request.headers.get(
+            CORRELATION_ID_HEADER,
+            "",
+        ).strip()
         # 未预期异常在 HTTP 边界统一脱敏，不能返回堆栈或内部异常文本。
         return _error_response(
-            500,
-            "INTERNAL_ERROR",
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            INTERNAL_ERROR,
             "Agent 内部错误",
             True,
             correlation_id,

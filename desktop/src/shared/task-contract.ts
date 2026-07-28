@@ -29,6 +29,13 @@ export interface ApprovalRequest {
   reversible: boolean;
 }
 
+export interface TaskPlanStep {
+  stepId: string;
+  title: string;
+  description: string;
+  requiresApproval: boolean;
+}
+
 export interface TaskSnapshot {
   taskId: string;
   goal: string;
@@ -36,6 +43,7 @@ export interface TaskSnapshot {
   lastEventSequence: number;
   activeStep: string;
   resultSummary: string;
+  planSteps: TaskPlanStep[];
   approval?: ApprovalRequest;
   errorMessage?: string;
 }
@@ -77,4 +85,3 @@ declare global {
     lumora: LumoraApi;
   }
 }
-

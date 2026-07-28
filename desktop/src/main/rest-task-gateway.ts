@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { JavaEventStream, type EventSubscription } from "./java-event-stream";
 import type { JavaConnection } from "./java-connection";
 import { validateJavaConnection } from "./java-connection";
@@ -34,6 +36,9 @@ export class RestTaskGateway implements TaskGateway {
   create(goal: string): Promise<TaskSnapshot> {
     return this.request("/api/v1/tasks", {
       method: "POST",
+      headers: {
+        "X-Correlation-Id": randomUUID(),
+      },
       body: JSON.stringify({ goal: validateGoal(goal) }),
     });
   }

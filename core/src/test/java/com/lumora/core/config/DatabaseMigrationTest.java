@@ -38,13 +38,17 @@ class DatabaseMigrationTest {
     }
 
     @Test
-    void appliesInitialSchemaOnlyOnceToTheSameDatabase() throws Exception {
+    void appliesAllSchemaChangesOnlyOnceToTheSameDatabase() throws Exception {
         Integer businessTableCount = jdbcTemplate.queryForObject(
                 """
                 SELECT COUNT(*)
                 FROM sqlite_master
                 WHERE type = 'table'
-                  AND name IN ('agent_task', 'approval_request')
+                  AND name IN (
+                      'agent_task',
+                      'approval_request',
+                      'task_plan_step'
+                  )
                 """,
                 Integer.class
         );
@@ -53,23 +57,26 @@ class DatabaseMigrationTest {
                 Integer.class
         );
 
-        assertThat(businessTableCount).isEqualTo(2);
+        assertThat(businessTableCount).isEqualTo(3);
         assertThat(foreignKeysEnabled).isEqualTo(1);
-        assertThat(initialChangeSetCount()).isEqualTo(1);
+        assertThat(applicationChangeSetCount()).isEqualTo(2);
 
         // 对同一数据库重复执行迁移，必须只校验历史而不能再次建表。
         liquibase.afterPropertiesSet();
 
-        assertThat(initialChangeSetCount()).isEqualTo(1);
+        assertThat(applicationChangeSetCount()).isEqualTo(2);
     }
 
-    private Integer initialChangeSetCount() {
+    private Integer applicationChangeSetCount() {
         return jdbcTemplate.queryForObject(
                 """
                 SELECT COUNT(*)
                 FROM DATABASECHANGELOG
-                WHERE ID = '001-initial-schema'
-                  AND AUTHOR = 'lumora'
+                WHERE ID IN (
+                    '001-initial-schema',
+                    '002-task-plan-step'
+                )
+                AND AUTHOR = 'lumora'
                 """,
                 Integer.class
         );

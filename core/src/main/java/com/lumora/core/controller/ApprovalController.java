@@ -1,5 +1,6 @@
 package com.lumora.core.controller;
 
+import com.lumora.core.common.constant.ApiPathConstants;
 import com.lumora.core.dto.request.ApprovalDecisionRequest;
 import com.lumora.core.dto.response.TaskResponse;
 import com.lumora.core.entity.AgentTask;
@@ -15,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 审批 REST 入口，审批合法性由 ApprovalService 统一判断。
  */
 @RestController
-@RequestMapping("/api/v1/tasks/{taskId}/approvals")
+@RequestMapping(ApiPathConstants.TASK_APPROVALS)
 public class ApprovalController {
 
     private final ApprovalService approvalService;
@@ -24,7 +25,7 @@ public class ApprovalController {
         this.approvalService = approvalService;
     }
 
-    @PostMapping("/{approvalId}")
+    @PostMapping(ApiPathConstants.APPROVAL_BY_ID)
     public TaskResponse decideApproval(
             @PathVariable String taskId,
             @PathVariable String approvalId,

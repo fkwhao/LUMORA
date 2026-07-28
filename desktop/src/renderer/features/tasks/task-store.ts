@@ -59,8 +59,14 @@ export function createTaskStore(api: LumoraTaskApi) {
         approvalId: task.approval.approvalId,
         decision,
       });
-      set({ activeTask: updated });
-      return updated;
+      // 审批接口只返回任务状态时，继续保留创建阶段得到的完整计划。
+      const merged = {
+        ...updated,
+        planSteps:
+          updated.planSteps.length > 0 ? updated.planSteps : task.planSteps,
+      };
+      set({ activeTask: merged });
+      return merged;
     },
 
     clearError() {

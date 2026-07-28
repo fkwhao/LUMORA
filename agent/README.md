@@ -7,17 +7,18 @@ Python 3.12 Agent 推理与编排运行时。
 - 任务规划和 Agent 状态图。
 - 模型适配、路由和中断恢复。
 - 文档理解与结果验证能力边界。
+- 通过 REST 接收 Java 的规划请求并返回结构化计划步骤。
 
 ## 边界
 
 - 本工程不得导入 `desktop/` 或 `core/` 的源码。
 - 不直接执行 Playwright、Shell 或无限制系统工具。
-- 所有内置工具调用通过 `protocol/` 交给 Java Local Core。
+- 需要使用本机能力时，只能通过受控 HTTP 接口交给 Java Local Core。
 
 ## IDE 配置
 
-在 IDE 中选择 Python 3.12，并以 `requirements-dev.txt` 安装开发依赖。将 `agent/`
-工程根目录和协议生成目录 `agent/generated` 加入 Sources Root。
+在 IDE 中选择 Python 3.12，并以 `requirements-dev.txt` 安装开发依赖。将
+`agent/` 工程根目录加入 Sources Root。
 
 ```powershell
 python -m pip install -r requirements-dev.txt
@@ -26,12 +27,14 @@ python -m pip install -r requirements-dev.txt
 ## 代码结构
 
 ```text
-app/controller/grpc/   gRPC 请求、认证和状态码转换
+app/controller/http/   REST 请求、认证和错误转换
+app/dto/               REST 请求与响应模型
+app/security/          本机启动令牌校验
 app/service/           Agent 规划与编排业务
 app/model/             Pydantic 数据模型
-app/config/            环境变量和运行配置
+app/config/            YAML 运行配置
 app/exception/         运行时异常
-app/main.py            grpc.aio Server 生命周期
+app/main.py            FastAPI 与 Uvicorn 生命周期
 ```
 
 ## 测试
@@ -55,13 +58,8 @@ python -m mypy app
 
 ## 启动
 
-先生成 Protobuf 代码，再设置以下环境变量：
-
-```text
-LUMORA_AGENT_PORT
-LUMORA_STARTUP_TOKEN
-LUMORA_PROTOCOL_VERSION
-```
+复制 `config/dev-local.example.yml` 为 `config/dev-local.yml`，配置监听地址、端口、
+协议版本和至少 32 个字符的本机开发令牌。真实配置文件已被 Git 忽略。
 
 启动命令：
 

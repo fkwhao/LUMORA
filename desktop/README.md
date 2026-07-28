@@ -5,9 +5,8 @@ Electron、React 和 TypeScript 桌面应用。
 ## 职责
 
 - 管理桌面窗口和应用生命周期。
-- 由 Electron Main 启动并监控 Java Local Core。
 - 通过 Preload 白名单 API 向 Renderer 暴露任务能力。
-- 展示任务、进度、审批和结果。
+- 展示 Python 生成并由 Java 持久化的真实任务计划、进度、审批和结果。
 
 ## 边界
 
@@ -22,9 +21,13 @@ pnpm install
 pnpm start
 ```
 
-Java 未启动时，Main 使用 `DemoTaskGateway` 跑通界面和审批流程。配置
-`LUMORA_CORE_URL=http://127.0.0.1:<port>` 和 `LUMORA_STARTUP_TOKEN` 后，
-Main 使用 `RestTaskGateway` 和 SSE 连接 Java。Renderer 和 Preload API 保持不变。
+复制 `config/dev-local.example.yml` 为 `config/dev-local.yml`，配置 Java 地址和
+本机开发令牌；真实配置文件已被 Git 忽略。开发入口使用 `RestTaskGateway`
+和 SSE 连接 Java，因此创建任务前需要先启动 Java。`DemoTaskGateway` 只保留给
+独立界面演示和测试使用。Renderer 和 Preload API 保持不变。
+
+开发阶段由 IDE 分别启动 Python Agent、Java Core 和 Electron。正式打包后，
+Electron Main 再负责启动、监控和关闭随应用分发的 Java 与 Python 运行时。
 
 ## 验证
 

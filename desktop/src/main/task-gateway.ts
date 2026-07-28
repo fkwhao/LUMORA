@@ -33,6 +33,20 @@ export class DemoTaskGateway implements TaskGateway {
       lastEventSequence: 0,
       activeStep: "",
       resultSummary: "",
+      planSteps: [
+        {
+          stepId: "understand-goal",
+          title: "理解目标",
+          description: "分析任务目标和约束",
+          requiresApproval: false,
+        },
+        {
+          stepId: "confirm-sensitive-action",
+          title: "确认敏感操作",
+          description: "执行本地文件操作前请求确认",
+          requiresApproval: true,
+        },
+      ],
     };
     this.tasks.set(taskId, task);
 

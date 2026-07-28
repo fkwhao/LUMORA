@@ -1,6 +1,7 @@
 import hmac
 
 from app.config.settings import AgentSettings
+from app.constants.http_contract import BEARER_PREFIX
 from app.exception.runtime_errors import (
     AuthenticationError,
     InvalidRequestError,
@@ -31,10 +32,12 @@ class RequestAuthenticator:
 
     @staticmethod
     def _extract_bearer_token(authorization: str | None) -> str:
-        prefix = "Bearer "
-        if authorization is None or not authorization.startswith(prefix):
+        if (
+            authorization is None
+            or not authorization.startswith(BEARER_PREFIX)
+        ):
             raise AuthenticationError("启动令牌无效")
-        token = authorization[len(prefix) :]
+        token = authorization[len(BEARER_PREFIX) :]
         if not token:
             raise AuthenticationError("启动令牌无效")
         return token

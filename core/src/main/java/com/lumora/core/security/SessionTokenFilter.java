@@ -1,5 +1,7 @@
 package com.lumora.core.security;
 
+import com.lumora.core.common.constant.ApiPathConstants;
+import com.lumora.core.common.constant.HttpContractConstants;
 import com.lumora.core.config.CoreProperties;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -19,8 +21,6 @@ import java.security.MessageDigest;
 @Component
 public class SessionTokenFilter extends OncePerRequestFilter {
 
-    private static final String BEARER_PREFIX = "Bearer ";
-
     private final CoreProperties properties;
 
     public SessionTokenFilter(CoreProperties properties) {
@@ -29,7 +29,9 @@ public class SessionTokenFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !request.getRequestURI().startsWith("/api/");
+        return !request.getRequestURI().startsWith(
+                ApiPathConstants.API_SCOPE_PREFIX
+        );
     }
 
     @Override
@@ -53,11 +55,15 @@ public class SessionTokenFilter extends OncePerRequestFilter {
     private String extractToken(String authorization) {
         if (
             authorization == null
-                || !authorization.startsWith(BEARER_PREFIX)
+                || !authorization.startsWith(
+                        HttpContractConstants.BEARER_PREFIX
+                )
         ) {
             return "";
         }
-        return authorization.substring(BEARER_PREFIX.length());
+        return authorization.substring(
+                HttpContractConstants.BEARER_PREFIX.length()
+        );
     }
 
     private boolean matches(String expectedToken, String suppliedToken) {

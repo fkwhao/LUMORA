@@ -1,5 +1,6 @@
 package com.lumora.core.agent.config;
 
+import com.lumora.core.agent.constant.AgentClientConstants;
 import com.lumora.core.config.CoreProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -8,22 +9,20 @@ import org.springframework.web.client.RestClient;
 
 import java.net.URI;
 import java.net.http.HttpClient;
-import java.time.Duration;
-
 @Configuration
 public class AgentClientConfiguration {
-
-    private static final Duration TIMEOUT = Duration.ofSeconds(30);
 
     @Bean
     public RestClient agentRestClient(CoreProperties properties) {
         URI agentUri = validateAgentUri(properties.getAgentUrl());
         HttpClient httpClient = HttpClient.newBuilder()
-                .connectTimeout(TIMEOUT)
+                .connectTimeout(AgentClientConstants.REQUEST_TIMEOUT)
                 .build();
         JdkClientHttpRequestFactory requestFactory =
                 new JdkClientHttpRequestFactory(httpClient);
-        requestFactory.setReadTimeout(TIMEOUT);
+        requestFactory.setReadTimeout(
+                AgentClientConstants.REQUEST_TIMEOUT
+        );
 
         return RestClient.builder()
                 .baseUrl(agentUri.toString())

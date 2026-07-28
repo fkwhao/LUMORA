@@ -1,11 +1,13 @@
 package com.lumora.core.agent.client;
 
 import com.lumora.core.agent.config.AgentClientConfiguration;
+import com.lumora.core.agent.constant.AgentClientConstants;
 import com.lumora.core.agent.dto.request.AgentPlanTaskRequest;
 import com.lumora.core.agent.dto.response.AgentPlanStepResponse;
 import com.lumora.core.agent.dto.response.AgentPlanTaskResponse;
 import com.lumora.core.agent.exception.AgentRuntimeException;
 import com.lumora.core.agent.model.AgentPlanStep;
+import com.lumora.core.common.constant.HttpContractConstants;
 import com.lumora.core.config.CoreProperties;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -19,10 +21,6 @@ import java.util.List;
 
 @Component
 public class HttpAgentRuntimeClient implements AgentRuntimeClient {
-
-    private static final String PLAN_PATH = "/api/v1/tasks/plan";
-    private static final String PROTOCOL_HEADER = "X-Lumora-Protocol-Version";
-    private static final String CORRELATION_HEADER = "X-Correlation-Id";
 
     private final RestClient restClient;
     private final CoreProperties properties;
@@ -44,17 +42,21 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
     ) {
         try {
             AgentPlanTaskResponse response = restClient.post()
-                    .uri(PLAN_PATH)
+                    .uri(AgentClientConstants.PLAN_TASK_PATH)
                     // 内部令牌只写入本次 HTTP 请求头，禁止拼入 URL、日志或异常信息。
                     .header(
                             HttpHeaders.AUTHORIZATION,
-                            "Bearer " + properties.getAgentStartupToken()
+                            HttpContractConstants.BEARER_PREFIX
+                                    + properties.getAgentStartupToken()
                     )
                     .header(
-                            PROTOCOL_HEADER,
+                            HttpContractConstants.PROTOCOL_VERSION_HEADER,
                             properties.getProtocolVersion()
                     )
-                    .header(CORRELATION_HEADER, correlationId)
+                    .header(
+                            HttpContractConstants.CORRELATION_ID_HEADER,
+                            correlationId
+                    )
                     .body(new AgentPlanTaskRequest(taskId, goal))
                     .retrieve()
                     .body(AgentPlanTaskResponse.class);

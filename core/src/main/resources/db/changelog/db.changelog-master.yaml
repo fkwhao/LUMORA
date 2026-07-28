@@ -10,3 +10,12 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 002-task-plan-step
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V2__task_plan_step.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

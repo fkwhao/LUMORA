@@ -16,23 +16,21 @@ interface TaskPageProps {
   store: TaskStore;
 }
 
-const steps = [
-  "分析目标",
-  "收集相关资料",
-  "整理文件结构",
-  "提取关键信息",
-  "生成任务报告",
-  "归档输出",
-];
-
 export function TaskPage({ store }: TaskPageProps) {
   const task = useStore(store, (state) => state.activeTask);
   if (!task) {
     return null;
   }
 
-  const activeStepIndex =
-    task.status === "WAITING_APPROVAL" ? 2 : task.status === "COMPLETED" ? 5 : 1;
+  const matchedStepIndex = task.planSteps.findIndex(
+    (step) =>
+      step.title === task.activeStep || step.stepId === task.activeStep,
+  );
+  const activeStepIndex = Math.max(0, matchedStepIndex);
+  const currentStepNumber =
+    task.planSteps.length === 0
+      ? 0
+      : Math.min(activeStepIndex + 1, task.planSteps.length);
 
   return (
     <main className="task-layout">
@@ -78,14 +76,14 @@ export function TaskPage({ store }: TaskPageProps) {
         <aside className="step-panel">
           <h2>任务流程</h2>
           <ol>
-            {steps.map((step, index) => (
+            {task.planSteps.map((step, index) => (
               <li
                 className={index === activeStepIndex ? "current" : ""}
-                key={step}
+                key={step.stepId}
               >
                 <span>{index < activeStepIndex ? <Check size={14} /> : index + 1}</span>
                 <div>
-                  <strong>{step}</strong>
+                  <strong>{step.title}</strong>
                   <small>
                     {index < activeStepIndex
                       ? "已完成"
@@ -96,8 +94,13 @@ export function TaskPage({ store }: TaskPageProps) {
                 </div>
               </li>
             ))}
+            {task.planSteps.length === 0 && (
+              <li className="empty-step">Agent 尚未返回任务计划</li>
+            )}
           </ol>
-          <p>{Math.min(activeStepIndex + 1, 6)} / 6 步骤</p>
+          <p>
+            {currentStepNumber} / {task.planSteps.length} 步骤
+          </p>
         </aside>
 
         <section className="execution-panel">
@@ -195,4 +198,3 @@ export function TaskPage({ store }: TaskPageProps) {
 function SparkStatus() {
   return <span className="spark-status">✦</span>;
 }
-

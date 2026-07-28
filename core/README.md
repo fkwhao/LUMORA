@@ -7,15 +7,15 @@ Java 21、Spring Boot、MyBatis-Plus 和 SQLite 本地核心。
 - 管理任务、工作空间、审批和审计。
 - 持久化本地状态。
 - 承载文件、浏览器和 Windows 工具边界。
-- 管理 Python Agent Runtime 生命周期。
 - 向 Electron Main 提供本机 REST API 和 SSE 任务事件流。
-- 通过 gRPC 调用 Python Agent Runtime，并为后续受控工具服务保留 gRPC 边界。
+- 通过本机 REST API 调用 Python Agent Runtime。
+- 将 Python 返回的任务计划步骤与任务状态写入 SQLite。
 
 ## 边界
 
 - 本工程不得导入 `desktop/` 或 `agent/` 的源码。
-- 调用 Python 必须通过 `protocol/` 生成的 gRPC Client。
-- REST DTO、数据库实体和 Protobuf 消息相互分离。
+- 调用 Python 必须通过独立的 Agent HTTP Client 和 REST DTO。
+- 对外 REST DTO、Agent REST DTO 和数据库实体相互分离。
 
 ## 代码结构
 
@@ -28,7 +28,7 @@ service/impl/    状态规则、审批校验和事务
 mapper/          MyBatis-Plus Mapper 接口
 mapper/typehandler/
                  SQLite 特有的字段类型转换
-grpc/client/     Java 调用 Python Agent
+agent/           Java 调用 Python Agent 的 HTTP Client 与 DTO
 config/          Spring 配置
 exception/       业务异常和统一 REST 异常响应
 security/        本机 REST 启动令牌校验
@@ -42,7 +42,9 @@ Mapper 不判断状态转换。
 ## IDE 配置
 
 使用 IntelliJ IDEA 单独打开 `core/`，将 Project SDK 和 Maven Runner JRE 设置为
-JDK 21。Maven 会从 `../protocol/proto` 生成 Java 和 gRPC 源码。
+JDK 21。复制 `src/main/resources/application-dev-local.example.yml` 为
+`application-dev-local.yml`，设置 Java 端口、Python Agent 地址和本机开发令牌；
+真实配置文件已被 Git 忽略。启动时启用 `dev-local` Profile。
 
 当前仓库只保存 Maven Wrapper 配置。你在 IDE 中配置 Maven 后可执行：
 
