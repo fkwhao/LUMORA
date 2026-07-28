@@ -1,0 +1,167 @@
+openapi: 3.1.0
+info:
+  title: LUMORA Agent API
+  version: 1.0.0
+  description: Java Core 与本机 Python Agent 之间的 REST/JSON 人工契约。
+servers:
+  - url: http://127.0.0.1:45101
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/health:
+    get:
+      operationId: getAgentHealth
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Agent 已就绪
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "412":
+          $ref: "#/components/responses/ProtocolMismatch"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/tasks/plan:
+    post:
+      operationId: planTask
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlanTaskRequest"
+            example:
+              taskId: task-123
+              goal: 整理本地文档
+      responses:
+        "200":
+          description: 任务规划成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlanTaskResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "412":
+          $ref: "#/components/responses/ProtocolMismatch"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    ProtocolVersion:
+      name: X-Lumora-Protocol-Version
+      in: header
+      required: true
+      schema:
+        type: string
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 1
+  responses:
+    BadRequest:
+      description: 请求内容或关联 ID 无效
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: 启动令牌无效
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ProtocolMismatch:
+      description: 协议版本不兼容
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalError:
+      description: Agent 内部错误
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required: [status, service, protocolVersion]
+      properties:
+        status:
+          type: string
+          const: UP
+        service:
+          type: string
+          const: lumora-agent
+        protocolVersion:
+          type: string
+    PlanTaskRequest:
+      type: object
+      additionalProperties: false
+      required: [taskId, goal]
+      properties:
+        taskId:
+          type: string
+          minLength: 1
+        goal:
+          type: string
+          minLength: 1
+    PlanTaskResponse:
+      type: object
+      additionalProperties: false
+      required: [taskId, steps]
+      properties:
+        taskId:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlanStepResponse"
+    PlanStepResponse:
+      type: object
+      additionalProperties: false
+      required: [stepId, title, description, requiresApproval]
+      properties:
+        stepId:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        requiresApproval:
+          type: boolean
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, retryable, correlationId]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        retryable:
+          type: boolean
+        correlationId:
+          type: string

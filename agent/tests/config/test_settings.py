@@ -1,35 +1,47 @@
-import os
+import tempfile
 import unittest
-from unittest.mock import patch
+from pathlib import Path
 
 from app.config.settings import AgentSettings
 
 
 class AgentSettingsTest(unittest.TestCase):
-    def test_reads_required_runtime_environment(self) -> None:
-        environment = {
-            "LUMORA_AGENT_PORT": "45123",
-            "LUMORA_STARTUP_TOKEN": "a" * 43,
-            "LUMORA_PROTOCOL_VERSION": "1",
-        }
-
-        with patch.dict(os.environ, environment, clear=True):
-            settings = AgentSettings.from_environment()
+    def test_reads_required_yaml_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            config_path = Path(temporary_directory) / "dev-local.yml"
+            config_path.write_text(
+                f"""
+server:
+  host: 127.0.0.1
+  port: 45123
+lumora:
+  startup-token: {"a" * 43}
+  protocol-version: "1"
+""",
+                encoding="utf-8",
+            )
+            settings = AgentSettings.from_yaml(config_path)
 
         self.assertEqual(settings.port, 45123)
         self.assertEqual(settings.startup_token, "a" * 43)
         self.assertEqual(settings.protocol_version, "1")
 
-    def test_rejects_non_loopback_port_range(self) -> None:
-        environment = {
-            "LUMORA_AGENT_PORT": "70000",
-            "LUMORA_STARTUP_TOKEN": "a" * 43,
-            "LUMORA_PROTOCOL_VERSION": "1",
-        }
-
-        with patch.dict(os.environ, environment, clear=True):
+    def test_rejects_invalid_port_range(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            config_path = Path(temporary_directory) / "dev-local.yml"
+            config_path.write_text(
+                f"""
+server:
+  host: 127.0.0.1
+  port: 70000
+lumora:
+  startup-token: {"a" * 43}
+  protocol-version: "1"
+""",
+                encoding="utf-8",
+            )
             with self.assertRaises(ValueError):
-                AgentSettings.from_environment()
+                AgentSettings.from_yaml(config_path)
 
 
 if __name__ == "__main__":

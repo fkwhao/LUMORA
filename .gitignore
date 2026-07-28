@@ -21,6 +21,9 @@ logs/
 
 .env
 .env.local
+agent/config/dev-local.yml
+core/src/main/resources/application-dev-local.yml
+desktop/config/dev-local.yml
 
 integration/runtime/
 .worktrees/

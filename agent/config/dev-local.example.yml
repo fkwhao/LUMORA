@@ -1,0 +1,6 @@
+server:
+  host: 127.0.0.1
+  port: 45101
+lumora:
+  startup-token: replace-with-at-least-32-local-characters
+  protocol-version: "1"
