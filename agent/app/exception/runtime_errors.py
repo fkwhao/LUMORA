@@ -4,3 +4,7 @@ class AuthenticationError(ValueError):
 
 class ProtocolMismatchError(ValueError):
     pass
+
+
+class InvalidRequestError(ValueError):
+    pass

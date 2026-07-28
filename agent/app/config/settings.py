@@ -1,6 +1,5 @@
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -30,10 +29,19 @@ class AgentSettings(BaseModel):
         lumora = cls._required_mapping(data, "lumora", path)
 
         return cls(
-            host=server.get("host"),
-            port=server.get("port"),
-            startup_token=lumora.get("startup-token"),
-            protocol_version=lumora.get("protocol-version", "1"),
+            host=cls._required_str(server, "host", path),
+            port=cls._required_int(server, "port", path),
+            startup_token=cls._required_str(
+                lumora,
+                "startup-token",
+                path,
+            ),
+            protocol_version=cls._optional_str(
+                lumora,
+                "protocol-version",
+                "1",
+                path,
+            ),
         )
 
     @staticmethod
@@ -41,8 +49,42 @@ class AgentSettings(BaseModel):
         data: Mapping[str, object],
         key: str,
         path: Path,
-    ) -> Mapping[str, Any]:
+    ) -> Mapping[str, object]:
         section = data.get(key)
         if not isinstance(section, Mapping):
-            raise ValueError(f"本地配置缺少对象节点 {key}：{path}")
+            raise TypeError(f"本地配置缺少对象节点 {key}：{path}")
         return section
+
+    @staticmethod
+    def _required_str(
+        data: Mapping[str, object],
+        key: str,
+        path: Path,
+    ) -> str:
+        value = data.get(key)
+        if not isinstance(value, str):
+            raise TypeError(f"本地配置项 {key} 必须是字符串：{path}")
+        return value
+
+    @staticmethod
+    def _optional_str(
+        data: Mapping[str, object],
+        key: str,
+        default: str,
+        path: Path,
+    ) -> str:
+        value = data.get(key, default)
+        if not isinstance(value, str):
+            raise TypeError(f"本地配置项 {key} 必须是字符串：{path}")
+        return value
+
+    @staticmethod
+    def _required_int(
+        data: Mapping[str, object],
+        key: str,
+        path: Path,
+    ) -> int:
+        value = data.get(key)
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise TypeError(f"本地配置项 {key} 必须是整数：{path}")
+        return value

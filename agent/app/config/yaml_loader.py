@@ -18,5 +18,5 @@ def load_yaml_mapping(path: Path) -> Mapping[str, object]:
         raise ValueError(f"本地配置文件格式无效：{path}") from error
 
     if not isinstance(data, Mapping):
-        raise ValueError(f"本地配置文件根节点必须是对象：{path}")
+        raise TypeError(f"本地配置文件根节点必须是对象：{path}")
     return data

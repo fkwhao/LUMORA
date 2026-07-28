@@ -5,7 +5,6 @@ from pathlib import Path
 from app.config.settings import AgentSettings
 from app.config.yaml_loader import load_yaml_mapping
 
-
 VALID_TOKEN = "a" * 64
 
 
@@ -80,15 +79,17 @@ lumora:
 
     def test_rejects_missing_required_sections(self) -> None:
         for content in ("lumora: {}\n", "server: {}\n"):
-            with self.subTest(content=content):
-                with tempfile.TemporaryDirectory() as temporary_directory:
-                    config_path = self.write_config(
-                        Path(temporary_directory),
-                        content,
-                    )
+            with (
+                self.subTest(content=content),
+                tempfile.TemporaryDirectory() as temporary_directory,
+            ):
+                config_path = self.write_config(
+                    Path(temporary_directory),
+                    content,
+                )
 
-                    with self.assertRaises(ValueError):
-                        AgentSettings.from_yaml(config_path)
+                with self.assertRaises(TypeError):
+                    AgentSettings.from_yaml(config_path)
 
     def test_rejects_python_yaml_tags(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
