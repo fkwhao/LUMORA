@@ -8,6 +8,7 @@ import com.lumora.core.exception.TaskNotFoundException;
 import com.lumora.core.mapper.ApprovalMapper;
 import com.lumora.core.mapper.TaskMapper;
 import com.lumora.core.service.ApprovalService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,21 +16,12 @@ import java.time.Clock;
 import java.util.Objects;
 
 @Service
+@RequiredArgsConstructor
 public class ApprovalServiceImpl implements ApprovalService {
 
     private final TaskMapper taskMapper;
     private final ApprovalMapper approvalMapper;
     private final Clock clock;
-
-    public ApprovalServiceImpl(
-            TaskMapper taskMapper,
-            ApprovalMapper approvalMapper,
-            Clock clock
-    ) {
-        this.taskMapper = taskMapper;
-        this.approvalMapper = approvalMapper;
-        this.clock = clock;
-    }
 
     @Override
     @Transactional

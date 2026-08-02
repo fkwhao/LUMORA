@@ -1,5 +1,7 @@
 .idea/
 .vscode/
+.DS_Store
+Thumbs.db
 
 node_modules/
 dist/
@@ -17,13 +19,29 @@ generated/
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
 logs/
+*.log
 
 .env
-.env.local
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
 agent/config/dev-local.yml
+agent/config/model-local.yml
 core/src/main/resources/application-dev-local.yml
 desktop/config/dev-local.yml
 
 integration/runtime/
 .worktrees/
+
+# 本机产品草稿和历史实施记录不属于公开源码仓库。
+artwork/
+generalDesign/
+docs/superpowers/

@@ -66,13 +66,14 @@ class MyBatisPlusMapperTest {
                 """);
         jdbcTemplate.execute("""
                 CREATE TABLE task_plan_step (
+                    plan_step_id TEXT PRIMARY KEY,
                     task_id TEXT NOT NULL,
                     step_index INTEGER NOT NULL,
                     step_id TEXT NOT NULL,
                     title TEXT NOT NULL,
                     description TEXT NOT NULL,
                     requires_approval INTEGER NOT NULL DEFAULT 0,
-                    PRIMARY KEY (task_id, step_index),
+                    UNIQUE (task_id, step_index),
                     UNIQUE (task_id, step_id),
                     FOREIGN KEY (task_id) REFERENCES agent_task(task_id)
                 )
@@ -182,6 +183,12 @@ class MyBatisPlusMapperTest {
 
         assertThat(taskPlanStepMapper.insert(secondStep)).isEqualTo(1);
         assertThat(taskPlanStepMapper.insert(firstStep)).isEqualTo(1);
+        assertThat(secondStep.getPlanStepId()).isNotBlank();
+        assertThat(firstStep.getPlanStepId()).isNotBlank();
+        assertThat(
+                taskPlanStepMapper.selectById(firstStep.getPlanStepId())
+                        .getStepId()
+        ).isEqualTo("scan");
 
         assertThat(taskPlanStepMapper.selectList(
                 Wrappers.<TaskPlanStep>lambdaQuery()

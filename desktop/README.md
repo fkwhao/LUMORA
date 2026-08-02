@@ -6,13 +6,14 @@ Electron、React 和 TypeScript 桌面应用。
 
 - 管理桌面窗口和应用生命周期。
 - 通过 Preload 白名单 API 向 Renderer 暴露任务能力。
-- 展示 Python 生成并由 Java 持久化的真实任务计划、进度、审批和结果。
+- 展示任务计划、对话流、推理内容、审批和执行结果。
+- 管理本地任务归档、模型连接与应用外观偏好。
 
 ## 边界
 
 - Renderer 不得直接访问 Node.js、REST/SSE、后端端口或启动令牌。
 - 本工程不得导入 `core/` 或 `agent/` 的源码。
-- Renderer 与 Main 的能力通过 `shared/task-contract.ts` 和 Preload 白名单定义。
+- Renderer 与 Main 的能力通过 `shared/` 下的领域契约和 Preload 白名单定义。
 
 ## 开发
 
@@ -23,8 +24,8 @@ pnpm start
 
 复制 `config/dev-local.example.yml` 为 `config/dev-local.yml`，配置 Java 地址和
 本机开发令牌；真实配置文件已被 Git 忽略。开发入口使用 `RestTaskGateway`
-和 SSE 连接 Java，因此创建任务前需要先启动 Java。`DemoTaskGateway` 只保留给
-独立界面演示和测试使用。Renderer 和 Preload API 保持不变。
+和 SSE 连接 Java，因此创建任务前需要先启动 Java；完整规划和模型对话还需要启动
+Python Agent。Renderer 不直接接触后端 URL、启动令牌或模型 API Key。
 
 开发阶段由 IDE 分别启动 Python Agent、Java Core 和 Electron。正式打包后，
 Electron Main 再负责启动、监控和关闭随应用分发的 Java 与 Python 运行时。

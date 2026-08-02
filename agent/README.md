@@ -5,7 +5,8 @@ Python 3.12 Agent 推理与编排运行时。
 ## 职责
 
 - 任务规划和 Agent 状态图。
-- 模型适配、路由和中断恢复。
+- OpenAI 兼容模型适配、对话流式响应和模型设置。
+- 后续 Agent Harness、动态编排和中断恢复。
 - 文档理解与结果验证能力边界。
 - 通过 REST 接收 Java 的规划请求并返回结构化计划步骤。
 
@@ -32,6 +33,8 @@ app/dto/               REST 请求与响应模型
 app/security/          本机启动令牌校验
 app/service/           Agent 规划与编排业务
 app/model/             Pydantic 数据模型
+app/provider/          模型供应商适配与流式事件转换
+app/prompt/            分层 System Prompt、动态上下文和模板装配
 app/config/            YAML 运行配置
 app/exception/         运行时异常
 app/main.py            FastAPI 与 Uvicorn 生命周期
@@ -59,7 +62,9 @@ python -m mypy app
 ## 启动
 
 复制 `config/dev-local.example.yml` 为 `config/dev-local.yml`，配置监听地址、端口、
-协议版本和至少 32 个字符的本机开发令牌。真实配置文件已被 Git 忽略。
+协议版本和至少 32 个字符的本机开发令牌。模型配置由 Java Local Core 管理：
+API Key 使用 Windows DPAPI 加密后写入 SQLite。Java 只在调用模型时通过已认证的
+localhost 请求临时传给 Python，Python 不保存 API Key。
 
 启动命令：
 

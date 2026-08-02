@@ -4,19 +4,17 @@ import com.lumora.core.common.constant.ApiPathConstants;
 import com.lumora.core.common.constant.CoreMetadataConstants;
 import com.lumora.core.config.CoreProperties;
 import com.lumora.core.dto.response.CoreHealthResponse;
+import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@RequiredArgsConstructor
 @RequestMapping(ApiPathConstants.HEALTH)
 public class CoreHealthController {
 
     private final CoreProperties properties;
-
-    public CoreHealthController(CoreProperties properties) {
-        this.properties = properties;
-    }
 
     @GetMapping
     public CoreHealthResponse health() {

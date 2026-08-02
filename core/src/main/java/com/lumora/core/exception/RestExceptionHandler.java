@@ -3,6 +3,7 @@ package com.lumora.core.exception;
 import com.lumora.core.agent.exception.AgentRuntimeException;
 import com.lumora.core.common.constant.ErrorCodeConstants;
 import com.lumora.core.dto.response.ErrorResponse;
+import com.lumora.core.security.secret.SecretProtectionException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -72,6 +73,18 @@ public class RestExceptionHandler {
                 HttpStatus.BAD_GATEWAY,
                 ErrorCodeConstants.AGENT_UNAVAILABLE,
                 error.getMessage()
+        );
+    }
+
+    @ExceptionHandler(SecretProtectionException.class)
+    public ResponseEntity<ErrorResponse> handleSecretProtectionFailure(
+            SecretProtectionException error
+    ) {
+        // 不向前端暴露 DPAPI 原生错误、密文或解密上下文。
+        return response(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                ErrorCodeConstants.SECRET_PROTECTION_UNAVAILABLE,
+                "本地敏感配置暂时不可用，请重新配置 API Key"
         );
     }
 

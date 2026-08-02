@@ -2,7 +2,16 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
-import "./styles.css";
+import {
+  applyAppearancePreferences,
+  loadAppearancePreferences,
+  watchSystemTheme,
+} from "./features/appearance/appearance-preferences";
+import "./styles";
+
+// 在 React 首次绘制前应用本地外观，避免启动时先闪出默认浅色主题。
+applyAppearancePreferences(loadAppearancePreferences());
+watchSystemTheme(loadAppearancePreferences);
 
 const root = document.getElementById("root");
 if (!root) {
@@ -14,4 +23,3 @@ createRoot(root).render(
     <App />
   </StrictMode>,
 );
-

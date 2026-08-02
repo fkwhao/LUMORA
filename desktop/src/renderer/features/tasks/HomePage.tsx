@@ -1,175 +1,240 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
-  ArrowRight,
-  Bot,
+  ArrowUp,
   File,
+  Folder,
+  FolderOpen,
   Globe2,
-  LayoutGrid,
+  GitBranch,
+  Laptop,
   MoreHorizontal,
+  Paperclip,
   Sparkles,
+  X,
 } from "lucide-react";
 import { useStore } from "zustand";
 
+import type { ProjectDirectory } from "../../../shared/window-contract";
+import { submitFormOnEnter } from "../../utils/submit-on-enter";
+import {
+  loadActiveProject,
+  saveActiveProject,
+} from "./project-context-storage";
 import type { TaskStore } from "./task-store";
 
 interface HomePageProps {
   store: TaskStore;
+  notify(message: string, tone?: "info" | "success"): void;
 }
 
-const quickActions = [
+const contextActions = [
   { icon: File, label: "文件" },
+  { icon: Folder, label: "文件夹" },
   { icon: Globe2, label: "网页" },
-  { icon: LayoutGrid, label: "应用" },
-  { icon: MoreHorizontal, label: "更多" },
+  { icon: Laptop, label: "应用" },
 ];
 
-const recentTasks = [
-  { kind: "学术研究", title: "毕业答辩材料准备", meta: "35% · 2 小时前" },
-  { kind: "文件整理", title: "下载文件夹整理", meta: "已完成 · 昨天" },
-  { kind: "市场分析", title: "市场趋势分析", meta: "等待中 · 7 月 20 日" },
-];
-
-export function HomePage({ store }: HomePageProps) {
+export function HomePage({ store, notify }: HomePageProps) {
   const [goal, setGoal] = useState("");
+  const [contexts, setContexts] = useState<string[]>([]);
+  const [project, setProject] = useState<ProjectDirectory | undefined>(
+    loadActiveProject,
+  );
+  const fileInput = useRef<HTMLInputElement>(null);
   const isCreating = useStore(store, (state) => state.isCreating);
   const error = useStore(store, (state) => state.error);
 
   async function submitGoal(event: React.FormEvent) {
     event.preventDefault();
     try {
-      await store.getState().createTask(goal);
+      await store.getState().createTask(goal, project?.path);
     } catch {
-      // Store 已将用户可理解的错误写入状态，表单只负责阻止未处理拒绝。
+      // Store 已经提供面向用户的错误信息，表单无需重复处理异常。
     }
+  }
+
+  async function chooseProject() {
+    const selected =
+      await window.lumora?.window?.selectProjectDirectory?.();
+    if (!selected) {
+      return;
+    }
+    setProject(selected);
+    saveActiveProject(selected);
+    notify(`已选择项目：${selected.name}`, "success");
+  }
+
+  function clearProject() {
+    setProject(undefined);
+    saveActiveProject(undefined);
+    notify("已切换为无项目对话");
+  }
+
+  function chooseLocalContext(folder: boolean) {
+    const input = fileInput.current;
+    if (!input) {
+      return;
+    }
+    folder
+      ? input.setAttribute("webkitdirectory", "")
+      : input.removeAttribute("webkitdirectory");
+    input.click();
+  }
+
+  function addContext(label: string) {
+    setContexts((items) =>
+      items.includes(label) ? items : [...items, label],
+    );
+    notify(`已添加${label}上下文`, "success");
   }
 
   return (
     <main className="home-layout">
-      <section className="home-main">
-        <header className="welcome">
-          <p>早上好，Ada</p>
-          <h1>今天，想完成什么？</h1>
+      <section className="home-content">
+        <header className="home-hero">
+          <span className="home-hero-mark" aria-hidden="true">
+            <Sparkles size={25} />
+          </span>
+          <h1>
+            今天想在 <strong>LUMORA</strong> 中完成什么？
+          </h1>
+          <p>选择一个项目开始工作，或直接发起普通对话。</p>
         </header>
 
-        <form className="goal-composer" onSubmit={submitGoal}>
-          <label htmlFor="task-goal">任务目标</label>
-          <textarea
-            id="task-goal"
-            value={goal}
-            onChange={(event) => setGoal(event.target.value)}
-            placeholder="告诉 LUMORA 你的目标..."
-            rows={4}
-          />
-          <div className="composer-footer">
-            <div className="quick-actions">
-              {quickActions.map(({ icon: Icon, label }) => (
-                <button type="button" key={label}>
-                  <Icon size={17} />
-                  {label}
-                </button>
-              ))}
-            </div>
+        <div className="home-composer-stack">
+          <div className="project-context-bar">
             <button
-              className="submit-task"
-              type="submit"
-              aria-label="开始任务"
-              disabled={isCreating}
+              type="button"
+              className="project-picker"
+              title={project?.path ?? "选择项目所在文件夹"}
+              onClick={() => void chooseProject()}
             >
-              <ArrowRight size={20} />
+              <FolderOpen size={15} />
+              <span>{project?.name ?? "选择项目文件夹"}</span>
             </button>
+            <span className="project-mode">
+              <Laptop size={14} />
+              本地
+            </span>
+            <span className="project-branch">
+              <GitBranch size={14} />
+              {project?.gitBranch ?? "未关联 Git"}
+            </span>
+            {project && (
+              <button
+                type="button"
+                className="clear-project"
+                aria-label="取消项目选择"
+                title="不关联项目"
+                onClick={clearProject}
+              >
+                <X size={14} />
+              </button>
+            )}
           </div>
-        </form>
+
+          <form className="goal-composer" onSubmit={submitGoal}>
+            <input
+              ref={fileInput}
+              className="visually-hidden"
+              type="file"
+              multiple
+              onChange={(event) => {
+                const names = [...(event.target.files ?? [])]
+                  .slice(0, 4)
+                  .map((file) => file.name);
+                if (names.length > 0) {
+                  setContexts((items) => [...new Set([...items, ...names])]);
+                  notify(`已选择 ${names.length} 个本地资源`, "success");
+                }
+                event.target.value = "";
+              }}
+            />
+            <textarea
+              id="task-goal"
+              aria-label="告诉 LUMORA 你的目标"
+              value={goal}
+              onChange={(event) => setGoal(event.target.value)}
+              onKeyDown={submitFormOnEnter}
+              placeholder="描述要完成的任务…"
+              rows={4}
+            />
+            <div className="composer-footer">
+              <div className="context-actions">
+                <button
+                  type="button"
+                  aria-label="添加上下文"
+                  onClick={() => chooseLocalContext(false)}
+                >
+                  <Paperclip size={17} />
+                </button>
+                {contextActions.map(({ icon: Icon, label }) => (
+                  <button
+                    type="button"
+                    key={label}
+                    onClick={() => {
+                      if (label === "文件") {
+                        chooseLocalContext(false);
+                      } else if (label === "文件夹") {
+                        chooseLocalContext(true);
+                      } else {
+                        addContext(
+                          label === "网页"
+                            ? "网页链接（待配置）"
+                            : "当前应用（待授权）",
+                        );
+                      }
+                    }}
+                  >
+                    <Icon size={16} />
+                    {label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  aria-label="更多上下文"
+                  onClick={() => notify("更多上下文类型将在技能接入后显示")}
+                >
+                  <MoreHorizontal size={17} />
+                </button>
+              </div>
+              <button
+                className="submit-task"
+                type="submit"
+                aria-label="开始任务"
+                disabled={!goal.trim() || isCreating}
+              >
+                <ArrowUp size={19} strokeWidth={2.2} />
+              </button>
+            </div>
+            {contexts.length > 0 && (
+              <div className="selected-contexts">
+                {contexts.map((context) => (
+                  <span key={context}>
+                    {context}
+                    <button
+                      type="button"
+                      aria-label={`移除${context}`}
+                      onClick={() =>
+                        setContexts((items) =>
+                          items.filter((item) => item !== context),
+                        )
+                      }
+                    >
+                      <X size={11} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </form>
+        </div>
         {error && <p className="form-error">{error}</p>}
 
-        <div className="ready-note">
-          <Sparkles size={16} />
-          你的本地 AI 助手已准备就绪
-        </div>
-
-        <section className="active-task">
-          <div className="task-visual" aria-hidden="true">
-            <div className="visual-sun" />
-            <div className="visual-mountain visual-mountain-back" />
-            <div className="visual-mountain visual-mountain-front" />
-            <div className="visual-label">JAPAN / 2026</div>
-          </div>
-          <div className="active-task-copy">
-            <span>继续进行 · 旅行规划</span>
-            <h2>整理日本旅行资料</h2>
-            <p>Browser Agent 正在收集交通与景点信息</p>
-            <strong>60%</strong>
-            <div className="progress-track">
-              <span style={{ width: "60%" }} />
-            </div>
-            <small>12 个文件 · 3 个 Agent</small>
-            <button type="button">
-              继续处理
-              <ArrowRight size={16} />
-            </button>
-          </div>
-        </section>
-
-        <section className="recent-section">
-          <div className="section-heading">
-            <h2>最近任务</h2>
-            <button type="button">
-              查看全部
-              <ArrowRight size={15} />
-            </button>
-          </div>
-          <div className="recent-grid">
-            {recentTasks.map((task, index) => (
-              <article className={`recent-item accent-${index + 1}`} key={task.title}>
-                <div className="recent-pattern" />
-                <small>{task.kind}</small>
-                <h3>{task.title}</h3>
-                <p>{task.meta}</p>
-                <ArrowRight size={17} />
-              </article>
-            ))}
-          </div>
-        </section>
+        <p className="home-privacy-note">
+          项目路径和会话记录仅保存在本机；敏感操作仍会请求确认。
+        </p>
       </section>
-
-      <aside className="home-rail">
-        <div className="date-label">今日 · 7月24日</div>
-        <strong className="task-count">03</strong>
-        <p>项任务正在推进</p>
-
-        <section className="rail-section">
-          <h2>最近动态</h2>
-          <ol className="activity-list">
-            <li>
-              <time>10:45</time>
-              更新 日本交通攻略.pdf
-            </li>
-            <li>
-              <time>10:30</time>
-              Browser Agent 收集 4 个网页
-            </li>
-            <li>
-              <time>09:58</time>
-              创建工作空间
-            </li>
-          </ol>
-        </section>
-
-        <section className="rail-section">
-          <h2>在线 Agent</h2>
-          {["Browser Agent", "File Agent", "Writer Agent"].map((agent) => (
-            <div className="agent-row" key={agent}>
-              <span>
-                <Bot size={17} />
-              </span>
-              <div>
-                <strong>{agent}</strong>
-                <small>在线</small>
-              </div>
-            </div>
-          ))}
-        </section>
-      </aside>
     </main>
   );
 }
-

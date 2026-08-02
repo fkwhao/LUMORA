@@ -60,6 +60,21 @@ class TaskControllerTest {
     }
 
     @Test
+    void listsPersistedTasksForConversationHistory() throws Exception {
+        TaskService service = org.mockito.Mockito.mock(TaskService.class);
+        when(service.listTasks()).thenReturn(List.of(
+                taskDetails().getTask()
+        ));
+        MockMvc mockMvc = mockMvc(service);
+
+        mockMvc.perform(get("/api/v1/tasks"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].taskId").value(TASK_ID))
+                .andExpect(jsonPath("$[0].goal").value("整理下载目录"))
+                .andExpect(jsonPath("$[0].status").value("PLANNING"));
+    }
+
+    @Test
     void rejectsABlankGoal() throws Exception {
         MockMvc mockMvc = mockMvc(
                 org.mockito.Mockito.mock(TaskService.class)

@@ -1,4 +1,4 @@
-import { FolderInput } from "lucide-react";
+import { ShieldAlert } from "lucide-react";
 import { useStore } from "zustand";
 
 import type { TaskStore } from "./task-store";
@@ -16,9 +16,10 @@ export function ApprovalDock({ store }: ApprovalDockProps) {
 
   return (
     <section className="approval-dock" aria-label="权限与提醒">
-      <h2>权限与提醒</h2>
       <div className="approval-content">
-        <FolderInput size={19} />
+        <span className="approval-icon">
+          <ShieldAlert size={18} />
+        </span>
         <div>
           <strong>{approval.action}</strong>
           <p>{approval.impactSummary}</p>
@@ -27,23 +28,22 @@ export function ApprovalDock({ store }: ApprovalDockProps) {
             {approval.reversible ? " 可撤销" : " 不可撤销"}
           </small>
         </div>
-      </div>
-      <div className="approval-actions">
-        <button
-          type="button"
-          onClick={() => void store.getState().decideApproval("REJECT")}
-        >
-          拒绝
-        </button>
-        <button
-          className="allow"
-          type="button"
-          onClick={() => void store.getState().decideApproval("ALLOW_ONCE")}
-        >
-          仅允许本次
-        </button>
+        <div className="approval-actions">
+          <button
+            type="button"
+            onClick={() => void store.getState().decideApproval("REJECT")}
+          >
+            拒绝
+          </button>
+          <button
+            className="allow"
+            type="button"
+            onClick={() => void store.getState().decideApproval("ALLOW_ONCE")}
+          >
+            仅允许本次
+          </button>
+        </div>
       </div>
     </section>
   );
 }
-

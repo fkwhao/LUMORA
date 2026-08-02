@@ -10,6 +10,8 @@ Java 21、Spring Boot、MyBatis-Plus 和 SQLite 本地核心。
 - 向 Electron Main 提供本机 REST API 和 SSE 任务事件流。
 - 通过本机 REST API 调用 Python Agent Runtime。
 - 将 Python 返回的任务计划步骤与任务状态写入 SQLite。
+- 持久化会话消息，并转发模型流式响应。
+- 使用 Windows DPAPI 加密 API Key，并通过 MyBatis-Plus 将密文与模型配置统一保存到 SQLite。
 
 ## 边界
 
@@ -29,6 +31,7 @@ mapper/          MyBatis-Plus Mapper 接口
 mapper/typehandler/
                  SQLite 特有的字段类型转换
 agent/           Java 调用 Python Agent 的 HTTP Client 与 DTO
+model/           模型与对话领域对象
 config/          Spring 配置
 exception/       业务异常和统一 REST 异常响应
 security/        本机 REST 启动令牌校验

@@ -14,19 +14,32 @@ from app.controller.http.agent_controller import (
     AgentHttpError,
 )
 from app.dto.response.error_response import ErrorResponse
+from app.prompt.prompt_builder import PromptBuilder
+from app.provider.openai_compatible_provider import OpenAICompatibleProvider
+from app.service.chat_service import ChatService
 from app.service.planner_service import PlannerService
 
 
 def default_dev_config_path() -> Path:
-    return Path("config/dev-local.yml")
+    # 配置路径固定以 Agent 工程根目录为基准，避免受 IDE 工作目录影响。
+    return Path(__file__).resolve().parent.parent / "config" / "dev-local.yml"
 
 
 def create_app(
     settings: AgentSettings,
     planner_service: PlannerService,
+    chat_service: ChatService | None = None,
 ) -> FastAPI:
     app = FastAPI(title=SERVICE_TITLE, version=SERVICE_VERSION)
-    controller = AgentHttpController(settings, planner_service)
+    resolved_chat_service = chat_service or ChatService(
+        OpenAICompatibleProvider(),
+        PromptBuilder(),
+    )
+    controller = AgentHttpController(
+        settings,
+        planner_service,
+        resolved_chat_service,
+    )
     app.include_router(controller.router)
 
     @app.exception_handler(AgentHttpError)

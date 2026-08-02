@@ -14,15 +14,19 @@ import com.lumora.core.mapper.TaskMapper;
 import com.lumora.core.mapper.TaskPlanStepMapper;
 import com.lumora.core.service.TaskService;
 import com.lumora.core.task.model.TaskDetails;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
-import java.util.Objects;
 
+/**
+ * 任务领域服务，负责任务创建、计划落库与状态流转。
+ */
 @Service
+@RequiredArgsConstructor
 public class TaskServiceImpl implements TaskService {
 
     private final TaskMapper taskMapper;
@@ -31,56 +35,56 @@ public class TaskServiceImpl implements TaskService {
     private final Clock clock;
     private final TaskIdGenerator taskIdGenerator;
 
-    public TaskServiceImpl(
-            TaskMapper taskMapper,
-            TaskPlanStepMapper taskPlanStepMapper,
-            AgentRuntimeClient agentRuntimeClient,
-            Clock clock,
-            TaskIdGenerator taskIdGenerator
-    ) {
-        this.taskMapper = taskMapper;
-        this.taskPlanStepMapper = taskPlanStepMapper;
-        this.agentRuntimeClient = agentRuntimeClient;
-        this.clock = clock;
-        this.taskIdGenerator = taskIdGenerator;
-    }
-
     @Override
     @Transactional
     public TaskDetails createTask(String goal, String correlationId) {
-        String normalizedGoal = Objects.requireNonNull(goal, "goal").trim();
-        if (normalizedGoal.isEmpty()) {
-            throw new IllegalArgumentException("任务目标不能为空");
-        }
-        if (correlationId == null || correlationId.isBlank()) {
-            throw new IllegalArgumentException("关联 ID 不能为空");
-        }
-
-        Instant now = clock.instant();
+        // 1. 校验请求并提前生成任务 ID，供 Java 与 Python 全链路关联。
+        String normalizedGoal = requireText(goal, "任务目标");
+        String normalizedCorrelationId = requireText(
+                correlationId,
+                "关联 ID"
+        );
         String taskId = taskIdGenerator.generate();
+
+        // 2. 请求 Agent 生成计划；空计划不允许形成无法执行的任务。
         List<AgentPlanStep> agentPlan = agentRuntimeClient.planTask(
                 taskId,
                 normalizedGoal,
-                correlationId
+                normalizedCorrelationId
         );
         if (agentPlan.isEmpty()) {
             throw new AgentRuntimeException("Python Agent 返回了空任务计划");
         }
 
-        AgentTask task = new AgentTask(
+        // 3. 任务和计划步骤在同一事务内落库。
+        AgentTask task = newPlanningTask(
                 taskId,
                 normalizedGoal,
+                agentPlan.getFirst(),
+                clock.instant()
+        );
+        taskMapper.insert(task);
+        List<TaskPlanStep> planSteps = persistPlan(taskId, agentPlan);
+        return new TaskDetails(task, planSteps);
+    }
+
+    private AgentTask newPlanningTask(
+            String taskId,
+            String goal,
+            AgentPlanStep firstStep,
+            Instant now
+    ) {
+        return new AgentTask(
+                taskId,
+                goal,
                 TaskStatus.PLANNING,
                 0L,
-                agentPlan.getFirst().getTitle(),
+                firstStep.getTitle(),
                 "",
                 "",
                 now,
                 now
         );
-        taskMapper.insert(task);
-        List<TaskPlanStep> planSteps = persistPlan(taskId, agentPlan);
-        return new TaskDetails(task, planSteps);
     }
 
     @Override
@@ -97,6 +101,15 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     @Transactional(readOnly = true)
+    public List<AgentTask> listTasks() {
+        return taskMapper.selectList(
+                Wrappers.<AgentTask>lambdaQuery()
+                        .orderByDesc(AgentTask::getUpdatedAt)
+        );
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public AgentTask getTask(String taskId) {
         if (taskId == null || taskId.isBlank()) {
             throw new IllegalArgumentException("任务 ID 不能为空");
@@ -106,6 +119,14 @@ public class TaskServiceImpl implements TaskService {
             throw new TaskNotFoundException(taskId);
         }
         return task;
+    }
+
+    @Override
+    @Transactional
+    public void touchTask(String taskId) {
+        AgentTask task = getTask(taskId);
+        task.setUpdatedAt(clock.instant());
+        taskMapper.updateById(task);
     }
 
     @Override
@@ -166,29 +187,30 @@ public class TaskServiceImpl implements TaskService {
             TaskStatus currentStatus,
             TaskStatus nextStatus
     ) {
-        if (currentStatus == TaskStatus.CREATED) {
-            return nextStatus == TaskStatus.PLANNING
+        return switch (currentStatus) {
+            case CREATED -> nextStatus == TaskStatus.PLANNING
                     || nextStatus == TaskStatus.INTERRUPTED
                     || nextStatus == TaskStatus.FAILED;
-        }
-        if (currentStatus == TaskStatus.PLANNING) {
-            return nextStatus == TaskStatus.RUNNING
+            case PLANNING -> nextStatus == TaskStatus.RUNNING
                     || nextStatus == TaskStatus.INTERRUPTED
                     || nextStatus == TaskStatus.FAILED;
-        }
-        if (currentStatus == TaskStatus.RUNNING) {
-            return nextStatus == TaskStatus.WAITING_APPROVAL
+            case RUNNING -> nextStatus == TaskStatus.WAITING_APPROVAL
                     || nextStatus == TaskStatus.COMPLETED
                     || nextStatus == TaskStatus.INTERRUPTED
                     || nextStatus == TaskStatus.FAILED;
-        }
-        if (currentStatus == TaskStatus.WAITING_APPROVAL) {
-            return nextStatus == TaskStatus.RUNNING
+            case WAITING_APPROVAL -> nextStatus == TaskStatus.RUNNING
                     || nextStatus == TaskStatus.COMPLETED
                     || nextStatus == TaskStatus.REJECTED
                     || nextStatus == TaskStatus.INTERRUPTED
                     || nextStatus == TaskStatus.FAILED;
+            default -> false;
+        };
+    }
+
+    private String requireText(String value, String label) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(label + "不能为空");
         }
-        return false;
+        return value.trim();
     }
 }

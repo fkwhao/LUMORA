@@ -1,6 +1,7 @@
 package com.lumora.core.service;
 
 import com.lumora.core.dto.response.TaskResponse;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -11,16 +12,19 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 @Service
+@RequiredArgsConstructor
 public class TaskEventService {
 
     private final TaskService taskService;
     private final Map<String, List<SseEmitter>> subscribers =
             new ConcurrentHashMap<>();
 
-    public TaskEventService(TaskService taskService) {
-        this.taskService = taskService;
-    }
-
+    /**
+     * 订阅指定任务的状态事件，并在连接结束时自动清理订阅关系。
+     *
+     * @param taskId 任务 ID
+     * @return 永不主动超时的 SSE 发送器
+     */
     public SseEmitter subscribe(String taskId) {
         taskService.getTask(taskId);
         SseEmitter emitter = new SseEmitter(0L);
@@ -36,6 +40,9 @@ public class TaskEventService {
 
     /**
      * Service 完成状态变更后调用，Controller 不直接管理订阅者生命周期。
+     *
+     * @param taskId 任务 ID
+     * @param event 最新任务快照
      */
     public void publish(String taskId, TaskResponse event) {
         List<SseEmitter> emitters = subscribers.getOrDefault(

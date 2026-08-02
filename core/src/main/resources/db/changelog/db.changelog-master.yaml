@@ -19,3 +19,48 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 003-task-plan-step-primary-key
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V3__task_plan_step_primary_key.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false
+  - changeSet:
+      id: 004-conversation-message
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V4__conversation_message.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false
+  - changeSet:
+      id: 005-conversation-reasoning
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V5__conversation_reasoning.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false
+  - changeSet:
+      id: 006-model-configuration
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V6__model_configuration.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false
+  - changeSet:
+      id: 007-conversation-message-duration
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V7__conversation_message_duration.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

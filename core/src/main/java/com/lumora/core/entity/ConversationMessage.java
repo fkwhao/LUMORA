@@ -1,0 +1,197 @@
+package com.lumora.core.entity;
+
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import com.lumora.core.mapper.typehandler.SqliteInstantTypeHandler;
+
+import java.time.Instant;
+
+@TableName(value = "conversation_message", autoResultMap = true)
+public class ConversationMessage {
+
+    @TableId(value = "message_id", type = IdType.INPUT)
+    private String messageId;
+    @TableField("conversation_id")
+    private String conversationId;
+    @TableField("sequence")
+    private int sequence;
+    @TableField("role")
+    private ChatMessageRole role;
+    @TableField("content")
+    private String content;
+    @TableField("reasoning_content")
+    private String reasoningContent;
+    @TableField("model")
+    private String model;
+    @TableField("prompt_tokens")
+    private int promptTokens;
+    @TableField("completion_tokens")
+    private int completionTokens;
+    @TableField("total_tokens")
+    private int totalTokens;
+    @TableField("duration_ms")
+    private long durationMs;
+    @TableField(
+            value = "created_at",
+            typeHandler = SqliteInstantTypeHandler.class
+    )
+    private Instant createdAt;
+
+    public ConversationMessage() {
+    }
+
+    public ConversationMessage(
+            String messageId,
+            String conversationId,
+            int sequence,
+            ChatMessageRole role,
+            String content,
+            String reasoningContent,
+            String model,
+            int promptTokens,
+            int completionTokens,
+            int totalTokens,
+            Instant createdAt
+    ) {
+        this(
+                messageId,
+                conversationId,
+                sequence,
+                role,
+                content,
+                reasoningContent,
+                model,
+                promptTokens,
+                completionTokens,
+                totalTokens,
+                0L,
+                createdAt
+        );
+    }
+
+    public ConversationMessage(
+            String messageId,
+            String conversationId,
+            int sequence,
+            ChatMessageRole role,
+            String content,
+            String reasoningContent,
+            String model,
+            int promptTokens,
+            int completionTokens,
+            int totalTokens,
+            long durationMs,
+            Instant createdAt
+    ) {
+        this.messageId = messageId;
+        this.conversationId = conversationId;
+        this.sequence = sequence;
+        this.role = role;
+        this.content = content;
+        this.reasoningContent = reasoningContent;
+        this.model = model;
+        this.promptTokens = promptTokens;
+        this.completionTokens = completionTokens;
+        this.totalTokens = totalTokens;
+        this.durationMs = durationMs;
+        this.createdAt = createdAt;
+    }
+
+    public String getMessageId() {
+        return messageId;
+    }
+
+    public void setMessageId(String messageId) {
+        this.messageId = messageId;
+    }
+
+    public String getConversationId() {
+        return conversationId;
+    }
+
+    public void setConversationId(String conversationId) {
+        this.conversationId = conversationId;
+    }
+
+    public int getSequence() {
+        return sequence;
+    }
+
+    public void setSequence(int sequence) {
+        this.sequence = sequence;
+    }
+
+    public ChatMessageRole getRole() {
+        return role;
+    }
+
+    public void setRole(ChatMessageRole role) {
+        this.role = role;
+    }
+
+    public String getContent() {
+        return content;
+    }
+
+    public void setContent(String content) {
+        this.content = content;
+    }
+
+    public String getReasoningContent() {
+        return reasoningContent;
+    }
+
+    public void setReasoningContent(String reasoningContent) {
+        this.reasoningContent = reasoningContent;
+    }
+
+    public String getModel() {
+        return model;
+    }
+
+    public void setModel(String model) {
+        this.model = model;
+    }
+
+    public int getPromptTokens() {
+        return promptTokens;
+    }
+
+    public void setPromptTokens(int promptTokens) {
+        this.promptTokens = promptTokens;
+    }
+
+    public int getCompletionTokens() {
+        return completionTokens;
+    }
+
+    public void setCompletionTokens(int completionTokens) {
+        this.completionTokens = completionTokens;
+    }
+
+    public int getTotalTokens() {
+        return totalTokens;
+    }
+
+    public void setTotalTokens(int totalTokens) {
+        this.totalTokens = totalTokens;
+    }
+
+    public long getDurationMs() {
+        return durationMs;
+    }
+
+    public void setDurationMs(long durationMs) {
+        this.durationMs = durationMs;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(Instant createdAt) {
+        this.createdAt = createdAt;
+    }
+}

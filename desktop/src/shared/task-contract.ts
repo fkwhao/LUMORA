@@ -44,8 +44,17 @@ export interface TaskSnapshot {
   activeStep: string;
   resultSummary: string;
   planSteps: TaskPlanStep[];
+  createdAt?: string;
+  updatedAt?: string;
   approval?: ApprovalRequest;
   errorMessage?: string;
+}
+
+export interface TaskSummary {
+  taskId: string;
+  goal: string;
+  status: TaskStatus;
+  updatedAt?: string;
 }
 
 export interface TaskEvent {
@@ -68,6 +77,7 @@ export interface ApprovalDecisionInput {
 // 这是 Renderer 能看到的完整能力面，不能加入通用 invoke 或任意 channel。
 export interface LumoraTaskApi {
   create(goal: string): Promise<TaskSnapshot>;
+  list(): Promise<TaskSummary[]>;
   get(taskId: string): Promise<TaskSnapshot>;
   subscribe(
     taskId: string,
@@ -78,6 +88,8 @@ export interface LumoraTaskApi {
 
 export interface LumoraApi {
   tasks: LumoraTaskApi;
+  model: LumoraModelApi;
+  window: LumoraWindowApi;
 }
 
 declare global {
@@ -85,3 +97,5 @@ declare global {
     lumora: LumoraApi;
   }
 }
+import type { LumoraModelApi } from "./model-contract";
+import type { LumoraWindowApi } from "./window-contract";

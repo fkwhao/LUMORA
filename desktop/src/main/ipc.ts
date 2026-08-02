@@ -10,6 +10,7 @@ import {
 
 const channels = {
   create: "tasks:create",
+  list: "tasks:list",
   get: "tasks:get",
   decideApproval: "tasks:decide-approval",
   subscribe: "tasks:subscribe",
@@ -23,6 +24,7 @@ export function registerTaskIpc(gateway: TaskGateway): () => void {
   ipcMain.handle(channels.create, (_event, goal: unknown) =>
     gateway.create(validateGoal(goal)),
   );
+  ipcMain.handle(channels.list, () => gateway.list());
   ipcMain.handle(channels.get, (_event, taskId: unknown) =>
     gateway.get(validateTaskId(taskId)),
   );
@@ -63,6 +65,7 @@ export function registerTaskIpc(gateway: TaskGateway): () => void {
 
   return () => {
     ipcMain.removeHandler(channels.create);
+    ipcMain.removeHandler(channels.list);
     ipcMain.removeHandler(channels.get);
     ipcMain.removeHandler(channels.decideApproval);
     ipcMain.removeAllListeners(channels.subscribe);

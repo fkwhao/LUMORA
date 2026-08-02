@@ -1,8 +1,10 @@
 openapi: 3.1.0
 info:
   title: LUMORA Agent API
-  version: 1.0.0
-  description: Java Core 与本机 Python Agent 之间的 REST/JSON 人工契约。
+  version: 1.1.0
+  description: |
+    Java Local Core 与本机 Python Agent 之间的 REST/JSON 契约。
+    模型连接参数仅由 Java 在已认证的本机请求中临时传入，Python 不持久化。
 servers:
   - url: http://127.0.0.1:45101
 security:
@@ -41,9 +43,6 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/PlanTaskRequest"
-            example:
-              taskId: task-123
-              goal: 整理本地文档
       responses:
         "200":
           description: 任务规划成功
@@ -59,6 +58,59 @@ paths:
           $ref: "#/components/responses/ProtocolMismatch"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/chat/completions:
+    post:
+      operationId: completeChat
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatCompletionRequest"
+      responses:
+        "200":
+          description: 模型响应
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatCompletionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "412":
+          $ref: "#/components/responses/ProtocolMismatch"
+        "502":
+          description: 上游模型调用失败
+  /api/v1/chat/completions/stream:
+    post:
+      operationId: streamChatCompletion
+      description: 以 SSE 返回推理增量、文本增量、用量和结束状态。
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatCompletionRequest"
+      responses:
+        "200":
+          description: 模型增量响应
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "412":
+          $ref: "#/components/responses/ProtocolMismatch"
 components:
   securitySchemes:
     bearerAuth:
@@ -86,7 +138,7 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
     Unauthorized:
-      description: 启动令牌无效
+      description: 本机启动令牌无效
       content:
         application/json:
           schema:
@@ -152,6 +204,94 @@ components:
           type: string
         requiresApproval:
           type: boolean
+    ChatCompletionRequest:
+      type: object
+      additionalProperties: false
+      required: [messages, connection]
+      properties:
+        messages:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+        connection:
+          $ref: "#/components/schemas/ModelConnection"
+    ModelConnection:
+      type: object
+      additionalProperties: false
+      required: [providerName, baseUrl, model, apiKey]
+      properties:
+        providerName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        baseUrl:
+          type: string
+          minLength: 1
+          maxLength: 500
+        model:
+          type: string
+          minLength: 1
+          maxLength: 160
+        apiKey:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          writeOnly: true
+          description: 仅在本机 Java 到 Python 的当前请求内使用，不落盘。
+    ChatMessage:
+      type: object
+      additionalProperties: false
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+          minLength: 1
+    ChatCompletionResponse:
+      type: object
+      additionalProperties: false
+      required: [message, model, usage]
+      properties:
+        message:
+          type: string
+        model:
+          type: string
+        usage:
+          $ref: "#/components/schemas/TokenUsage"
+    ChatStreamEvent:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [text_delta, reasoning_delta, usage, completed, failed]
+        delta:
+          type: string
+        model:
+          type: string
+        usage:
+          $ref: "#/components/schemas/TokenUsage"
+        errorMessage:
+          type: string
+    TokenUsage:
+      type: object
+      additionalProperties: false
+      required: [promptTokens, completionTokens, totalTokens]
+      properties:
+        promptTokens:
+          type: integer
+          minimum: 0
+        completionTokens:
+          type: integer
+          minimum: 0
+        totalTokens:
+          type: integer
+          minimum: 0
     ErrorResponse:
       type: object
       additionalProperties: false

@@ -1,0 +1,192 @@
+import { randomUUID } from "node:crypto";
+
+import type {
+  ChatCompletion,
+  ChatMessage,
+  ChatStreamEvent,
+  ModelSettings,
+  UpdateModelSettingsInput,
+} from "../shared/model-contract";
+import type { JavaConnection } from "./java-connection";
+import { validateJavaConnection } from "./java-connection";
+import type { ModelGateway } from "./model-gateway";
+import type { ModelStreamSubscription } from "./model-gateway";
+
+type JavaError = {
+  message?: string;
+};
+
+export class RestModelGateway implements ModelGateway {
+  private readonly connection: JavaConnection;
+
+  constructor(
+    connection: JavaConnection,
+    private readonly fetchImpl: typeof fetch = fetch,
+  ) {
+    this.connection = validateJavaConnection(connection);
+  }
+
+  getSettings(): Promise<ModelSettings> {
+    return this.request("/api/v1/model/settings");
+  }
+
+  updateSettings(input: UpdateModelSettingsInput): Promise<ModelSettings> {
+    return this.request("/api/v1/model/settings", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  }
+
+  complete(messages: ChatMessage[]): Promise<ChatCompletion> {
+    return this.request(
+      "/api/v1/chat/completions",
+      {
+        method: "POST",
+        body: JSON.stringify({ messages }),
+      },
+      90_000,
+    );
+  }
+
+  listMessages(taskId: string): Promise<ChatMessage[]> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/messages`,
+    );
+  }
+
+  streamMessage(
+    taskId: string,
+    content: string,
+    onEvent: (event: ChatStreamEvent) => void,
+  ): ModelStreamSubscription {
+    const controller = new AbortController();
+    const completed = this.consumeMessageStream(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/messages/stream`,
+      content,
+      onEvent,
+      controller.signal,
+    );
+    return {
+      cancel: () => controller.abort(),
+      completed,
+    };
+  }
+
+  regenerateMessage(
+    taskId: string,
+    messageId: string,
+    content: string,
+    onEvent: (event: ChatStreamEvent) => void,
+  ): ModelStreamSubscription {
+    const controller = new AbortController();
+    const completed = this.consumeMessageStream(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/messages/${encodeURIComponent(messageId)}/regenerate`,
+      content,
+      onEvent,
+      controller.signal,
+    );
+    return {
+      cancel: () => controller.abort(),
+      completed,
+    };
+  }
+
+  private async request<T>(
+    path: string,
+    init: RequestInit = {},
+    timeout = 10_000,
+  ): Promise<T> {
+    const response = await this.fetchImpl(
+      `${this.connection.baseUrl}${path}`,
+      {
+        ...init,
+        headers: {
+          Authorization: `Bearer ${this.connection.sessionToken}`,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "X-Correlation-Id": randomUUID(),
+          ...init.headers,
+        },
+        signal: AbortSignal.timeout(timeout),
+      },
+    );
+    if (!response.ok) {
+      const error = await readJavaError(response);
+      throw new Error(
+        error.message ?? `Java Core 请求失败: HTTP ${response.status}`,
+      );
+    }
+    return (await response.json()) as T;
+  }
+
+  private async consumeMessageStream(
+    path: string,
+    content: string,
+    onEvent: (event: ChatStreamEvent) => void,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const response = await this.fetchImpl(
+      `${this.connection.baseUrl}${path}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.connection.sessionToken}`,
+          Accept: "text/event-stream",
+          "Content-Type": "application/json",
+          "X-Correlation-Id": randomUUID(),
+        },
+        body: JSON.stringify({ content }),
+        signal,
+      },
+    );
+    if (!response.ok) {
+      const error = await readJavaError(response);
+      throw new Error(
+        error.message ?? `Java Core 请求失败: HTTP ${response.status}`,
+      );
+    }
+    if (!response.body) {
+      throw new Error("Java Core 返回了空流");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        consumeSseLine(line, onEvent);
+      }
+      if (done) {
+        if (buffer) {
+          consumeSseLine(buffer, onEvent);
+        }
+        return;
+      }
+    }
+  }
+}
+
+async function readJavaError(response: Response): Promise<JavaError> {
+  try {
+    return (await response.json()) as JavaError;
+  } catch {
+    return {};
+  }
+}
+
+function consumeSseLine(
+  line: string,
+  onEvent: (event: ChatStreamEvent) => void,
+): void {
+  if (!line.startsWith("data:")) {
+    return;
+  }
+  const json = line.slice("data:".length).trim();
+  if (json) {
+    onEvent(JSON.parse(json) as ChatStreamEvent);
+  }
+}

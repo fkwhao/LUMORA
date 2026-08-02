@@ -8,6 +8,15 @@ import com.lumora.core.entity.ApprovalDecision;
  */
 public interface ApprovalService {
 
+    /**
+     * 对等待中的审批请求作出一次不可重复的决定。
+     *
+     * @param taskId 任务 ID
+     * @param approvalId 审批请求 ID
+     * @param decision 用户审批决定
+     * @return 审批后的最新任务状态
+     * @throws IllegalArgumentException 参数无效、审批不存在或已处理
+     */
     AgentTask decideApproval(
             String taskId,
             String approvalId,

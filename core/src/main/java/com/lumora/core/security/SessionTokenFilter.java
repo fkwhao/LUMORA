@@ -7,6 +7,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -19,13 +20,10 @@ import java.security.MessageDigest;
  * Java REST 只接受 Electron Main 持有的本次启动令牌。
  */
 @Component
+@RequiredArgsConstructor
 public class SessionTokenFilter extends OncePerRequestFilter {
 
     private final CoreProperties properties;
-
-    public SessionTokenFilter(CoreProperties properties) {
-        this.properties = properties;
-    }
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {

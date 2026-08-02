@@ -26,6 +26,11 @@ desktop/config/dev-local.example.yml
 Electron 与 Java 使用相同的 Core 令牌；令牌至少 32 个字符，不写入已提交的示例
 配置。端口和服务地址也在这些本地 YAML 中维护。
 
+模型连接通过桌面端“设置 → 模型与 API”配置。非敏感字段和经过 Windows DPAPI
+加密的 API Key 密文统一写入 Java SQLite；Python 只在当前模型请求中临时接收
+明文，不保存到 YAML、日志或数据库。旧的 `agent/config/model-local.yml`
+已不再使用。
+
 ## Python
 
 ```powershell

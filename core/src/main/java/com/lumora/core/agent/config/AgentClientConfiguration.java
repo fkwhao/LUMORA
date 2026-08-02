@@ -1,14 +1,20 @@
 package com.lumora.core.agent.config;
 
+import com.lumora.core.agent.client.http.AgentRuntimeHttpApi;
 import com.lumora.core.agent.constant.AgentClientConstants;
+import com.lumora.core.common.constant.HttpContractConstants;
 import com.lumora.core.config.CoreProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.support.RestClientAdapter;
+import org.springframework.web.service.invoker.HttpServiceProxyFactory;
 
 import java.net.URI;
 import java.net.http.HttpClient;
+
 @Configuration
 public class AgentClientConfiguration {
 
@@ -17,6 +23,8 @@ public class AgentClientConfiguration {
         URI agentUri = validateAgentUri(properties.getAgentUrl());
         HttpClient httpClient = HttpClient.newBuilder()
                 .connectTimeout(AgentClientConstants.REQUEST_TIMEOUT)
+                // Uvicorn 提供 HTTP/1.1 REST 服务，禁止 JDK 客户端发起无意义的 h2c 升级。
+                .version(HttpClient.Version.HTTP_1_1)
                 .build();
         JdkClientHttpRequestFactory requestFactory =
                 new JdkClientHttpRequestFactory(httpClient);
@@ -27,7 +35,25 @@ public class AgentClientConfiguration {
         return RestClient.builder()
                 .baseUrl(agentUri.toString())
                 .requestFactory(requestFactory)
+                // 固定内部协议 Header 统一由 Client 配置维护，业务调用只传关联 ID。
+                .defaultHeader(
+                        HttpHeaders.AUTHORIZATION,
+                        HttpContractConstants.BEARER_PREFIX
+                                + properties.getAgentStartupToken()
+                )
+                .defaultHeader(
+                        HttpContractConstants.PROTOCOL_VERSION_HEADER,
+                        properties.getProtocolVersion()
+                )
                 .build();
+    }
+
+    @Bean
+    public AgentRuntimeHttpApi agentRuntimeHttpApi(RestClient agentRestClient) {
+        RestClientAdapter adapter = RestClientAdapter.create(agentRestClient);
+        return HttpServiceProxyFactory.builderFor(adapter)
+                .build()
+                .createClient(AgentRuntimeHttpApi.class);
     }
 
     public static URI validateAgentUri(String agentUrl) {

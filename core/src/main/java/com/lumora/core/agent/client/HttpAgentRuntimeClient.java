@@ -1,38 +1,38 @@
 package com.lumora.core.agent.client;
 
-import com.lumora.core.agent.config.AgentClientConfiguration;
-import com.lumora.core.agent.constant.AgentClientConstants;
+import com.lumora.core.agent.client.http.AgentClientExceptionMapper;
+import com.lumora.core.agent.client.http.AgentRuntimeHttpApi;
+import com.lumora.core.agent.client.http.AgentRuntimeSseClient;
+import com.lumora.core.agent.converter.AgentDtoMapper;
+import com.lumora.core.agent.dto.request.AgentChatCompletionRequest;
 import com.lumora.core.agent.dto.request.AgentPlanTaskRequest;
-import com.lumora.core.agent.dto.response.AgentPlanStepResponse;
+import com.lumora.core.agent.dto.response.AgentChatCompletionResponse;
 import com.lumora.core.agent.dto.response.AgentPlanTaskResponse;
-import com.lumora.core.agent.exception.AgentRuntimeException;
 import com.lumora.core.agent.model.AgentPlanStep;
-import com.lumora.core.common.constant.HttpContractConstants;
-import com.lumora.core.config.CoreProperties;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
+import com.lumora.core.model.ChatCompletion;
+import com.lumora.core.model.ChatMessage;
+import com.lumora.core.model.ChatStreamEvent;
+import com.lumora.core.model.ModelConnection;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.HttpStatusCodeException;
-import org.springframework.web.client.ResourceAccessException;
-import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientException;
 
 import java.util.List;
+import java.util.function.Consumer;
 
+/**
+ * Java 业务层访问 Python Agent Runtime 的适配器。
+ *
+ * <p>普通 REST 由 Spring HTTP Interface 声明，SSE 由独立流客户端处理；
+ * 本类只负责编排调用与领域模型转换。</p>
+ */
 @Component
+@RequiredArgsConstructor
 public class HttpAgentRuntimeClient implements AgentRuntimeClient {
 
-    private final RestClient restClient;
-    private final CoreProperties properties;
-
-    public HttpAgentRuntimeClient(
-            RestClient restClient,
-            CoreProperties properties
-    ) {
-        AgentClientConfiguration.validateAgentUri(properties.getAgentUrl());
-        this.restClient = restClient;
-        this.properties = properties;
-    }
+    private final AgentRuntimeHttpApi httpApi;
+    private final AgentRuntimeSseClient sseClient;
+    private final AgentDtoMapper dtoMapper;
+    private final AgentClientExceptionMapper exceptionMapper;
 
     @Override
     public List<AgentPlanStep> planTask(
@@ -40,67 +40,42 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
             String goal,
             String correlationId
     ) {
-        try {
-            AgentPlanTaskResponse response = restClient.post()
-                    .uri(AgentClientConstants.PLAN_TASK_PATH)
-                    // 内部令牌只写入本次 HTTP 请求头，禁止拼入 URL、日志或异常信息。
-                    .header(
-                            HttpHeaders.AUTHORIZATION,
-                            HttpContractConstants.BEARER_PREFIX
-                                    + properties.getAgentStartupToken()
-                    )
-                    .header(
-                            HttpContractConstants.PROTOCOL_VERSION_HEADER,
-                            properties.getProtocolVersion()
-                    )
-                    .header(
-                            HttpContractConstants.CORRELATION_ID_HEADER,
-                            correlationId
-                    )
-                    .body(new AgentPlanTaskRequest(taskId, goal))
-                    .retrieve()
-                    .body(AgentPlanTaskResponse.class);
-
-            if (response == null) {
-                throw new AgentRuntimeException("Python Agent 返回空响应");
-            }
-            return response.getSteps().stream()
-                    .map(this::toModel)
-                    .toList();
-        } catch (HttpStatusCodeException error) {
-            throw mapHttpError(error);
-        } catch (ResourceAccessException error) {
-            throw new AgentRuntimeException("无法连接 Python Agent", error);
-        } catch (RestClientException error) {
-            throw new AgentRuntimeException("Python Agent 调用失败", error);
-        }
-    }
-
-    private AgentPlanStep toModel(AgentPlanStepResponse response) {
-        return new AgentPlanStep(
-                response.getStepId(),
-                response.getTitle(),
-                response.getDescription(),
-                response.isRequiresApproval()
+        AgentPlanTaskResponse response = exceptionMapper.execute(
+                () -> httpApi.planTask(
+                        correlationId,
+                        new AgentPlanTaskRequest(taskId, goal)
+                )
         );
+        return dtoMapper.toPlanSteps(response);
     }
 
-    private AgentRuntimeException mapHttpError(
-            HttpStatusCodeException error
+    @Override
+    public ChatCompletion completeChat(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String correlationId
     ) {
-        // 只按状态码输出稳定本地信息，避免响应正文意外携带令牌或内部堆栈。
-        if (error.getStatusCode() == HttpStatus.UNAUTHORIZED) {
-            return new AgentRuntimeException("Python Agent 认证失败", error);
-        }
-        if (error.getStatusCode() == HttpStatus.PRECONDITION_FAILED) {
-            return new AgentRuntimeException(
-                    "Python Agent 协议版本不兼容",
-                    error
-            );
-        }
-        if (error.getStatusCode().is5xxServerError()) {
-            return new AgentRuntimeException("Python Agent 服务异常", error);
-        }
-        return new AgentRuntimeException("Python Agent 请求被拒绝", error);
+        AgentChatCompletionRequest request = dtoMapper.toChatRequest(
+                messages,
+                connection
+        );
+        AgentChatCompletionResponse response = exceptionMapper.execute(
+                () -> httpApi.completeChat(correlationId, request)
+        );
+        return dtoMapper.toChatCompletion(response);
+    }
+
+    @Override
+    public void streamChat(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String correlationId,
+            Consumer<ChatStreamEvent> eventConsumer
+    ) {
+        sseClient.streamChat(
+                correlationId,
+                dtoMapper.toChatRequest(messages, connection),
+                eventConsumer
+        );
     }
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { LumoraModelApi } from "../../src/shared/model-contract";
 import type {
   LumoraTaskApi,
   TaskEvent,
@@ -80,14 +81,145 @@ describe("task store", () => {
 
     expect(store.getState().activeTask?.approval).toBeUndefined();
   });
+
+  it("loads persisted messages when opening a recent task", async () => {
+    const api = createApi();
+    vi.mocked(api.list).mockResolvedValue([
+      {
+        taskId: createdTask.taskId,
+        goal: createdTask.goal,
+        status: createdTask.status,
+      },
+    ]);
+    const modelApi = createModelApi();
+    const store = createTaskStore(api, modelApi);
+
+    await store.getState().loadRecentTasks();
+    await store.getState().openTask(createdTask.taskId);
+
+    expect(store.getState().recentTasks).toHaveLength(1);
+    expect(store.getState().activeTask?.taskId).toBe(createdTask.taskId);
+    expect(store.getState().messages[1]).toMatchObject({
+      role: "assistant",
+      content: "可以开始整理。",
+      reasoningContent: "先识别目录结构。",
+      durationMs: 2_100,
+    });
+  });
+
+  it("replaces the latest answer after editing the latest user message", async () => {
+    const api = createApi();
+    const modelApi = createModelApi();
+    vi.mocked(modelApi.listMessages)
+      .mockResolvedValueOnce([
+        {
+          messageId: "message-1",
+          role: "user",
+          content: "整理下载目录",
+        },
+        {
+          messageId: "message-2",
+          role: "assistant",
+          content: "旧回答",
+          durationMs: 800,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          messageId: "message-1",
+          role: "user",
+          content: "只整理图片",
+        },
+        {
+          messageId: "message-3",
+          role: "assistant",
+          content: "新回答",
+          durationMs: 1_500,
+        },
+      ]);
+    vi.mocked(modelApi.regenerateMessage).mockImplementation(
+      (_taskId, _messageId, _content, onEvent) => {
+        queueMicrotask(() =>
+          onEvent({
+            type: "completed",
+            delta: "",
+            model: "demo",
+            errorMessage: "",
+          }),
+        );
+        return () => undefined;
+      },
+    );
+    const store = createTaskStore(api, modelApi);
+    await store.getState().openTask(createdTask.taskId);
+
+    await store
+      .getState()
+      .regenerateMessage("message-1", "只整理图片");
+
+    expect(modelApi.regenerateMessage).toHaveBeenCalledWith(
+      createdTask.taskId,
+      "message-1",
+      "只整理图片",
+      expect.any(Function),
+    );
+    expect(store.getState().messages).toEqual([
+      expect.objectContaining({ content: "只整理图片" }),
+      expect.objectContaining({
+        content: "新回答",
+        durationMs: 1_500,
+      }),
+    ]);
+  });
+
+  it("persists archived tasks locally and allows restoring them", async () => {
+    localStorage.clear();
+    const api = createApi();
+    const store = createTaskStore(api);
+
+    await store.getState().createTask("整理下载目录");
+    store.getState().archiveTask(createdTask.taskId);
+
+    expect(store.getState().activeTask).toBeUndefined();
+    expect(store.getState().archivedTaskIds).toEqual([createdTask.taskId]);
+
+    const restoredStore = createTaskStore(api);
+    expect(restoredStore.getState().archivedTaskIds).toEqual([
+      createdTask.taskId,
+    ]);
+
+    restoredStore.getState().restoreTask(createdTask.taskId);
+    expect(restoredStore.getState().archivedTaskIds).toEqual([]);
+    localStorage.clear();
+  });
 });
 
 function createApi(): LumoraTaskApi {
   return {
     create: vi.fn(async () => createdTask),
+    list: vi.fn(async () => []),
     get: vi.fn(async () => createdTask),
     subscribe: vi.fn(() => () => undefined),
     decideApproval: vi.fn(async () => createdTask),
+  };
+}
+
+function createModelApi(): LumoraModelApi {
+  return {
+    getSettings: vi.fn(),
+    updateSettings: vi.fn(),
+    complete: vi.fn(),
+    listMessages: vi.fn(async () => [
+      { role: "user" as const, content: "整理下载目录" },
+      {
+        role: "assistant" as const,
+        content: "可以开始整理。",
+        reasoningContent: "先识别目录结构。",
+        durationMs: 2_100,
+      },
+    ]),
+    streamMessage: vi.fn(() => () => undefined),
+    regenerateMessage: vi.fn(() => () => undefined),
   };
 }
 

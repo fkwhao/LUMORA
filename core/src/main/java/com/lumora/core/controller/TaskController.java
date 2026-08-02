@@ -7,6 +7,7 @@ import com.lumora.core.dto.response.TaskResponse;
 import com.lumora.core.service.TaskService;
 import com.lumora.core.task.model.TaskDetails;
 import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,18 +18,17 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 /**
  * 桌面端任务 REST 入口，只负责 DTO 转换和参数校验。
  */
 @RestController
+@RequiredArgsConstructor
 @RequestMapping(ApiPathConstants.TASKS)
 public class TaskController {
 
     private final TaskService taskService;
-
-    public TaskController(TaskService taskService) {
-        this.taskService = taskService;
-    }
 
     @PostMapping
     public ResponseEntity<TaskResponse> createTask(
@@ -43,6 +43,13 @@ public class TaskController {
         return ResponseEntity
                 .status(HttpStatus.CREATED)
                 .body(TaskResponse.fromDetails(task));
+    }
+
+    @GetMapping
+    public List<TaskResponse> listTasks() {
+        return taskService.listTasks().stream()
+                .map(TaskResponse::fromEntity)
+                .toList();
     }
 
     @GetMapping(ApiPathConstants.TASK_BY_ID)

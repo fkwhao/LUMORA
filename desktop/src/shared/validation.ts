@@ -24,6 +24,13 @@ export function validateTaskId(input: unknown): string {
   return input;
 }
 
+export function validateMessageId(input: unknown): string {
+  if (typeof input !== "string" || !identifierPattern.test(input)) {
+    throw new Error("消息 ID 格式无效");
+  }
+  return input;
+}
+
 export function validateApprovalId(input: unknown): string {
   if (typeof input !== "string" || !identifierPattern.test(input)) {
     throw new Error("审批 ID 格式无效");

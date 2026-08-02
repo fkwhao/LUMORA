@@ -1,0 +1,123 @@
+package com.lumora.core.controller;
+
+import com.lumora.core.common.constant.ApiPathConstants;
+import com.lumora.core.common.constant.HttpContractConstants;
+import com.lumora.core.dto.request.SendMessageRequest;
+import com.lumora.core.dto.response.ConversationMessageResponse;
+import com.lumora.core.model.ChatStreamEvent;
+import com.lumora.core.model.ChatStreamEventType;
+import com.lumora.core.service.ConversationService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import java.io.IOException;
+import java.util.List;
+
+/**
+ * 会话 REST/SSE 入口。
+ *
+ * <p>Controller 只负责协议转换；生成流程、并发控制和持久化均由 Service 处理。</p>
+ */
+@RestController
+@RequiredArgsConstructor
+@RequestMapping(ApiPathConstants.TASKS)
+public class ConversationController {
+
+    private final ConversationService conversationService;
+
+    @GetMapping(ApiPathConstants.TASK_MESSAGES)
+    public List<ConversationMessageResponse> listMessages(
+            @PathVariable String taskId
+    ) {
+        return conversationService.listMessages(taskId).stream()
+                .map(ConversationMessageResponse::fromEntity)
+                .toList();
+    }
+
+    @PostMapping(
+            value = ApiPathConstants.TASK_MESSAGE_STREAM,
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE
+    )
+    public SseEmitter streamMessage(
+            @PathVariable String taskId,
+            @Valid @RequestBody SendMessageRequest request,
+            @RequestHeader(HttpContractConstants.CORRELATION_ID_HEADER)
+            String correlationId
+    ) {
+        SseEmitter emitter = new SseEmitter(0L);
+        conversationService.streamMessage(
+                taskId,
+                request.getContent(),
+                correlationId,
+                event -> sendEvent(emitter, event),
+                emitter::complete,
+                error -> completeWithStreamError(emitter, error)
+        );
+        return emitter;
+    }
+
+    @PostMapping(
+            value = ApiPathConstants.TASK_MESSAGE_REGENERATE,
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE
+    )
+    public SseEmitter regenerateMessage(
+            @PathVariable String taskId,
+            @PathVariable String messageId,
+            @Valid @RequestBody SendMessageRequest request,
+            @RequestHeader(HttpContractConstants.CORRELATION_ID_HEADER)
+            String correlationId
+    ) {
+        SseEmitter emitter = new SseEmitter(0L);
+        conversationService.regenerateMessage(
+                taskId,
+                messageId,
+                request.getContent(),
+                correlationId,
+                event -> sendEvent(emitter, event),
+                emitter::complete,
+                error -> completeWithStreamError(emitter, error)
+        );
+        return emitter;
+    }
+
+    private void completeWithStreamError(
+            SseEmitter emitter,
+            Throwable error
+    ) {
+        sendEvent(
+                emitter,
+                new ChatStreamEvent(
+                        ChatStreamEventType.FAILED,
+                        "",
+                        "",
+                        null,
+                        safeErrorMessage(error)
+                )
+        );
+        emitter.complete();
+    }
+
+    private void sendEvent(SseEmitter emitter, ChatStreamEvent event) {
+        try {
+            emitter.send(SseEmitter.event().data(event));
+        } catch (IOException error) {
+            emitter.completeWithError(error);
+        }
+    }
+
+    private String safeErrorMessage(Throwable error) {
+        String message = error.getMessage();
+        return message == null || message.isBlank()
+                ? "模型流式响应失败"
+                : message;
+    }
+}

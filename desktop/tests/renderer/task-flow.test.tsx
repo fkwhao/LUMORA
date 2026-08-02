@@ -35,6 +35,7 @@ describe("visible task flow", () => {
     };
     const api: LumoraTaskApi = {
       create: vi.fn(async () => createdTask),
+      list: vi.fn(async () => []),
       get: vi.fn(async () => createdTask),
       subscribe: vi.fn((_taskId, listener) => {
         onEvent = listener;
@@ -49,10 +50,50 @@ describe("visible task flow", () => {
 
     render(<App api={api} />);
 
-    fireEvent.change(screen.getByRole("textbox", { name: "任务目标" }), {
+    fireEvent.click(
+      screen.getByRole("button", { name: "收起侧边栏" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "展开侧边栏" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.getByRole("textbox", { name: "告诉 LUMORA 你的目标" }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "展开侧边栏" }),
+    );
+
+    expect(screen.queryByText("Agent 办公室")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "工作空间" }));
+    expect(
+      screen.getByRole("heading", { name: "组织项目上下文" }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "新建工作空间" }),
+    );
+    expect(screen.getByText("新工作空间")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "任务" }));
+    fireEvent.click(screen.getByRole("button", { name: "返回" }));
+    expect(
+      screen.getByRole("heading", { name: "组织项目上下文" }),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "前进" }));
+    const goalInput = screen.getByRole("textbox", {
+      name: "告诉 LUMORA 你的目标",
+    });
+    fireEvent.change(goalInput, {
       target: { value: "整理下载目录" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "开始任务" }));
+    fireEvent.keyDown(goalInput, {
+      key: "Enter",
+      code: "Enter",
+      shiftKey: true,
+    });
+    expect(api.create).not.toHaveBeenCalled();
+    fireEvent.keyDown(goalInput, {
+      key: "Enter",
+      code: "Enter",
+    });
 
     expect(
       await screen.findByRole("heading", {
@@ -60,8 +101,22 @@ describe("visible task flow", () => {
         name: "整理下载目录",
       }),
     ).toBeVisible();
-    expect(screen.getByText("分析目录内容")).toBeVisible();
-    expect(screen.getByText("整理文件")).toBeVisible();
+    expect(screen.queryByText("分析目录内容")).not.toBeInTheDocument();
+    expect(screen.queryByText("整理文件")).not.toBeInTheDocument();
+    expect(screen.queryByText("执行活动")).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "审阅文件变更" }),
+    );
+    expect(
+      screen.getByRole("complementary", { name: "变更审阅" }),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "关闭审阅" }));
+    expect(
+      screen.queryByRole("complementary", { name: "变更审阅" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "暂停" }),
+    ).not.toBeInTheDocument();
 
     act(() => {
       onEvent?.({

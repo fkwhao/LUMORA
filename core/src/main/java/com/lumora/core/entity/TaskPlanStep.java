@@ -1,11 +1,15 @@
 package com.lumora.core.entity;
 
+import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
 @TableName("task_plan_step")
 public class TaskPlanStep {
 
+    @TableId(value = "plan_step_id", type = IdType.ASSIGN_UUID)
+    private String planStepId;
     @TableField("task_id")
     private String taskId;
     @TableField("step_index")
@@ -36,6 +40,14 @@ public class TaskPlanStep {
         this.title = title;
         this.description = description;
         this.requiresApproval = requiresApproval;
+    }
+
+    public String getPlanStepId() {
+        return planStepId;
+    }
+
+    public void setPlanStepId(String planStepId) {
+        this.planStepId = planStepId;
     }
 
     public String getTaskId() {

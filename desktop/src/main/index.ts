@@ -2,6 +2,10 @@ import path from "node:path";
 import { app, BrowserWindow, shell } from "electron";
 
 import { registerTaskIpc } from "./ipc";
+import { registerAppearanceIpc } from "./appearance-ipc";
+import { registerModelIpc } from "./model-ipc";
+import { registerWorkspaceIpc } from "./workspace-ipc";
+import { RestModelGateway } from "./rest-model-gateway";
 import { RestTaskGateway } from "./rest-task-gateway";
 import type { TaskGateway } from "./task-gateway";
 import { createMainWindowOptions } from "./window-options";
@@ -14,16 +18,33 @@ import {
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
 
-const gateway = createTaskGateway(
-  loadDevConfig(path.resolve("config/dev-local.yml")),
+// 明确启用 Chromium 高 DPI 支持；实际缩放比例仍跟随 Windows 显示设置，
+// 避免强制固定比例导致 125% / 150% 屏幕上的界面尺寸失真。
+app.commandLine.appendSwitch("high-dpi-support", "1");
+app.commandLine.appendSwitch("force-color-profile", "srgb");
+
+const devConfig = loadDevConfig(path.resolve("config/dev-local.yml"));
+const gateway = createTaskGateway(devConfig);
+const modelGateway = new RestModelGateway(
+  {
+    baseUrl: devConfig.coreUrl,
+    sessionToken: devConfig.startupToken,
+  },
 );
 // BrowserWindow 必须保留强引用，否则窗口可能在函数返回后被垃圾回收。
 const mainWindow = new WindowReference<BrowserWindow>();
 let unregisterIpc: (() => void) | undefined;
+let unregisterModelIpc: (() => void) | undefined;
+let unregisterAppearanceIpc: (() => void) | undefined;
+let unregisterWorkspaceIpc: (() => void) | undefined;
 
 async function createWindow(): Promise<BrowserWindow> {
   const preloadPath = path.join(__dirname, "preload.js");
   const window = new BrowserWindow(createMainWindowOptions(preloadPath));
+
+  // 必须在加载页面前监听；开发服务器响应很快时，ready-to-show 可能先于
+  // loadURL Promise 完成，后注册监听会让 show: false 的窗口永久隐藏。
+  window.once("ready-to-show", () => window.show());
 
   // 导航白名单阻止远程页面获得本应用的 Preload 能力。
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -46,13 +67,19 @@ async function createWindow(): Promise<BrowserWindow> {
       ),
     );
   }
-  window.once("ready-to-show", () => window.show());
+  // 页面即使没有触发 ready-to-show，也不能让主窗口永久停留在隐藏状态。
+  if (!window.isVisible()) {
+    window.show();
+  }
   mainWindow.set(window);
   return window;
 }
 
 app.whenReady().then(async () => {
   unregisterIpc = registerTaskIpc(gateway);
+  unregisterModelIpc = registerModelIpc(modelGateway);
+  unregisterAppearanceIpc = registerAppearanceIpc();
+  unregisterWorkspaceIpc = registerWorkspaceIpc();
   await createWindow();
 
   app.on("activate", async () => {
@@ -70,6 +97,9 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   unregisterIpc?.();
+  unregisterModelIpc?.();
+  unregisterAppearanceIpc?.();
+  unregisterWorkspaceIpc?.();
   gateway.dispose();
 });
 

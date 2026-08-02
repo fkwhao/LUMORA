@@ -8,6 +8,7 @@ import type {
   ApprovalDecisionInput,
   TaskEvent,
   TaskSnapshot,
+  TaskSummary,
 } from "../shared/task-contract";
 import {
   validateApprovalDecisionInput,
@@ -41,6 +42,10 @@ export class RestTaskGateway implements TaskGateway {
       },
       body: JSON.stringify({ goal: validateGoal(goal) }),
     });
+  }
+
+  list(): Promise<TaskSummary[]> {
+    return this.request("/api/v1/tasks");
   }
 
   get(taskId: string): Promise<TaskSnapshot> {

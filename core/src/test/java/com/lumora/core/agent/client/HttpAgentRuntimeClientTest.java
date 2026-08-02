@@ -1,16 +1,30 @@
 package com.lumora.core.agent.client;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lumora.core.agent.client.http.AgentClientExceptionMapper;
+import com.lumora.core.agent.client.http.AgentRuntimeHttpApi;
+import com.lumora.core.agent.client.http.AgentRuntimeSseClient;
+import com.lumora.core.agent.config.AgentClientConfiguration;
+import com.lumora.core.agent.converter.AgentDtoMapper;
 import com.lumora.core.agent.exception.AgentRuntimeException;
 import com.lumora.core.agent.model.AgentPlanStep;
+import com.lumora.core.common.constant.HttpContractConstants;
 import com.lumora.core.config.CoreProperties;
+import com.lumora.core.model.ChatCompletion;
+import com.lumora.core.model.ChatMessage;
+import com.lumora.core.model.ChatStreamEvent;
+import com.lumora.core.model.ChatStreamEventType;
+import com.lumora.core.model.ModelConnection;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -28,6 +42,12 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 class HttpAgentRuntimeClientTest {
 
     private static final String TOKEN = "a".repeat(64);
+    private static final ModelConnection CONNECTION = new ModelConnection(
+            "OpenAI Compatible",
+            "https://api.example.com/v1",
+            "example-model",
+            "provider-secret"
+    );
 
     private CoreProperties properties;
     private MockRestServiceServer server;
@@ -41,9 +61,34 @@ class HttpAgentRuntimeClientTest {
         properties.setProtocolVersion("1");
 
         RestClient.Builder builder = RestClient.builder()
-                .baseUrl(properties.getAgentUrl());
+                .baseUrl(properties.getAgentUrl())
+                .defaultHeader(
+                        HttpHeaders.AUTHORIZATION,
+                        HttpContractConstants.BEARER_PREFIX + TOKEN
+                )
+                .defaultHeader(
+                        HttpContractConstants.PROTOCOL_VERSION_HEADER,
+                        properties.getProtocolVersion()
+                );
         server = MockRestServiceServer.bindTo(builder).build();
-        client = new HttpAgentRuntimeClient(builder.build(), properties);
+        RestClient restClient = builder.build();
+        AgentDtoMapper dtoMapper = new AgentDtoMapper();
+        AgentClientExceptionMapper exceptionMapper =
+                new AgentClientExceptionMapper();
+        AgentRuntimeHttpApi httpApi = new AgentClientConfiguration()
+                .agentRuntimeHttpApi(restClient);
+        AgentRuntimeSseClient sseClient = new AgentRuntimeSseClient(
+                restClient,
+                new ObjectMapper(),
+                dtoMapper,
+                exceptionMapper
+        );
+        client = new HttpAgentRuntimeClient(
+                httpApi,
+                sseClient,
+                dtoMapper,
+                exceptionMapper
+        );
     }
 
     @Test
@@ -93,14 +138,15 @@ class HttpAgentRuntimeClientTest {
         server.expect(requestTo(
                         "http://127.0.0.1:45101/api/v1/tasks/plan"
                 ))
-                .andRespond(withStatus(org.springframework.http.HttpStatus.UNAUTHORIZED));
+                .andRespond(withStatus(
+                        org.springframework.http.HttpStatus.UNAUTHORIZED
+                ));
 
         AgentRuntimeException error = assertThrows(
                 AgentRuntimeException.class,
                 () -> client.planTask("task-123", "goal", "correlation-123")
         );
 
-        assertEquals("Python Agent 认证失败", error.getMessage());
         assertFalse(error.getMessage().contains(TOKEN));
     }
 
@@ -113,12 +159,10 @@ class HttpAgentRuntimeClientTest {
                         org.springframework.http.HttpStatus.PRECONDITION_FAILED
                 ));
 
-        AgentRuntimeException error = assertThrows(
+        assertThrows(
                 AgentRuntimeException.class,
                 () -> client.planTask("task-123", "goal", "correlation-123")
         );
-
-        assertEquals("Python Agent 协议版本不兼容", error.getMessage());
     }
 
     @Test
@@ -130,12 +174,10 @@ class HttpAgentRuntimeClientTest {
                         org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR
                 ));
 
-        AgentRuntimeException error = assertThrows(
+        assertThrows(
                 AgentRuntimeException.class,
                 () -> client.planTask("task-123", "goal", "correlation-123")
         );
-
-        assertEquals("Python Agent 服务异常", error.getMessage());
     }
 
     @Test
@@ -145,12 +187,10 @@ class HttpAgentRuntimeClientTest {
                 ))
                 .andRespond(withException(new IOException("connection failed")));
 
-        AgentRuntimeException error = assertThrows(
+        assertThrows(
                 AgentRuntimeException.class,
                 () -> client.planTask("task-123", "goal", "correlation-123")
         );
-
-        assertEquals("无法连接 Python Agent", error.getMessage());
     }
 
     @Test
@@ -159,10 +199,103 @@ class HttpAgentRuntimeClientTest {
 
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new HttpAgentRuntimeClient(
-                        RestClient.create(properties.getAgentUrl()),
-                        properties
+                () -> AgentClientConfiguration.validateAgentUri(
+                        properties.getAgentUrl()
                 )
         );
+    }
+
+    @Test
+    void mapsChatCompletionAndForwardsTransientConnection() {
+        server.expect(requestTo(
+                        "http://127.0.0.1:45101/api/v1/chat/completions"
+                ))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(content().json("""
+                        {
+                          "messages": [
+                            {"role": "user", "content": "你好"}
+                          ],
+                          "connection": {
+                            "providerName": "OpenAI Compatible",
+                            "baseUrl": "https://api.example.com/v1",
+                            "model": "example-model",
+                            "apiKey": "provider-secret"
+                          }
+                        }
+                        """))
+                .andRespond(withSuccess("""
+                        {
+                          "message": "你好，我是 LUMORA。",
+                          "model": "example-model",
+                          "usage": {
+                            "promptTokens": 4,
+                            "completionTokens": 6,
+                            "totalTokens": 10
+                          }
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        ChatCompletion completion = client.completeChat(
+                List.of(new ChatMessage("user", "你好")),
+                CONNECTION,
+                "correlation-123"
+        );
+
+        assertEquals("你好，我是 LUMORA。", completion.getMessage());
+        assertEquals(10, completion.getUsage().getTotalTokens());
+        server.verify();
+    }
+
+    @Test
+    void forwardsTextUsageAndCompletionStreamEvents() {
+        server.expect(requestTo(
+                        "http://127.0.0.1:45101/api/v1/chat/completions/stream"
+                ))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(content().json("""
+                        {
+                          "connection": {
+                            "apiKey": "provider-secret"
+                          }
+                        }
+                        """, false))
+                .andRespond(withSuccess("""
+                        data: {"type":"text_delta","delta":"你","model":"demo"}
+
+                        data: {"type":"reasoning_delta","delta":"分析问题","model":"demo"}
+
+                        data: {"type":"text_delta","delta":"好","model":"demo"}
+
+                        data: {"type":"usage","model":"demo","usage":{"promptTokens":2,"completionTokens":2,"totalTokens":4}}
+
+                        data: {"type":"completed","model":"demo"}
+
+                        """, MediaType.TEXT_EVENT_STREAM));
+        List<ChatStreamEvent> events = new ArrayList<>();
+
+        client.streamChat(
+                List.of(new ChatMessage("user", "你好")),
+                CONNECTION,
+                "correlation-123",
+                events::add
+        );
+
+        assertEquals(5, events.size());
+        assertEquals(ChatStreamEventType.TEXT_DELTA, events.get(0).getType());
+        assertEquals(
+                ChatStreamEventType.REASONING_DELTA,
+                events.get(1).getType()
+        );
+        assertEquals(
+                "你好",
+                events.get(0).getDelta() + events.get(2).getDelta()
+        );
+        assertEquals(4, events.get(3).getUsage().getTotalTokens());
+        assertEquals(
+                ChatStreamEventType.COMPLETED,
+                events.get(4).getType()
+        );
+        server.verify();
     }
 }

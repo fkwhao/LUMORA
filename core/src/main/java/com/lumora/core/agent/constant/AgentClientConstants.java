@@ -8,7 +8,12 @@ import java.time.Duration;
 public final class AgentClientConstants {
 
     public static final String PLAN_TASK_PATH = "/api/v1/tasks/plan";
-    public static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
+    public static final String CHAT_COMPLETIONS_PATH =
+            "/api/v1/chat/completions";
+    public static final String CHAT_COMPLETIONS_STREAM_PATH =
+            "/api/v1/chat/completions/stream";
+    public static final String SSE_DATA_PREFIX = "data:";
+    public static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(90);
 
     private AgentClientConstants() {
     }
