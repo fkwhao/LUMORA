@@ -6,6 +6,7 @@ import {
   KeyRound,
   LockKeyhole,
   Palette,
+  RefreshCw,
   RotateCcw,
   Search,
   Server,
@@ -265,7 +266,7 @@ function ArchivedTasksPanel({
         <div>
           <span className="eyebrow">本地数据</span>
           <h1>已归档任务</h1>
-          <p>归档只整理任务列表，不会影响模型配置和工作空间。</p>
+          <p>归档只整理任务列表，不会影响模型配置和项目关联。</p>
         </div>
         <button
           className="delete-all-button"
@@ -342,7 +343,10 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
   const [providerName, setProviderName] = useState("OpenAI Compatible");
   const [baseUrl, setBaseUrl] = useState("https://api.openai.com/v1");
   const [model, setModel] = useState("");
+  const [contextWindow, setContextWindow] = useState(128_000);
   const [apiKey, setApiKey] = useState("");
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [isListingModels, setIsListingModels] = useState(false);
   const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [error, setError] = useState<string>();
 
@@ -355,6 +359,7 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
         setProviderName(normalized.providerName);
         setBaseUrl(normalized.baseUrl);
         setModel(normalized.model);
+        setContextWindow(normalized.contextWindow);
       })
       .catch((loadError: unknown) => setError(toMessage(loadError)));
   }, [api]);
@@ -368,6 +373,7 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
         providerName,
         baseUrl,
         model,
+        contextWindow,
         apiKey: apiKey.trim() || undefined,
       });
       setSettings(updated);
@@ -377,6 +383,26 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
     } catch (saveError) {
       setStatus("idle");
       setError(toMessage(saveError));
+    }
+  }
+
+  async function listModels() {
+    setIsListingModels(true);
+    setError(undefined);
+    try {
+      const models = await api.listModels({
+        providerName,
+        baseUrl,
+        apiKey: apiKey.trim() || undefined,
+      });
+      setAvailableModels(models);
+      if (!model.trim() && models[0]) {
+        setModel(models[0]);
+      }
+    } catch (listError) {
+      setError(toMessage(listError));
+    } finally {
+      setIsListingModels(false);
     }
   }
 
@@ -447,13 +473,49 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
               </select>
             </label>
             <label>
-              <span>模型名称</span>
+              <span>上下文长度（Token）</span>
               <input
-                value={model}
-                onChange={(event) => setModel(event.target.value)}
-                placeholder="例如 gpt-4.1-mini"
+                type="number"
+                min={1}
+                max={10_000_000}
+                step={1}
+                value={contextWindow}
+                onChange={(event) =>
+                  setContextWindow(Number(event.target.value))
+                }
                 required
               />
+            </label>
+            <label className="field-wide">
+              <span>模型名称</span>
+              <div className="model-discovery-control">
+                <input
+                  list="available-models"
+                  value={model}
+                  onChange={(event) => setModel(event.target.value)}
+                  placeholder="先获取列表，或手动输入模型 ID"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => void listModels()}
+                  disabled={isListingModels || (!apiKey.trim() && !settings?.apiKeyConfigured)}
+                >
+                  <RefreshCw
+                    size={14}
+                    className={isListingModels ? "is-spinning" : undefined}
+                  />
+                  {isListingModels ? "获取中" : "获取模型"}
+                </button>
+              </div>
+              <datalist id="available-models">
+                {availableModels.map((availableModel) => (
+                  <option value={availableModel} key={availableModel} />
+                ))}
+              </datalist>
+              {availableModels.length > 0 && (
+                <small>已获取 {availableModels.length} 个可用模型</small>
+              )}
             </label>
             <label className="field-wide">
               <span>API Base URL</span>

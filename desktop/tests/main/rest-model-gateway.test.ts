@@ -21,6 +21,34 @@ afterEach(async () => {
 });
 
 describe("Java REST model gateway", () => {
+  it("retrieves the available model IDs through Java Core", async () => {
+    let receivedPath = "";
+    let receivedBody = "";
+    const baseUrl = await listen(async (request) => {
+      receivedPath = request.url ?? "";
+      receivedBody = await readBody(request);
+      return { models: ["deepseek-v4-flash", "deepseek-v4-pro"] };
+    });
+    const gateway = new RestModelGateway({
+      baseUrl,
+      sessionToken: "test-token",
+    });
+
+    const models = await gateway.listModels({
+      providerName: "DeepSeek",
+      baseUrl: "https://api.deepseek.com",
+      apiKey: "provider-secret",
+    });
+
+    expect(receivedPath).toBe("/api/v1/model/settings/models");
+    expect(JSON.parse(receivedBody)).toEqual({
+      providerName: "DeepSeek",
+      baseUrl: "https://api.deepseek.com",
+      apiKey: "provider-secret",
+    });
+    expect(models).toEqual(["deepseek-v4-flash", "deepseek-v4-pro"]);
+  });
+
   it("sends chat history through the authenticated Java boundary", async () => {
     let receivedAuthorization = "";
     let receivedBody = "";
@@ -83,17 +111,26 @@ describe("Java REST model gateway", () => {
     const events: string[] = [];
     const reasoningEvents: string[] = [];
 
-    const subscription = gateway.streamMessage("task-1", "你好", (event) => {
-      if (event.type === "text_delta") {
-        events.push(event.delta);
-      }
-      if (event.type === "reasoning_delta") {
-        reasoningEvents.push(event.delta);
-      }
-    });
+    const subscription = gateway.streamMessage(
+      "task-1",
+      "你好",
+      (event) => {
+        if (event.type === "text_delta") {
+          events.push(event.delta);
+        }
+        if (event.type === "reasoning_delta") {
+          reasoningEvents.push(event.delta);
+        }
+      },
+      { model: "gpt-5.6-sol", reasoningEffort: "high" },
+    );
     await subscription.completed;
 
-    expect(JSON.parse(receivedBody)).toEqual({ content: "你好" });
+    expect(JSON.parse(receivedBody)).toEqual({
+      content: "你好",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "high",
+    });
     expect(events.join("")).toBe("你好");
     expect(reasoningEvents.join("")).toBe("分析问题");
   });

@@ -11,6 +11,8 @@ from app.constants.api_paths import (
     CHAT_COMPLETIONS_ROUTE,
     CHAT_COMPLETIONS_STREAM_ROUTE,
     HEALTH_ROUTE,
+    MEMORY_EXTRACTIONS_ROUTE,
+    MODELS_ROUTE,
     PLAN_TASK_ROUTE,
 )
 from app.constants.error_codes import (
@@ -26,9 +28,13 @@ from app.constants.http_contract import (
 )
 from app.constants.service_metadata import SERVICE_NAME, STATUS_UP
 from app.dto.request.chat_completion_request import ChatCompletionRequest
+from app.dto.request.model_list_request import ModelListRequest
+from app.dto.request.memory_extraction_request import MemoryExtractionRequest
 from app.dto.request.plan_task_request import PlanTaskRequest
 from app.dto.response.chat_completion_response import ChatCompletionResponse
 from app.dto.response.health_response import HealthResponse
+from app.dto.response.model_list_response import ModelListResponse
+from app.dto.response.memory_extraction_response import MemoryExtractionResponse
 from app.dto.response.plan_step_response import PlanStepResponse
 from app.dto.response.plan_task_response import PlanTaskResponse
 from app.exception.runtime_errors import (
@@ -38,6 +44,7 @@ from app.exception.runtime_errors import (
 )
 from app.security.request_authenticator import RequestAuthenticator
 from app.service.chat_service import ChatService, ModelProviderError
+from app.service.memory_extraction_service import MemoryExtractionService
 from app.service.planner_service import PlannerService
 
 
@@ -64,11 +71,13 @@ class AgentHttpController:
         settings: AgentSettings,
         planner_service: PlannerService,
         chat_service: ChatService,
+        memory_extraction_service: MemoryExtractionService,
     ) -> None:
         self.router = APIRouter(prefix=API_V1_PREFIX)
         self._settings = settings
         self._planner_service = planner_service
         self._chat_service = chat_service
+        self._memory_extraction_service = memory_extraction_service
         self._authenticator = RequestAuthenticator(settings)
         self.router.add_api_route(
             HEALTH_ROUTE,
@@ -94,6 +103,92 @@ class AgentHttpController:
             methods=[HTTPMethod.POST],
             response_class=StreamingResponse,
         )
+        self.router.add_api_route(
+            MODELS_ROUTE,
+            self.list_models,
+            methods=[HTTPMethod.POST],
+            response_model=ModelListResponse,
+        )
+        self.router.add_api_route(
+            MEMORY_EXTRACTIONS_ROUTE,
+            self.extract_memories,
+            methods=[HTTPMethod.POST],
+            response_model=MemoryExtractionResponse,
+        )
+
+    async def extract_memories(
+        self,
+        request: MemoryExtractionRequest,
+        authorization: str | None = Header(
+            default=None,
+            alias=AUTHORIZATION_HEADER,
+        ),
+        protocol_version: str | None = Header(
+            default=None,
+            alias=PROTOCOL_VERSION_HEADER,
+        ),
+        correlation_id: str | None = Header(
+            default=None,
+            alias=CORRELATION_ID_HEADER,
+        ),
+    ) -> MemoryExtractionResponse:
+        authenticated_correlation_id = self._authenticate(
+            authorization,
+            protocol_version,
+            correlation_id,
+        )
+        try:
+            return await self._memory_extraction_service.extract(request)
+        except ModelProviderError as error:
+            raise AgentHttpError(
+                status.HTTP_502_BAD_GATEWAY,
+                MODEL_PROVIDER_ERROR,
+                str(error),
+                True,
+                authenticated_correlation_id,
+            ) from error
+
+    async def list_models(
+        self,
+        request: ModelListRequest,
+        authorization: str | None = Header(
+            default=None,
+            alias=AUTHORIZATION_HEADER,
+        ),
+        protocol_version: str | None = Header(
+            default=None,
+            alias=PROTOCOL_VERSION_HEADER,
+        ),
+        correlation_id: str | None = Header(
+            default=None,
+            alias=CORRELATION_ID_HEADER,
+        ),
+    ) -> ModelListResponse:
+        authenticated_correlation_id = self._authenticate(
+            authorization,
+            protocol_version,
+            correlation_id,
+        )
+        try:
+            return ModelListResponse(
+                models=await self._chat_service.list_models(request)
+            )
+        except ValueError as error:
+            raise AgentHttpError(
+                status.HTTP_400_BAD_REQUEST,
+                INVALID_REQUEST,
+                str(error),
+                False,
+                authenticated_correlation_id,
+            ) from error
+        except ModelProviderError as error:
+            raise AgentHttpError(
+                status.HTTP_502_BAD_GATEWAY,
+                MODEL_PROVIDER_ERROR,
+                str(error),
+                True,
+                authenticated_correlation_id,
+            ) from error
 
     def health(
         self,

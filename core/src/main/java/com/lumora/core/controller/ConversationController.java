@@ -57,6 +57,8 @@ public class ConversationController {
         conversationService.streamMessage(
                 taskId,
                 request.getContent(),
+                request.getModel(),
+                request.getReasoningEffort(),
                 correlationId,
                 event -> sendEvent(emitter, event),
                 emitter::complete,
@@ -81,6 +83,8 @@ public class ConversationController {
                 taskId,
                 messageId,
                 request.getContent(),
+                request.getModel(),
+                request.getReasoningEffort(),
                 correlationId,
                 event -> sendEvent(emitter, event),
                 emitter::complete,

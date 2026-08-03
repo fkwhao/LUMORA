@@ -2,7 +2,9 @@ import { ipcMain } from "electron";
 
 import type {
   ChatMessage,
+  ChatRequestOptions,
   ChatStreamEvent,
+  ListModelsInput,
   UpdateModelSettingsInput,
 } from "../shared/model-contract";
 import type { ModelGateway } from "./model-gateway";
@@ -10,6 +12,7 @@ import type { ModelGateway } from "./model-gateway";
 export const modelIpcChannels = {
   getSettings: "model:get-settings",
   updateSettings: "model:update-settings",
+  listModels: "model:list-models",
   complete: "model:complete",
   listMessages: "model:list-messages",
   streamStart: "model:stream-start",
@@ -24,6 +27,11 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
     modelIpcChannels.updateSettings,
     (_event, input: UpdateModelSettingsInput) =>
       gateway.updateSettings(validateSettings(input)),
+  );
+  ipcMain.handle(
+    modelIpcChannels.listModels,
+    (_event, input: ListModelsInput) =>
+      gateway.listModels(validateListModelsInput(input)),
   );
   ipcMain.handle(
     modelIpcChannels.complete,
@@ -41,6 +49,7 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
         ? undefined
         : requireText(input.messageId, "消息 ID");
     const requestId = requireText(input?.requestId, "流请求 ID");
+    const options = validateChatRequestOptions(input?.options);
     const key = subscriptionKey(event.sender.id, requestId);
     subscriptions.get(key)?.();
 
@@ -53,8 +62,14 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
         }
       };
     const subscription = messageId
-      ? gateway.regenerateMessage(taskId, messageId, content, handleEvent)
-      : gateway.streamMessage(taskId, content, handleEvent);
+      ? gateway.regenerateMessage(
+          taskId,
+          messageId,
+          content,
+          handleEvent,
+          options,
+        )
+      : gateway.streamMessage(taskId, content, handleEvent, options);
     subscriptions.set(key, subscription.cancel);
     void subscription.completed
       .catch((error: unknown) => {
@@ -85,6 +100,7 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
   return () => {
     ipcMain.removeHandler(modelIpcChannels.getSettings);
     ipcMain.removeHandler(modelIpcChannels.updateSettings);
+    ipcMain.removeHandler(modelIpcChannels.listModels);
     ipcMain.removeHandler(modelIpcChannels.complete);
     ipcMain.removeHandler(modelIpcChannels.listMessages);
     ipcMain.removeAllListeners(modelIpcChannels.streamStart);
@@ -101,6 +117,7 @@ interface StreamStartInput {
   taskId: string;
   messageId?: string;
   content: string;
+  options?: ChatRequestOptions;
 }
 
 function validateSettings(
@@ -116,7 +133,40 @@ function validateSettings(
     input.apiKey === undefined
       ? undefined
       : requireText(input.apiKey, "API Key");
-  return { providerName, baseUrl, model, apiKey };
+  const contextWindow = Number(input.contextWindow);
+  if (!Number.isInteger(contextWindow) || contextWindow < 1 || contextWindow > 10_000_000) {
+    throw new TypeError("上下文长度必须在 1 到 10000000 之间");
+  }
+  return { providerName, baseUrl, model, contextWindow, apiKey };
+}
+
+function validateListModelsInput(input: ListModelsInput): ListModelsInput {
+  if (!input || typeof input !== "object") {
+    throw new TypeError("模型连接格式无效");
+  }
+  return {
+    providerName: requireText(input.providerName, "模型供应商"),
+    baseUrl: requireText(input.baseUrl, "API 地址"),
+    apiKey:
+      input.apiKey === undefined || !input.apiKey.trim()
+        ? undefined
+        : input.apiKey.trim(),
+  };
+}
+
+function validateChatRequestOptions(
+  options?: ChatRequestOptions,
+): ChatRequestOptions | undefined {
+  if (!options) {
+    return undefined;
+  }
+  const model = options.model?.trim() || undefined;
+  const allowed = new Set(["low", "medium", "high", "xhigh", "max"]);
+  const reasoningEffort = options.reasoningEffort;
+  if (reasoningEffort && !allowed.has(reasoningEffort)) {
+    throw new TypeError("推理强度无效");
+  }
+  return { model, reasoningEffort };
 }
 
 function validateMessages(messages: ChatMessage[]): ChatMessage[] {

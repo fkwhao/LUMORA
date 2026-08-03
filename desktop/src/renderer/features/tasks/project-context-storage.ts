@@ -1,6 +1,7 @@
 import type { ProjectDirectory } from "../../../shared/window-contract";
 import {
   ACTIVE_PROJECT_STORAGE_KEY,
+  PROJECT_NAMES_STORAGE_KEY,
   TASK_PROJECT_PATHS_STORAGE_KEY,
 } from "../../constants/storage";
 
@@ -75,5 +76,37 @@ export function saveTaskProjectPaths(paths: Record<string, string>): void {
     );
   } catch {
     // 项目映射只用于本地组织，写入失败不影响任务主体。
+  }
+}
+
+export function loadProjectNames(): Record<string, string> {
+  try {
+    const value = globalThis.localStorage?.getItem(PROJECT_NAMES_STORAGE_KEY);
+    if (!value) {
+      return {};
+    }
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return {};
+    }
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        ([path, name]) => path.length > 0 && typeof name === "string",
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+export function saveProjectName(path: string, name: string): void {
+  try {
+    const projectNames = loadProjectNames();
+    globalThis.localStorage?.setItem(
+      PROJECT_NAMES_STORAGE_KEY,
+      JSON.stringify({ ...projectNames, [path]: name }),
+    );
+  } catch {
+    // 项目名称持久化失败不影响目录本身的使用。
   }
 }

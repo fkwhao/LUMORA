@@ -164,8 +164,10 @@ globalStyle(".goal-composer textarea,\n.follow-up-composer textarea", {
 
 globalStyle(".goal-composer textarea", {
   minHeight: "92px",
+  maxHeight: "220px",
   padding: "15px 2px 8px",
   fontSize: "13px",
+  overflowY: "hidden",
 });
 
 globalStyle("textarea::placeholder", {

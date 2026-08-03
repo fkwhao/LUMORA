@@ -13,22 +13,52 @@ from app.dto.response.chat_stream_event_response import (
     ChatStreamEventResponse,
 )
 from app.model.model_connection_settings import ModelConnectionSettings
+from app.prompt.prompt_assembly import PromptAssembly
 
 
 class OpenAICompatibleProvider:
     """调用实现 OpenAI Chat Completions 契约的第三方模型服务。"""
 
+    async def list_models(
+        self,
+        settings: ModelConnectionSettings,
+    ) -> list[str]:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{settings.base_url}/models",
+                headers={
+                    "Authorization": f"Bearer {settings.api_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, list):
+            raise ValueError("模型列表响应格式无效")
+        models = {
+            item.get("id", "").strip()
+            for item in data
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        }
+        resolved = sorted(model for model in models if model)
+        if not resolved:
+            raise ValueError("供应商未返回可用模型")
+        return resolved
+
     async def complete(
         self,
         settings: ModelConnectionSettings,
-        system_prompt: str,
+        prompt: PromptAssembly,
         messages: list[ChatMessageRequest],
+        reasoning_effort: str | None = None,
     ) -> ChatCompletionResponse:
         request_body = self._request_body(
             settings,
-            system_prompt,
+            prompt,
             messages,
             stream=False,
+            reasoning_effort=reasoning_effort,
         )
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
@@ -46,14 +76,16 @@ class OpenAICompatibleProvider:
     async def stream(
         self,
         settings: ModelConnectionSettings,
-        system_prompt: str,
+        prompt: PromptAssembly,
         messages: list[ChatMessageRequest],
+        reasoning_effort: str | None = None,
     ) -> AsyncIterator[ChatStreamEventResponse]:
         request_body = self._request_body(
             settings,
-            system_prompt,
+            prompt,
             messages,
             stream=True,
+            reasoning_effort=reasoning_effort,
         )
         resolved_model = settings.model
         async with httpx.AsyncClient(timeout=60.0) as client, client.stream(
@@ -111,31 +143,71 @@ class OpenAICompatibleProvider:
     def _request_body(
         self,
         settings: ModelConnectionSettings,
-        system_prompt: str,
+        prompt: PromptAssembly,
         messages: list[ChatMessageRequest],
         stream: bool,
+        reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
+        request_messages: list[dict[str, Any]] = [
+            *prompt.system_messages,
+            *prompt.context_messages,
+            *[
+                {"role": message.role, "content": message.content}
+                for message in messages
+            ],
+        ]
+        self._attach_current_user_blocks(
+            request_messages,
+            prompt.current_user_content_blocks,
+            flatten=self._is_deepseek(settings),
+        )
         request_body: dict[str, Any] = {
             "model": settings.model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-                *[
-                    {"role": message.role, "content": message.content}
-                    for message in messages
-                ],
-            ],
+            "messages": request_messages,
             "stream": stream,
         }
+        if prompt.tools:
+            request_body["tools"] = list(prompt.tools)
         if stream:
             request_body["stream_options"] = {"include_usage": True}
+        if reasoning_effort:
+            request_body["reasoning_effort"] = reasoning_effort
         if self._is_deepseek(settings):
             # DeepSeek 的思考模型需要显式开启，返回内容位于 reasoning_content。
-            request_body["reasoning_effort"] = "high"
+            request_body["reasoning_effort"] = reasoning_effort or "high"
             request_body["thinking"] = {"type": "enabled"}
         return request_body
+
+    @staticmethod
+    def _attach_current_user_blocks(
+        messages: list[dict[str, Any]],
+        reminder_blocks: tuple[dict[str, str], ...],
+        flatten: bool,
+    ) -> None:
+        if not reminder_blocks:
+            return
+        current_user = next(
+            (
+                message
+                for message in reversed(messages)
+                if message.get("role") == "user"
+            ),
+            None,
+        )
+        if current_user is None:
+            raise ValueError("动态提醒缺少当前用户消息")
+        user_content = current_user.get("content")
+        if not isinstance(user_content, str) or not user_content:
+            raise ValueError("当前用户消息内容格式无效")
+        blocks = [
+            *[dict(block) for block in reminder_blocks],
+            {"type": "text", "text": user_content},
+        ]
+        current_user["content"] = (
+            "\n\n".join(block["text"] for block in blocks)
+            if flatten
+            else blocks
+        )
 
     @staticmethod
     def _is_deepseek(settings: ModelConnectionSettings) -> bool:

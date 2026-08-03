@@ -11,6 +11,7 @@ public class CoreProperties {
     private String startupToken = "";
     private String agentUrl = "http://127.0.0.1:45101";
     private String agentStartupToken = "";
+    private boolean memoryAutoExtractionEnabled = true;
 
     public String getProtocolVersion() {
         return protocolVersion;
@@ -42,5 +43,15 @@ public class CoreProperties {
 
     public void setAgentStartupToken(String agentStartupToken) {
         this.agentStartupToken = agentStartupToken;
+    }
+
+    public boolean isMemoryAutoExtractionEnabled() {
+        return memoryAutoExtractionEnabled;
+    }
+
+    public void setMemoryAutoExtractionEnabled(
+            boolean memoryAutoExtractionEnabled
+    ) {
+        this.memoryAutoExtractionEnabled = memoryAutoExtractionEnabled;
     }
 }

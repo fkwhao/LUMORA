@@ -155,13 +155,20 @@ describe("task store", () => {
 
     await store
       .getState()
-      .regenerateMessage("message-1", "只整理图片");
+      .regenerateMessage("message-1", "只整理图片", {
+        model: "gpt-5.6-sol",
+        reasoningEffort: "medium",
+      });
 
     expect(modelApi.regenerateMessage).toHaveBeenCalledWith(
       createdTask.taskId,
       "message-1",
       "只整理图片",
       expect.any(Function),
+      {
+        model: "gpt-5.6-sol",
+        reasoningEffort: "medium",
+      },
     );
     expect(store.getState().messages).toEqual([
       expect.objectContaining({ content: "只整理图片" }),
@@ -170,6 +177,38 @@ describe("task store", () => {
         durationMs: 1_500,
       }),
     ]);
+  });
+
+  it("cancels an active streamed answer and keeps the sent message", async () => {
+    const api = createApi();
+    const modelApi = createModelApi();
+    const cancel = vi.fn();
+    vi.mocked(modelApi.streamMessage).mockReturnValue(cancel);
+    const store = createTaskStore(api, modelApi);
+    await store.getState().openTask(createdTask.taskId);
+
+    const pendingSend = store.getState().sendMessage("继续整理文档");
+
+    expect(store.getState().isChatting).toBe(true);
+    expect(store.getState().messages.at(-2)).toMatchObject({
+      role: "user",
+      content: "继续整理文档",
+    });
+
+    store.getState().stopChat();
+    await pendingSend;
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(store.getState().isChatting).toBe(false);
+    expect(store.getState().messages.at(-2)).toMatchObject({
+      role: "user",
+      content: "继续整理文档",
+    });
+    expect(store.getState().messages.at(-1)).toMatchObject({
+      role: "assistant",
+      content: "",
+    });
+    expect(store.getState().chatWasStopped).toBe(true);
   });
 
   it("persists archived tasks locally and allows restoring them", async () => {
@@ -208,6 +247,7 @@ function createModelApi(): LumoraModelApi {
   return {
     getSettings: vi.fn(),
     updateSettings: vi.fn(),
+    listModels: vi.fn(async () => []),
     complete: vi.fn(),
     listMessages: vi.fn(async () => [
       { role: "user" as const, content: "整理下载目录" },

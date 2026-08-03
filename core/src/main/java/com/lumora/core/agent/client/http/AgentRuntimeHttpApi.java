@@ -3,8 +3,12 @@ package com.lumora.core.agent.client.http;
 import com.lumora.core.agent.constant.AgentClientConstants;
 import com.lumora.core.agent.dto.request.AgentChatCompletionRequest;
 import com.lumora.core.agent.dto.request.AgentPlanTaskRequest;
+import com.lumora.core.agent.dto.request.AgentModelListRequest;
+import com.lumora.core.agent.dto.request.AgentMemoryExtractionRequest;
 import com.lumora.core.agent.dto.response.AgentChatCompletionResponse;
 import com.lumora.core.agent.dto.response.AgentPlanTaskResponse;
+import com.lumora.core.agent.dto.response.AgentModelListResponse;
+import com.lumora.core.agent.dto.response.AgentMemoryExtractionResponse;
 import com.lumora.core.common.constant.HttpContractConstants;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -23,6 +27,20 @@ import org.springframework.web.service.annotation.PostExchange;
         contentType = MediaType.APPLICATION_JSON_VALUE
 )
 public interface AgentRuntimeHttpApi {
+
+    @PostExchange(AgentClientConstants.MODELS_PATH)
+    AgentModelListResponse listModels(
+            @RequestHeader(HttpContractConstants.CORRELATION_ID_HEADER)
+            String correlationId,
+            @RequestBody AgentModelListRequest request
+    );
+
+    @PostExchange(AgentClientConstants.MEMORY_EXTRACTIONS_PATH)
+    AgentMemoryExtractionResponse extractMemories(
+            @RequestHeader(HttpContractConstants.CORRELATION_ID_HEADER)
+            String correlationId,
+            @RequestBody AgentMemoryExtractionRequest request
+    );
 
     /**
      * 调用 Agent 任务规划端点。

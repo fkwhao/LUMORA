@@ -7,7 +7,9 @@ import type {
 } from "../shared/task-contract";
 import type {
   ChatMessage,
+  ChatRequestOptions,
   ChatStreamEvent,
+  ListModelsInput,
   UpdateModelSettingsInput,
 } from "../shared/model-contract";
 import {
@@ -52,11 +54,18 @@ const api: LumoraApi = {
     getSettings: () => ipcRenderer.invoke("model:get-settings"),
     updateSettings: (input: UpdateModelSettingsInput) =>
       ipcRenderer.invoke("model:update-settings", input),
+    listModels: (input: ListModelsInput) =>
+      ipcRenderer.invoke("model:list-models", input),
     complete: (messages: ChatMessage[]) =>
       ipcRenderer.invoke("model:complete", messages),
     listMessages: (taskId) =>
       ipcRenderer.invoke("model:list-messages", validateTaskId(taskId)),
-    streamMessage: (untrustedTaskId, untrustedContent, onEvent) => {
+    streamMessage: (
+      untrustedTaskId,
+      untrustedContent,
+      onEvent,
+      options?: ChatRequestOptions,
+    ) => {
       const taskId = validateTaskId(untrustedTaskId);
       const content = untrustedContent.trim();
       if (!content) {
@@ -80,6 +89,7 @@ const api: LumoraApi = {
         requestId,
         taskId,
         content,
+        options,
       });
       return () => {
         ipcRenderer.removeListener("model:stream-event", listener);
@@ -91,6 +101,7 @@ const api: LumoraApi = {
       untrustedMessageId,
       untrustedContent,
       onEvent,
+      options?: ChatRequestOptions,
     ) => {
       const taskId = validateTaskId(untrustedTaskId);
       const messageId = validateMessageId(untrustedMessageId);
@@ -116,6 +127,7 @@ const api: LumoraApi = {
         taskId,
         messageId,
         content,
+        options,
       });
       return () => {
         ipcRenderer.removeListener("model:stream-event", listener);

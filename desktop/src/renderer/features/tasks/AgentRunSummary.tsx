@@ -9,9 +9,11 @@ import {
 import type { TaskEvent } from "../../../shared/task-contract";
 
 interface AgentRunSummaryProps {
+  startedAt?: number;
   durationMs?: number;
   events: TaskEvent[];
   running: boolean;
+  stopped?: boolean;
 }
 
 /**
@@ -19,12 +21,27 @@ interface AgentRunSummaryProps {
  * 避免把不稳定的思维文本误认为真实执行记录。
  */
 export function AgentRunSummary({
+  startedAt,
   durationMs,
   events,
   running,
+  stopped = false,
 }: AgentRunSummaryProps) {
   const [expanded, setExpanded] = useState(running);
+  const [elapsedMs, setElapsedMs] = useState(durationMs ?? 0);
   const wasRunning = useRef(running);
+
+  useEffect(() => {
+    if (!running) {
+      setElapsedMs(durationMs ?? 0);
+      return;
+    }
+    const started = startedAt ?? Date.now();
+    const updateElapsed = () => setElapsedMs(Date.now() - started);
+    updateElapsed();
+    const timer = window.setInterval(updateElapsed, 500);
+    return () => window.clearInterval(timer);
+  }, [durationMs, running, startedAt]);
 
   useEffect(() => {
     if (running) {
@@ -38,21 +55,25 @@ export function AgentRunSummary({
   const visibleEvents = events.slice(-8);
   return (
     <section className={`agent-run${expanded ? " expanded" : ""}`}>
-      <button
-        className="agent-run-toggle"
-        type="button"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((current) => !current)}
-      >
-        <span>
-          {running
-            ? "正在处理"
-            : durationMs
-              ? `已处理 ${formatDuration(durationMs)}`
-              : "已处理"}
-        </span>
-        <ChevronRight size={15} />
-      </button>
+      <div className="agent-run-heading">
+        <button
+          className="agent-run-toggle"
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+        >
+          <span>
+            {running
+              ? `正在处理 ${formatDuration(elapsedMs, false)}`
+              : stopped && durationMs
+                ? `你在 ${formatDuration(durationMs)} 后停止了`
+              : durationMs
+                ? `已处理 ${formatDuration(durationMs)}`
+                : "已处理"}
+          </span>
+          <ChevronRight size={15} />
+        </button>
+      </div>
       <div className="agent-run-events" aria-hidden={!expanded}>
         <div className="agent-run-events-inner">
           {visibleEvents.length > 0 ? (
@@ -78,7 +99,11 @@ export function AgentRunSummary({
               </span>
               <div>
                 <strong>
-                  {running ? "正在生成回答" : "回答生成完成"}
+                  {running
+                    ? "正在生成回答"
+                    : stopped
+                      ? "已停止生成"
+                      : "回答生成完成"}
                 </strong>
                 <p>当前链路还没有返回更细的工具执行事件。</p>
               </div>
@@ -90,9 +115,10 @@ export function AgentRunSummary({
   );
 }
 
-function formatDuration(durationMs: number): string {
+function formatDuration(durationMs: number, minimumOne = true): string {
   if (durationMs < 60_000) {
-    return `${Math.max(1, Math.round(durationMs / 1000))}s`;
+    const seconds = Math.round(durationMs / 1000);
+    return `${minimumOne ? Math.max(1, seconds) : Math.max(0, seconds)}s`;
   }
   const minutes = Math.floor(durationMs / 60_000);
   const seconds = Math.round((durationMs % 60_000) / 1000);

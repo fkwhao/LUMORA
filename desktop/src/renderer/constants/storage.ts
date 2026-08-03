@@ -19,3 +19,6 @@ export const ACTIVE_PROJECT_STORAGE_KEY =
 
 export const TASK_PROJECT_PATHS_STORAGE_KEY =
   "lumora.desktop.task-project-paths.v1";
+
+export const PROJECT_NAMES_STORAGE_KEY =
+  "lumora.desktop.project-names.v1";

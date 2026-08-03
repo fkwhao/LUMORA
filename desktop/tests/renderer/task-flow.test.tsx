@@ -64,20 +64,12 @@ describe("visible task flow", () => {
     );
 
     expect(screen.queryByText("Agent 办公室")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "工作空间" }));
     expect(
-      screen.getByRole("heading", { name: "组织项目上下文" }),
-    ).toBeVisible();
-    fireEvent.click(
-      screen.getByRole("button", { name: "新建工作空间" }),
-    );
-    expect(screen.getByText("新工作空间")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "任务" }));
-    fireEvent.click(screen.getByRole("button", { name: "返回" }));
+      screen.queryByRole("button", { name: "工作空间" }),
+    ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "组织项目上下文" }),
+      screen.getByRole("button", { name: "选择项目文件夹" }),
     ).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "前进" }));
     const goalInput = screen.getByRole("textbox", {
       name: "告诉 LUMORA 你的目标",
     });

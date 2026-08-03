@@ -1,6 +1,7 @@
 package com.lumora.core.agent.client;
 
 import com.lumora.core.agent.model.AgentPlanStep;
+import com.lumora.core.agent.model.AgentMemoryCandidate;
 import com.lumora.core.model.ChatCompletion;
 import com.lumora.core.model.ChatMessage;
 import com.lumora.core.model.ChatStreamEvent;
@@ -13,6 +14,21 @@ import java.util.function.Consumer;
  * Service 调用 Python Agent 的稳定接口，业务层不依赖 HTTP DTO。
  */
 public interface AgentRuntimeClient {
+
+    List<String> listModels(
+            String providerName,
+            String baseUrl,
+            String apiKey,
+            String correlationId
+    );
+
+    List<AgentMemoryCandidate> extractMemories(
+            String userMessage,
+            String assistantMessage,
+            String existingMemorySummary,
+            ModelConnection connection,
+            String correlationId
+    );
 
     /**
      * 请求 Python Agent 为任务生成初始计划。
@@ -57,6 +73,8 @@ public interface AgentRuntimeClient {
             List<ChatMessage> messages,
             ModelConnection connection,
             String correlationId,
+            String reasoningEffort,
+            String memorySummary,
             Consumer<ChatStreamEvent> eventConsumer
     );
 }

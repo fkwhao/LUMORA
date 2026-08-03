@@ -2,6 +2,7 @@ export interface ModelSettings {
   providerName: string;
   baseUrl: string;
   model: string;
+  contextWindow: number;
   apiKeyConfigured: boolean;
 }
 
@@ -9,6 +10,13 @@ export interface UpdateModelSettingsInput {
   providerName: string;
   baseUrl: string;
   model: string;
+  contextWindow: number;
+  apiKey?: string;
+}
+
+export interface ListModelsInput {
+  providerName: string;
+  baseUrl: string;
   apiKey?: string;
 }
 
@@ -36,6 +44,13 @@ export interface ChatCompletion {
   usage: TokenUsage;
 }
 
+export type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max";
+
+export interface ChatRequestOptions {
+  model?: string;
+  reasoningEffort?: ReasoningEffort;
+}
+
 export type ChatStreamEventType =
   | "text_delta"
   | "reasoning_delta"
@@ -54,17 +69,20 @@ export interface ChatStreamEvent {
 export interface LumoraModelApi {
   getSettings(): Promise<ModelSettings>;
   updateSettings(input: UpdateModelSettingsInput): Promise<ModelSettings>;
+  listModels(input: ListModelsInput): Promise<string[]>;
   complete(messages: ChatMessage[]): Promise<ChatCompletion>;
   listMessages(taskId: string): Promise<ChatMessage[]>;
   streamMessage(
     taskId: string,
     content: string,
     onEvent: (event: ChatStreamEvent) => void,
+    options?: ChatRequestOptions,
   ): () => void;
   regenerateMessage(
     taskId: string,
     messageId: string,
     content: string,
     onEvent: (event: ChatStreamEvent) => void,
+    options?: ChatRequestOptions,
   ): () => void;
 }

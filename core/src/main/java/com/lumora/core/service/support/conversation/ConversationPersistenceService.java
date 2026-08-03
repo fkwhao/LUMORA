@@ -10,6 +10,7 @@ import com.lumora.core.mapper.ConversationMessageMapper;
 import com.lumora.core.model.ChatMessage;
 import com.lumora.core.model.TokenUsage;
 import com.lumora.core.service.TaskService;
+import com.lumora.core.service.MemoryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -30,6 +31,7 @@ public class ConversationPersistenceService {
     private final ConversationMapper conversationMapper;
     private final ConversationMessageMapper messageMapper;
     private final TaskService taskService;
+    private final MemoryService memoryService;
     private final Clock clock;
     private final TransactionTemplate transactionTemplate;
 
@@ -247,6 +249,10 @@ public class ConversationPersistenceService {
                 conversationId,
                 assistantSequence,
                 modelMessages,
+                currentUserMessage.getMessageId(),
+                currentUserMessage.getContent(),
+                memoryService.buildPromptSummary(conversationId),
+                memoryService.buildExtractionContext(conversationId),
                 System.nanoTime()
         );
     }

@@ -2,6 +2,7 @@ package com.lumora.core.dto.request;
 
 import com.lumora.core.common.constant.ConversationConstants;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 public class SendMessageRequest {
@@ -12,6 +13,15 @@ public class SendMessageRequest {
             message = "消息内容过长"
     )
     private String content;
+
+    @Size(max = 160, message = "模型名称过长")
+    private String model;
+
+    @Pattern(
+            regexp = "low|medium|high|xhigh|max",
+            message = "推理强度无效"
+    )
+    private String reasoningEffort;
 
     public SendMessageRequest() {
     }
@@ -26,5 +36,21 @@ public class SendMessageRequest {
 
     public void setContent(String content) {
         this.content = content;
+    }
+
+    public String getModel() {
+        return model;
+    }
+
+    public void setModel(String model) {
+        this.model = model;
+    }
+
+    public String getReasoningEffort() {
+        return reasoningEffort;
+    }
+
+    public void setReasoningEffort(String reasoningEffort) {
+        this.reasoningEffort = reasoningEffort;
     }
 }

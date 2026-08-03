@@ -61,33 +61,13 @@ globalStyle(".prototype-section-heading > button", {
   fontSize: "10px",
 });
 
-globalStyle(".workspace-grid,\n.skill-grid", {
+globalStyle(".skill-grid", {
   display: "grid",
   gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
   gap: "10px",
 });
 
-globalStyle(".workspace-card", {
-  display: "grid",
-  gridTemplateColumns: "auto minmax(0, 1fr) auto",
-  alignItems: "center",
-  minHeight: "82px",
-  gap: "12px",
-  padding: "14px",
-  color: "var(--ink)",
-  border: "1px solid var(--line)",
-  borderRadius: "12px",
-  background: "#fff",
-  cursor: "pointer",
-  textAlign: "left",
-});
-
-globalStyle(".workspace-card:hover,\n.workspace-card.active", {
-  borderColor: "#bfd1ef",
-  background: "#f8faff",
-});
-
-globalStyle(".workspace-card > span,\n.skill-grid article > span,\n.automation-list article > span", {
+globalStyle(".skill-grid article > span,\n.automation-list article > span", {
   display: "grid",
   width: "38px",
   height: "38px",
@@ -95,28 +75,6 @@ globalStyle(".workspace-card > span,\n.skill-grid article > span,\n.automation-l
   color: "#3266ae",
   borderRadius: "10px",
   background: "#edf4ff",
-});
-
-globalStyle(".workspace-card div", {
-  display: "grid",
-  minWidth: "0",
-  gap: "5px",
-});
-
-globalStyle(".workspace-card strong", {
-  fontSize: "11px",
-});
-
-globalStyle(".workspace-card small", {
-  overflow: "hidden",
-  color: "var(--muted)",
-  fontSize: "9px",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-});
-
-globalStyle(".workspace-card > svg", {
-  color: "var(--green)",
 });
 
 globalStyle(".automation-list", {

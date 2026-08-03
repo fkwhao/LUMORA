@@ -5,29 +5,26 @@ import { globalStyle } from "@vanilla-extract/css";
  * 这里只集中校准字号、字重和行高，避免散落的小字号发虚。
  */
 globalStyle("body", {
-  fontSize: "13px",
-  fontWeight: "440",
+  fontSize: "14px",
+  fontWeight: "450",
+  fontOpticalSizing: "auto",
 });
 
 globalStyle("button,\ninput,\nselect,\ntextarea", {
+  fontFamily: "inherit",
   fontWeight: "450",
 });
 
-globalStyle(".brand strong", {
-  fontSize: "17px",
-  fontWeight: "720",
-});
-
-globalStyle(".brand small", {
-  fontSize: "11px",
-  fontWeight: "450",
+globalStyle(".brand-wordmark", {
+  fontSize: "22px",
+  fontWeight: "740",
 });
 
 globalStyle(
-  ".new-task-button,\n.nav-item,\n.settings-link,\n.workspace-link",
+  ".new-task-button,\n.nav-item,\n.settings-link",
   {
-    fontSize: "13px",
-    fontWeight: "520",
+    fontSize: "14px",
+    fontWeight: "500",
   },
 );
 
@@ -36,22 +33,27 @@ globalStyle(".nav-item.active,\n.settings-link.active", {
 });
 
 globalStyle(".sidebar-section-heading", {
-  fontSize: "10.5px",
-  fontWeight: "700",
+  fontSize: "14px",
+  fontWeight: "500",
 });
 
-globalStyle(".history-label,\n.history-empty", {
-  fontSize: "10.5px",
+globalStyle(".history-label", {
+  fontSize: "14px",
+  fontWeight: "500",
+});
+
+globalStyle(".history-empty", {
+  fontSize: "11px",
   fontWeight: "500",
 });
 
 globalStyle(".history-item", {
-  fontSize: "12px",
-  fontWeight: "470",
+  fontSize: "14px",
+  fontWeight: "450",
 });
 
 globalStyle(".history-row.current .history-item", {
-  fontWeight: "620",
+  fontWeight: "500",
 });
 
 globalStyle(".home-hero h1", {
@@ -70,7 +72,7 @@ globalStyle(".project-picker,\n.project-mode,\n.project-branch", {
 
 globalStyle(".goal-composer textarea", {
   fontSize: "14px",
-  fontWeight: "440",
+  fontWeight: "450",
   lineHeight: "1.65",
 });
 
@@ -100,13 +102,13 @@ globalStyle(".task-actions > button:not(.icon-button),\n.task-more-menu button",
 });
 
 globalStyle(".user-message p", {
-  fontSize: "13.5px",
-  fontWeight: "470",
+  fontSize: "14px",
+  fontWeight: "450",
   lineHeight: "1.6",
 });
 
 globalStyle(".assistant-message > p,\n.markdown-body", {
-  fontSize: "13.5px",
+  fontSize: "14px",
   fontWeight: "450",
   lineHeight: "1.78",
 });
@@ -126,15 +128,15 @@ globalStyle(".markdown-body h3,\n.markdown-body h4", {
   fontWeight: "680",
 });
 
-globalStyle(".markdown-body pre code", {
+globalStyle(".markdown-body code,\n.markdown-body pre code", {
   fontSize: "12px",
-  fontWeight: "430",
+  fontWeight: "400",
   lineHeight: "1.65",
 });
 
 globalStyle(".agent-run-toggle", {
-  fontSize: "12px",
-  fontWeight: "500",
+  fontSize: "14px",
+  fontWeight: "450",
 });
 
 globalStyle(".agent-run-event strong", {
@@ -148,8 +150,8 @@ globalStyle(".agent-run-event p", {
 });
 
 globalStyle(".follow-up-composer textarea", {
-  fontSize: "13px",
-  fontWeight: "440",
+  fontSize: "14px",
+  fontWeight: "450",
 });
 
 globalStyle(".settings-sidebar-title strong", {
@@ -224,7 +226,7 @@ globalStyle(".prototype-toolbar p,\n.prototype-section-heading p", {
 });
 
 globalStyle(
-  ".workspace-card strong,\n.automation-list strong,\n.skill-grid strong",
+  ".automation-list strong,\n.skill-grid strong",
   {
     fontSize: "12px",
     fontWeight: "650",
@@ -232,7 +234,7 @@ globalStyle(
 );
 
 globalStyle(
-  ".workspace-card small,\n.automation-list small,\n.skill-grid p",
+  ".automation-list small,\n.skill-grid p",
   {
     fontSize: "10.5px",
     fontWeight: "450",

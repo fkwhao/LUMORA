@@ -21,8 +21,58 @@ class ModelConnectionRequest(BaseModel):
     api_key: str = Field(alias="apiKey", min_length=1, max_length=2048)
 
 
+class PromptContextRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    response_language: str = Field(
+        default="简体中文",
+        alias="responseLanguage",
+        min_length=1,
+        max_length=80,
+    )
+    workspace_path: str | None = Field(
+        default=None,
+        alias="workspacePath",
+        max_length=1000,
+    )
+    project_instructions: list[str] = Field(
+        default_factory=list,
+        alias="projectInstructions",
+        max_length=100,
+    )
+    available_tools: list[str] = Field(
+        default_factory=list,
+        alias="availableTools",
+        max_length=100,
+    )
+    memory_summary: str | None = Field(
+        default=None,
+        alias="memorySummary",
+        max_length=100_000,
+    )
+    system_reminders: list[str] = Field(
+        default_factory=list,
+        alias="systemReminders",
+        max_length=20,
+    )
+    tool_definitions: list[dict] = Field(
+        default_factory=list,
+        alias="toolDefinitions",
+        max_length=100,
+    )
+
+
 class ChatCompletionRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     messages: list[ChatMessageRequest] = Field(min_length=1, max_length=100)
     connection: ModelConnectionRequest
+    prompt_context: PromptContextRequest = Field(
+        default_factory=PromptContextRequest,
+        alias="promptContext",
+    )
+    reasoning_effort: Literal[
+        "low", "medium", "high", "xhigh", "max"
+    ] | None = (
+        Field(default=None, alias="reasoningEffort")
+    )

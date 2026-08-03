@@ -6,9 +6,14 @@ import com.lumora.core.agent.client.http.AgentRuntimeSseClient;
 import com.lumora.core.agent.converter.AgentDtoMapper;
 import com.lumora.core.agent.dto.request.AgentChatCompletionRequest;
 import com.lumora.core.agent.dto.request.AgentPlanTaskRequest;
+import com.lumora.core.agent.dto.request.AgentMemoryExtractionRequest;
+import com.lumora.core.agent.dto.request.AgentModelConnectionRequest;
+import com.lumora.core.agent.dto.request.AgentModelListRequest;
 import com.lumora.core.agent.dto.response.AgentChatCompletionResponse;
 import com.lumora.core.agent.dto.response.AgentPlanTaskResponse;
+import com.lumora.core.agent.dto.response.AgentModelListResponse;
 import com.lumora.core.agent.model.AgentPlanStep;
+import com.lumora.core.agent.model.AgentMemoryCandidate;
 import com.lumora.core.model.ChatCompletion;
 import com.lumora.core.model.ChatMessage;
 import com.lumora.core.model.ChatStreamEvent;
@@ -35,6 +40,47 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
     private final AgentClientExceptionMapper exceptionMapper;
 
     @Override
+    public List<AgentMemoryCandidate> extractMemories(
+            String userMessage,
+            String assistantMessage,
+            String existingMemorySummary,
+            ModelConnection connection,
+            String correlationId
+    ) {
+        return dtoMapper.toMemoryCandidates(exceptionMapper.execute(
+                () -> httpApi.extractMemories(
+                        correlationId,
+                        new AgentMemoryExtractionRequest(
+                                userMessage,
+                                assistantMessage,
+                                existingMemorySummary,
+                                new AgentModelConnectionRequest(connection)
+                        )
+                )
+        ));
+    }
+
+    @Override
+    public List<String> listModels(
+            String providerName,
+            String baseUrl,
+            String apiKey,
+            String correlationId
+    ) {
+        AgentModelListResponse response = exceptionMapper.execute(
+                () -> httpApi.listModels(
+                        correlationId,
+                        new AgentModelListRequest(
+                                providerName,
+                                baseUrl,
+                                apiKey
+                        )
+                )
+        );
+        return response.getModels();
+    }
+
+    @Override
     public List<AgentPlanStep> planTask(
             String taskId,
             String goal,
@@ -57,7 +103,8 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
     ) {
         AgentChatCompletionRequest request = dtoMapper.toChatRequest(
                 messages,
-                connection
+                connection,
+                null
         );
         AgentChatCompletionResponse response = exceptionMapper.execute(
                 () -> httpApi.completeChat(correlationId, request)
@@ -70,11 +117,18 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
             List<ChatMessage> messages,
             ModelConnection connection,
             String correlationId,
+            String reasoningEffort,
+            String memorySummary,
             Consumer<ChatStreamEvent> eventConsumer
     ) {
         sseClient.streamChat(
                 correlationId,
-                dtoMapper.toChatRequest(messages, connection),
+                dtoMapper.toChatRequest(
+                        messages,
+                        connection,
+                        reasoningEffort,
+                        memorySummary
+                ),
                 eventConsumer
         );
     }

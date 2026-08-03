@@ -72,7 +72,7 @@ globalStyle(":root", {
   color: vars.ink,
   background: vars.canvas,
   fontFamily:
-    'var(--ui-font, "Segoe UI Variable", "Microsoft YaHei UI", "PingFang SC", sans-serif)',
+    'var(--ui-font, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif)',
   fontSynthesis: "none",
   textRendering: "optimizeLegibility",
   WebkitFontSmoothing: "antialiased",

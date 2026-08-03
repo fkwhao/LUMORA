@@ -2,6 +2,8 @@ package com.lumora.core.dto.request;
 
 import com.lumora.core.common.constant.ModelConfigurationConstants;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
 
 public class UpdateModelSettingsRequest {
@@ -15,6 +17,9 @@ public class UpdateModelSettingsRequest {
     @NotBlank(message = "模型名称不能为空")
     @Size(max = 160, message = "模型名称过长")
     private String model;
+    @Min(value = 1, message = "上下文长度必须大于 0")
+    @Max(value = 10_000_000, message = "上下文长度过大")
+    private int contextWindow;
     @Size(
             max = ModelConfigurationConstants.MAX_API_KEY_LENGTH,
             message = "API Key 过长"
@@ -43,6 +48,14 @@ public class UpdateModelSettingsRequest {
 
     public void setModel(String model) {
         this.model = model;
+    }
+
+    public int getContextWindow() {
+        return contextWindow;
+    }
+
+    public void setContextWindow(int contextWindow) {
+        this.contextWindow = contextWindow;
     }
 
     public String getApiKey() {

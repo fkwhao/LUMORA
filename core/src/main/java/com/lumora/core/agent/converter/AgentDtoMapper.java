@@ -3,13 +3,16 @@ package com.lumora.core.agent.converter;
 import com.lumora.core.agent.dto.request.AgentChatCompletionRequest;
 import com.lumora.core.agent.dto.request.AgentChatMessageRequest;
 import com.lumora.core.agent.dto.request.AgentModelConnectionRequest;
+import com.lumora.core.agent.dto.request.AgentPromptContextRequest;
 import com.lumora.core.agent.dto.response.AgentChatCompletionResponse;
 import com.lumora.core.agent.dto.response.AgentChatStreamEventResponse;
 import com.lumora.core.agent.dto.response.AgentPlanStepResponse;
+import com.lumora.core.agent.dto.response.AgentMemoryExtractionResponse;
 import com.lumora.core.agent.dto.response.AgentPlanTaskResponse;
 import com.lumora.core.agent.dto.response.AgentTokenUsageResponse;
 import com.lumora.core.agent.exception.AgentRuntimeException;
 import com.lumora.core.agent.model.AgentPlanStep;
+import com.lumora.core.agent.model.AgentMemoryCandidate;
 import com.lumora.core.model.ChatCompletion;
 import com.lumora.core.model.ChatMessage;
 import com.lumora.core.model.ChatStreamEvent;
@@ -38,7 +41,22 @@ public class AgentDtoMapper {
 
     public AgentChatCompletionRequest toChatRequest(
             List<ChatMessage> messages,
-            ModelConnection connection
+            ModelConnection connection,
+            String reasoningEffort
+    ) {
+        return toChatRequest(
+                messages,
+                connection,
+                reasoningEffort,
+                null
+        );
+    }
+
+    public AgentChatCompletionRequest toChatRequest(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String reasoningEffort,
+            String memorySummary
     ) {
         List<AgentChatMessageRequest> requestMessages = messages.stream()
                 .map(message -> new AgentChatMessageRequest(
@@ -48,7 +66,9 @@ public class AgentDtoMapper {
                 .toList();
         return new AgentChatCompletionRequest(
                 requestMessages,
-                new AgentModelConnectionRequest(connection)
+                new AgentModelConnectionRequest(connection),
+                AgentPromptContextRequest.withMemorySummary(memorySummary),
+                reasoningEffort
         );
     }
 
@@ -63,6 +83,30 @@ public class AgentDtoMapper {
                 response.getModel(),
                 toTokenUsage(response.getUsage())
         );
+    }
+
+    public List<AgentMemoryCandidate> toMemoryCandidates(
+            AgentMemoryExtractionResponse response
+    ) {
+        if (response == null || response.getCandidates() == null) {
+            throw new AgentRuntimeException("Python Agent 返回无效记忆候选");
+        }
+        return response.getCandidates().stream()
+                .map(candidate -> new AgentMemoryCandidate(
+                        candidate.getScope(),
+                        candidate.getType(),
+                        candidate.getRetention(),
+                        candidate.getContent(),
+                        candidate.getDedupeKey(),
+                        candidate.getSubject(),
+                        candidate.getPredicate(),
+                        candidate.getValue(),
+                        candidate.getTargetMemoryId(),
+                        candidate.getStructuredData(),
+                        candidate.getConfidence(),
+                        candidate.getTtlSeconds()
+                ))
+                .toList();
     }
 
     public ChatStreamEvent toChatStreamEvent(

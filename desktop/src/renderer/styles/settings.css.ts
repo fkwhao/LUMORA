@@ -336,6 +336,50 @@ globalStyle(".field-wide", {
   gridColumn: "1 / -1",
 });
 
+globalStyle(".model-discovery-control", {
+  display: "flex",
+  minWidth: "0",
+  alignItems: "center",
+  gap: "8px",
+});
+
+globalStyle(".model-discovery-control input", {
+  minWidth: "0",
+  flex: "1 1 auto",
+});
+
+globalStyle(".model-discovery-control button", {
+  display: "inline-flex",
+  height: "39px",
+  flex: "0 0 auto",
+  alignItems: "center",
+  gap: "6px",
+  padding: "0 12px",
+  color: "var(--muted)",
+  border: "1px solid #dce1e7",
+  borderRadius: "9px",
+  background: "#fafbfc",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: "10px",
+});
+
+globalStyle(".model-discovery-control button:hover:not(:disabled)", {
+  color: "var(--ink)",
+  borderColor: "#c8ced7",
+  background: "#fff",
+});
+
+globalStyle(".model-discovery-control button:disabled", {
+  cursor: "wait",
+  opacity: "0.55",
+});
+
+globalStyle(".settings-form-grid label > small", {
+  color: "var(--muted)",
+  fontSize: "9px",
+});
+
 globalStyle(".settings-error", {
   margin: "-7px 20px 16px",
   padding: "9px 10px",

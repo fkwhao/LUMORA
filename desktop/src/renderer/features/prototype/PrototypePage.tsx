@@ -2,14 +2,13 @@ import { useState } from "react";
 import {
   Blocks,
   Bot,
-  Check,
   Clock3,
   FolderKanban,
   Plus,
   Power,
 } from "lucide-react";
 
-export type PrototypeView = "workspaces" | "automations" | "skills";
+export type PrototypeView = "automations" | "skills";
 
 interface PrototypePageProps {
   view: PrototypeView;
@@ -17,11 +16,6 @@ interface PrototypePageProps {
 }
 
 const pageCopy = {
-  workspaces: {
-    eyebrow: "工作空间",
-    title: "组织项目上下文",
-    description: "把目录、仓库和常用资料整理成可复用的任务边界。",
-  },
   automations: {
     eyebrow: "自动任务",
     title: "让重复工作按计划发生",
@@ -46,62 +40,9 @@ export function PrototypePage({ view, notify }: PrototypePageProps) {
         </div>
         <span className="prototype-badge">本地原型</span>
       </header>
-      {view === "workspaces" && <Workspaces notify={notify} />}
       {view === "automations" && <Automations notify={notify} />}
       {view === "skills" && <Skills notify={notify} />}
     </main>
-  );
-}
-
-function Workspaces({ notify }: Pick<PrototypePageProps, "notify">) {
-  const [workspaces, setWorkspaces] = useState([
-    { name: "LUMORA", path: "F:\\project\\LUMORA", active: true },
-  ]);
-
-  function addWorkspace() {
-    if (workspaces.some((item) => item.name === "新工作空间")) {
-      notify("新工作空间草稿已经存在");
-      return;
-    }
-    setWorkspaces((items) => [
-      ...items,
-      { name: "新工作空间", path: "等待选择本地目录", active: false },
-    ]);
-    notify("已创建工作空间草稿", "success");
-  }
-
-  return (
-    <section className="prototype-content">
-      <div className="prototype-section-heading">
-        <div>
-          <h2>工作空间</h2>
-          <p>{workspaces.length} 个本地上下文边界</p>
-        </div>
-        <button type="button" onClick={addWorkspace}>
-          <Plus size={15} />
-          新建工作空间
-        </button>
-      </div>
-      <div className="workspace-grid">
-        {workspaces.map((workspace) => (
-          <button
-            className={`workspace-card${workspace.active ? " active" : ""}`}
-            type="button"
-            key={workspace.name}
-            onClick={() =>
-              notify(`已选择工作空间：${workspace.name}`, "success")
-            }
-          >
-            <span><FolderKanban size={19} /></span>
-            <div>
-              <strong>{workspace.name}</strong>
-              <small>{workspace.path}</small>
-            </div>
-            {workspace.active && <Check size={16} />}
-          </button>
-        ))}
-      </div>
-    </section>
   );
 }
 

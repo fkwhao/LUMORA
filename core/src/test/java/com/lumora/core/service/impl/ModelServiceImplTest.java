@@ -64,6 +64,7 @@ class ModelServiceImplTest {
                 "DeepSeek",
                 "https://api.deepseek.com/",
                 "deepseek-v4-pro",
+                1_000_000,
                 "provider-secret",
                 "correlation-123"
         );
@@ -75,6 +76,7 @@ class ModelServiceImplTest {
         assertThat(configuration.getBaseUrl())
                 .isEqualTo("https://api.deepseek.com");
         assertThat(result.isApiKeyConfigured()).isTrue();
+        assertThat(result.getContextWindow()).isEqualTo(1_000_000);
         verify(protector).protect("provider-secret");
     }
 
@@ -84,6 +86,7 @@ class ModelServiceImplTest {
                 "DeepSeek",
                 "https://api.deepseek.com",
                 "deepseek-v4-pro",
+                1_000_000,
                 "provider-secret",
                 "correlation-123"
         );
@@ -92,6 +95,7 @@ class ModelServiceImplTest {
                 "DeepSeek",
                 "https://api.deepseek.com",
                 "deepseek-v4-flash",
+                1_000_000,
                 "",
                 "correlation-456"
         );

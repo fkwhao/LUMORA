@@ -168,11 +168,12 @@ class AgentControllerTest(unittest.TestCase):
         self.assertNotIn("secret-provider-key", response.text)
 
     def test_chat_stream_returns_incremental_sse_events(self) -> None:
+        chat_service = StreamingChatService()
         client = TestClient(
             create_app(
                 self.settings,
                 PlannerService(),
-                StreamingChatService(),
+                chat_service,
             )
         )
 
@@ -182,6 +183,7 @@ class AgentControllerTest(unittest.TestCase):
             json={
                 "messages": [{"role": "user", "content": "你好"}],
                 "connection": self.model_connection(),
+                "reasoningEffort": "high",
             },
         )
 
@@ -191,11 +193,49 @@ class AgentControllerTest(unittest.TestCase):
         self.assertIn('"type":"text_delta"', response.text)
         self.assertIn('"delta":"你好"', response.text)
         self.assertIn('"type":"completed"', response.text)
+        self.assertEqual(chat_service.last_reasoning_effort, "high")
+
+    def test_model_list_returns_provider_model_ids(self) -> None:
+        chat_service = StreamingChatService()
+        client = TestClient(
+            create_app(
+                self.settings,
+                PlannerService(),
+                chat_service,
+            )
+        )
+
+        response = client.post(
+            "/api/v1/models",
+            headers=self.authenticated_headers(),
+            json={
+                "providerName": "DeepSeek",
+                "baseUrl": "https://api.deepseek.com",
+                "apiKey": "secret-provider-key",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["models"],
+            ["deepseek-v4-flash", "deepseek-v4-pro"],
+        )
 
 
 class StreamingChatService:
-    async def stream(self, request: object):
+    def __init__(self) -> None:
+        self.last_reasoning_effort: str | None = None
+
+    async def list_models(self, request: object) -> list[str]:
         del request
+        return ["deepseek-v4-flash", "deepseek-v4-pro"]
+
+    async def stream(self, request: object):
+        self.last_reasoning_effort = getattr(
+            request,
+            "reasoning_effort",
+            None,
+        )
         yield ChatStreamEventResponse(
             type="reasoning_delta",
             delta="先理解用户问题。",

@@ -27,7 +27,7 @@ globalStyle("*", {
 
 globalStyle("html,\nbody,\n#root", {
   width: "100%",
-  minWidth: "1100px",
+  minWidth: "0",
   height: "100%",
   margin: "0",
 });

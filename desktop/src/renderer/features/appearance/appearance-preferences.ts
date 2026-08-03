@@ -24,13 +24,14 @@ export const DEFAULT_APPEARANCE_PREFERENCES: AppearancePreferences = {
 
 const UI_FONT_STACKS: Record<UiFontPreference, string> = {
   system:
-    '"Segoe UI Variable", "Microsoft YaHei UI", "PingFang SC", sans-serif',
+    '-apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif',
   segoe: '"Segoe UI Variable", "Segoe UI", sans-serif',
   yahei: '"Microsoft YaHei UI", "Microsoft YaHei", sans-serif',
 };
 
 const CODE_FONT_STACKS: Record<CodeFontPreference, string> = {
-  cascadia: '"Cascadia Code", "SFMono-Regular", Consolas, monospace',
+  cascadia:
+    'ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, monospace',
   consolas: 'Consolas, "SFMono-Regular", monospace',
   jetbrains: '"JetBrains Mono", "Cascadia Code", Consolas, monospace',
 };

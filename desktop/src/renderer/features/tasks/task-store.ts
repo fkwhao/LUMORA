@@ -2,6 +2,7 @@ import { createStore } from "zustand/vanilla";
 
 import type {
   ChatMessage,
+  ChatRequestOptions,
   ChatStreamEvent,
   LumoraModelApi,
 } from "../../../shared/model-contract";
@@ -31,6 +32,7 @@ interface TaskState {
   isCreating: boolean;
   isLoadingHistory: boolean;
   isChatting: boolean;
+  chatWasStopped: boolean;
   chatStartedAt?: number;
   lastChatDurationMs?: number;
   error?: string;
@@ -41,8 +43,13 @@ interface TaskState {
   loadRecentTasks(): Promise<void>;
   openTask(taskId: string): Promise<void>;
   createTask(goal: string, projectPath?: string): Promise<TaskSnapshot>;
-  sendMessage(content: string): Promise<void>;
-  regenerateMessage(messageId: string, content: string): Promise<void>;
+  sendMessage(content: string, options?: ChatRequestOptions): Promise<void>;
+  stopChat(): void;
+  regenerateMessage(
+    messageId: string,
+    content: string,
+    options?: ChatRequestOptions,
+  ): Promise<void>;
   decideApproval(decision: ApprovalDecision): Promise<TaskSnapshot>;
   archiveTask(taskId: string): void;
   restoreTask(taskId: string): void;
@@ -60,6 +67,7 @@ export function createTaskStore(
 ) {
   let unsubscribe: (() => void) | undefined;
   let unsubscribeChat: (() => void) | undefined;
+  let resolveChat: (() => void) | undefined;
 
   return createStore<TaskState>((set, get) => ({
     activeTask: undefined,
@@ -69,6 +77,7 @@ export function createTaskStore(
     isCreating: false,
     isLoadingHistory: false,
     isChatting: false,
+    chatWasStopped: false,
     chatStartedAt: undefined,
     lastChatDurationMs: undefined,
     error: undefined,
@@ -96,6 +105,8 @@ export function createTaskStore(
     async openTask(taskId) {
       unsubscribeChat?.();
       unsubscribeChat = undefined;
+      resolveChat?.();
+      resolveChat = undefined;
       set({
         isLoadingHistory: true,
         chatError: undefined,
@@ -115,6 +126,7 @@ export function createTaskStore(
           taskEvents: [],
           isLoadingHistory: false,
           isChatting: false,
+          chatWasStopped: false,
           chatStartedAt: undefined,
           lastChatDurationMs: undefined,
         });
@@ -181,7 +193,7 @@ export function createTaskStore(
       }
     },
 
-    async sendMessage(content) {
+    async sendMessage(content, options) {
       const normalizedContent = content.trim();
       if (!normalizedContent) {
         throw new Error("消息内容不能为空");
@@ -202,7 +214,9 @@ export function createTaskStore(
       ];
       set({
         messages,
+        taskEvents: [],
         isChatting: true,
+        chatWasStopped: false,
         chatError: undefined,
         chatStartedAt: Date.now(),
         lastChatDurationMs: undefined,
@@ -217,6 +231,7 @@ export function createTaskStore(
         return;
       }
       await new Promise<void>((resolve) => {
+        resolveChat = resolve;
         unsubscribeChat?.();
         unsubscribeChat = modelApi.streamMessage(
           task.taskId,
@@ -224,14 +239,75 @@ export function createTaskStore(
           (event) => {
             applyChatEvent(event, task.taskId, modelApi, get, set, resolve);
           },
+          options,
         );
       });
+      resolveChat = undefined;
       unsubscribeChat?.();
       unsubscribeChat = undefined;
       await get().loadRecentTasks();
     },
 
-    async regenerateMessage(messageId, content) {
+    stopChat() {
+      if (!get().isChatting) {
+        return;
+      }
+      unsubscribeChat?.();
+      unsubscribeChat = undefined;
+      const chatStartedAt = get().chatStartedAt;
+      const taskId = get().activeTask?.taskId;
+      const stoppedUserMessage = [...get().messages]
+        .reverse()
+        .find((message) => message.role === "user");
+      set({
+        isChatting: false,
+        chatWasStopped: true,
+        chatStartedAt: undefined,
+        lastChatDurationMs: chatStartedAt
+          ? Date.now() - chatStartedAt
+          : undefined,
+        chatError: undefined,
+      });
+      const resolve = resolveChat;
+      resolveChat = undefined;
+      resolve?.();
+      if (modelApi && taskId) {
+        void modelApi
+          .listMessages(taskId)
+          .then((persistedMessages) => {
+            if (
+              !get().chatWasStopped ||
+              get().activeTask?.taskId !== taskId ||
+              !stoppedUserMessage
+            ) {
+              return;
+            }
+            const persistedUserMessage = [...persistedMessages]
+              .reverse()
+              .find(
+                (message) =>
+                  message.role === "user" &&
+                  message.content === stoppedUserMessage.content &&
+                  Boolean(message.messageId),
+              );
+            if (!persistedUserMessage) {
+              return;
+            }
+            set({
+              messages:
+                persistedMessages.at(-1)?.role === "assistant"
+                  ? persistedMessages
+                  : [
+                      ...persistedMessages,
+                      { role: "assistant", content: "" },
+                    ],
+            });
+          })
+          .catch(() => undefined);
+      }
+    },
+
+    async regenerateMessage(messageId, content, options) {
       const normalizedContent = content.trim();
       if (!normalizedContent) {
         throw new Error("消息内容不能为空");
@@ -273,13 +349,16 @@ export function createTaskStore(
       ];
       set({
         messages,
+        taskEvents: [],
         isChatting: true,
+        chatWasStopped: false,
         chatError: undefined,
         chatStartedAt: Date.now(),
         lastChatDurationMs: undefined,
       });
 
       await new Promise<void>((resolve) => {
+        resolveChat = resolve;
         unsubscribeChat?.();
         unsubscribeChat = modelApi.regenerateMessage(
           task.taskId,
@@ -288,8 +367,10 @@ export function createTaskStore(
           (event) => {
             applyChatEvent(event, task.taskId, modelApi, get, set, resolve);
           },
+          options,
         );
       });
+      resolveChat = undefined;
       unsubscribeChat?.();
       unsubscribeChat = undefined;
       await get().loadRecentTasks();
@@ -327,12 +408,15 @@ export function createTaskStore(
         unsubscribe = undefined;
         unsubscribeChat?.();
         unsubscribeChat = undefined;
+        resolveChat?.();
+        resolveChat = undefined;
         set({
           archivedTaskIds,
           activeTask: undefined,
           messages: [],
           taskEvents: [],
           isChatting: false,
+          chatWasStopped: false,
           chatStartedAt: undefined,
           lastChatDurationMs: undefined,
           chatError: undefined,
@@ -407,6 +491,8 @@ export function createTaskStore(
       unsubscribe = undefined;
       unsubscribeChat?.();
       unsubscribeChat = undefined;
+      resolveChat?.();
+      resolveChat = undefined;
       set({
         activeTask: undefined,
         error: undefined,
@@ -414,6 +500,7 @@ export function createTaskStore(
         messages: [],
         taskEvents: [],
         isChatting: false,
+        chatWasStopped: false,
         chatStartedAt: undefined,
         lastChatDurationMs: undefined,
       });
@@ -484,6 +571,7 @@ function applyChatEvent(
         set({
           messages,
           isChatting: false,
+          chatWasStopped: false,
           chatStartedAt: undefined,
           lastChatDurationMs,
         }),
@@ -491,6 +579,7 @@ function applyChatEvent(
       .catch(() =>
         set({
           isChatting: false,
+          chatWasStopped: false,
           chatStartedAt: undefined,
           lastChatDurationMs,
         }),
@@ -509,6 +598,7 @@ function applyChatEvent(
         set({
           messages,
           isChatting: false,
+          chatWasStopped: false,
           chatStartedAt: undefined,
           lastChatDurationMs,
           chatError: event.errorMessage || "模型流式响应失败",
@@ -517,6 +607,7 @@ function applyChatEvent(
       .catch(() =>
         set({
           isChatting: false,
+          chatWasStopped: false,
           chatStartedAt: undefined,
           lastChatDurationMs,
           chatError: event.errorMessage || "模型流式响应失败",

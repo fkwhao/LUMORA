@@ -1,10 +1,5 @@
 import { globalStyle, keyframes } from "@vanilla-extract/css";
 
-const surfaceIn = keyframes({
-  from: { opacity: 0, transform: "translateY(5px) scale(0.997)" },
-  to: { opacity: 1, transform: "translateY(0) scale(1)" },
-});
-
 const riseIn = keyframes({
   from: { opacity: 0, transform: "translateY(10px)" },
   to: { opacity: 1, transform: "translateY(0)" },
@@ -24,13 +19,6 @@ const searchReveal = keyframes({
   from: { opacity: 0, transform: "translateY(-4px)", height: "24px" },
   to: { opacity: 1, transform: "translateY(0)", height: "32px" },
 });
-
-globalStyle(
-  ".home-layout,\n.task-layout,\n.prototype-layout,\n.settings-surface",
-  {
-    animation: `${surfaceIn} 190ms cubic-bezier(0.2, 0.75, 0.25, 1) both`,
-  },
-);
 
 globalStyle(".home-hero", {
   animation: `${riseIn} 260ms 30ms cubic-bezier(0.2, 0.75, 0.25, 1) both`,
@@ -75,7 +63,7 @@ globalStyle(
 );
 
 globalStyle(
-  ".submit-task:active:not(:disabled),\n.send-follow-up:active:not(:disabled),\n.icon-button:active,\n.task-actions > button:active",
+  ".submit-task:active:not(:disabled),\n.icon-button:active,\n.task-actions > button:active",
   {
     transform: "scale(0.92)",
   },
@@ -94,7 +82,7 @@ globalStyle(".window-navigation button svg", {
 });
 
 globalStyle(
-  ".home-layout,\n.task-layout,\n.prototype-layout,\n.settings-surface,\n.home-hero,\n.home-composer-stack,\n.history-search,\n.task-more-menu,\n.review-pane,\n.settings-dialog-backdrop,\n.settings-dialog,\n.window-navigation button svg",
+  ".home-hero,\n.home-composer-stack,\n.history-search,\n.task-more-menu,\n.review-pane,\n.settings-dialog-backdrop,\n.settings-dialog,\n.window-navigation button svg",
   {
     "@media": {
       "(prefers-reduced-motion: reduce)": {

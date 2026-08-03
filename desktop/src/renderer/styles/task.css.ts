@@ -5,6 +5,16 @@ const streamCursorBlink = keyframes({
   "46%, 100%": { opacity: 0 },
 });
 
+const bottomStatusDot = keyframes({
+  "0%, 60%, 100%": { opacity: 0.42, transform: "translateY(0)" },
+  "30%": { opacity: 1, transform: "translateY(-2.5px)" },
+});
+
+const thinkingTextSweep = keyframes({
+  "0%": { backgroundPosition: "100% 50%" },
+  "100%": { backgroundPosition: "-50% 50%" },
+});
+
 globalStyle(".task-layout", {
   display: "grid",
   gridTemplateRows: "auto minmax(0, 1fr)",
@@ -150,7 +160,7 @@ globalStyle(".task-actions > .review-toggle.active", {
   background: "var(--surface-soft)",
 });
 
-globalStyle(".task-workspace", {
+globalStyle(".task-stage", {
   display: "flex",
   minWidth: "0",
   minHeight: "0",
@@ -161,9 +171,170 @@ globalStyle(".task-workspace", {
   boxShadow: "none",
 });
 
-globalStyle(".conversation-pane", {
+globalStyle(".question-rail", {
+  position: "relative",
+  zIndex: "8",
+  display: "block",
+  width: "42px",
+  minWidth: "42px",
+  minHeight: "0",
+  padding: "18px 0",
+});
+
+globalStyle(".question-rail-track", {
+  position: "relative",
+  width: "100%",
+  height: "100%",
+  padding: "0",
+  overscrollBehavior: "contain",
+  touchAction: "none",
+  userSelect: "none",
+});
+
+globalStyle(".question-rail-list", {
+  display: "flex",
+  width: "100%",
+  minHeight: "100%",
+  alignItems: "center",
+  flexDirection: "column",
+  justifyContent: "center",
+});
+
+globalStyle(".question-rail-item", {
+  position: "relative",
+  zIndex: "1",
+  display: "block",
+  width: "34px",
+  height: "12px",
+  minHeight: "12px",
+  flex: "0 0 12px",
+  padding: "0",
+  border: "0",
+  background: "transparent",
+  cursor: "pointer",
+});
+
+globalStyle(".question-rail-item::before", {
+  position: "absolute",
+  top: "5px",
+  left: "3px",
+  width: "8px",
+  height: "2px",
+  borderRadius: "2px",
+  background: "var(--subtle)",
+  boxShadow: "0 0 0 4px var(--surface)",
+  content: '""',
+  opacity: "0.72",
+  transition:
+    "width 180ms cubic-bezier(0.2, 0.75, 0.25, 1), left 180ms cubic-bezier(0.2, 0.75, 0.25, 1), background 140ms ease, opacity 140ms ease",
+});
+
+globalStyle(".question-rail-item.active::before", {
+  background: "var(--ink)",
+  opacity: "1",
+});
+
+globalStyle(
+  ".question-rail-item:has(+ .question-rail-item:is(:hover, :focus-visible))::before,\n.question-rail-item:is(:hover, :focus-visible) + .question-rail-item::before",
+  {
+    left: "3px",
+    width: "20px",
+    opacity: "0.92",
+  },
+);
+
+globalStyle(
+  ".question-rail-item:has(+ .question-rail-item + .question-rail-item:is(:hover, :focus-visible))::before,\n.question-rail-item:is(:hover, :focus-visible) + .question-rail-item + .question-rail-item::before",
+  {
+    left: "3px",
+    width: "14px",
+    opacity: "0.84",
+  },
+);
+
+globalStyle(
+  ".question-rail-item:has(+ .question-rail-item + .question-rail-item + .question-rail-item:is(:hover, :focus-visible))::before,\n.question-rail-item:is(:hover, :focus-visible) + .question-rail-item + .question-rail-item + .question-rail-item::before",
+  {
+    left: "3px",
+    width: "10px",
+    opacity: "0.76",
+  },
+);
+
+globalStyle(
+  ".question-rail-item:hover::before,\n.question-rail-item:focus-visible::before",
+  {
+    left: "3px",
+    width: "28px",
+    background: "var(--ink)",
+    opacity: "1",
+  },
+);
+
+globalStyle(".question-rail-item:focus-visible", {
+  outline: "2px solid var(--blue)",
+  outlineOffset: "2px",
+  borderRadius: "4px",
+});
+
+globalStyle(".question-rail-tooltip", {
+  position: "absolute",
+  zIndex: "30",
+  top: "50%",
+  left: "42px",
   display: "grid",
-  gridTemplateRows: "minmax(0, 1fr) auto",
+  width: "min(328px, 36vw)",
+  gap: "7px",
+  padding: "11px 13px 12px",
+  color: "#f5f6f7",
+  border: "1px solid rgb(255 255 255 / 8%)",
+  borderRadius: "13px",
+  background: "rgb(31 33 37 / 96%)",
+  boxShadow: "0 18px 45px rgb(0 0 0 / 24%)",
+  opacity: "0",
+  pointerEvents: "none",
+  transform: "translate(6px, -50%) scale(0.98)",
+  transformOrigin: "left center",
+  transition: "opacity 140ms ease, transform 160ms ease",
+});
+
+globalStyle(
+  ".question-rail-item:hover .question-rail-tooltip,\n.question-rail-item:focus-visible .question-rail-tooltip",
+  {
+    opacity: "1",
+    transform: "translate(0, -50%) scale(1)",
+  },
+);
+
+globalStyle(".question-rail-tooltip strong", {
+  display: "-webkit-box",
+  overflow: "hidden",
+  color: "#f2f3f5",
+  fontSize: "14px",
+  fontWeight: "600",
+  lineHeight: "1.5",
+  textAlign: "left",
+  WebkitBoxOrient: "vertical",
+  WebkitLineClamp: 2,
+});
+
+globalStyle(".question-rail-result", {
+  display: "-webkit-box",
+  maxHeight: "91px",
+  overflow: "hidden",
+  color: "#a6a9af",
+  fontSize: "14px",
+  fontWeight: "450",
+  lineHeight: "1.62",
+  textAlign: "left",
+  whiteSpace: "pre-wrap",
+  WebkitBoxOrient: "vertical",
+  WebkitLineClamp: 4,
+});
+
+globalStyle(".conversation-pane", {
+  position: "relative",
+  display: "block",
   flex: "1 1 auto",
   minWidth: "0",
   minHeight: "0",
@@ -171,14 +342,31 @@ globalStyle(".conversation-pane", {
 });
 
 globalStyle(".conversation-scroll", {
+  height: "100%",
   minHeight: "0",
-  padding: "28px 28px 22px",
+  padding:
+    "28px clamp(12px, 3vw, 28px) calc(var(--conversation-footer-height, 126px) + 18px)",
   overflow: "auto",
+  scrollbarGutter: "stable",
+});
+
+globalStyle(".conversation-scroll::-webkit-scrollbar", {
+  width: "10px",
+});
+
+globalStyle(".conversation-scroll::-webkit-scrollbar-track", {
+  background: "transparent",
 });
 
 globalStyle(".conversation-content,\n.conversation-footer-inner", {
-  width: "min(100%, 920px)",
+  width: "min(100%, 860px)",
   margin: "0 auto",
+});
+
+globalStyle(".conversation-footer-inner", {
+  position: "relative",
+  zIndex: "1",
+  pointerEvents: "none",
 });
 
 globalStyle(".user-message-group", {
@@ -186,6 +374,7 @@ globalStyle(".user-message-group", {
   marginLeft: "auto",
   maxWidth: "min(72%, 620px)",
   marginTop: "22px",
+  scrollMarginTop: "34px",
 });
 
 globalStyle(".conversation-content > .user-message-group:first-child", {
@@ -216,42 +405,45 @@ globalStyle(".follow-up-message", {
 
 globalStyle(".user-message-meta", {
   display: "flex",
-  minHeight: "25px",
+  minHeight: "30px",
   alignItems: "center",
   justifyContent: "flex-end",
-  gap: "5px",
-  padding: "2px 4px 0",
-  color: "var(--subtle)",
-  fontSize: "9.5px",
+  gap: "8px",
+  padding: "4px 3px 0",
+  color: "var(--muted)",
+  fontSize: "14px",
   lineHeight: "1",
+  opacity: "0",
 });
+
+globalStyle(
+  ".user-message-group:hover .user-message-meta,\n.user-message-group:focus-within .user-message-meta",
+  {
+    opacity: "1",
+  },
+);
 
 globalStyle(".user-message-meta time:empty", {
   display: "none",
 });
 
+globalStyle(".user-message-meta time", {
+  fontSize: "14px",
+  fontWeight: "450",
+  fontVariantNumeric: "tabular-nums",
+  lineHeight: "1.4",
+});
+
 globalStyle(".user-message-actions", {
   display: "inline-flex",
   alignItems: "center",
-  gap: "1px",
-  opacity: "0",
-  transform: "translateY(-2px)",
-  transition:
-    "opacity 140ms ease, transform 180ms cubic-bezier(0.2, 0.75, 0.25, 1)",
+  gap: "2px",
 });
-
-globalStyle(
-  ".user-message-group:hover .user-message-actions,\n.user-message-group:focus-within .user-message-actions",
-  {
-    opacity: "1",
-    transform: "translateY(0)",
-  },
-);
 
 globalStyle(".user-message-actions button", {
   display: "grid",
-  width: "24px",
-  height: "24px",
+  width: "26px",
+  height: "26px",
   padding: "0",
   placeItems: "center",
   color: "var(--subtle)",
@@ -281,7 +473,8 @@ globalStyle(".user-message-edit", {
 globalStyle(".user-message-edit textarea", {
   width: "100%",
   minHeight: "58px",
-  resize: "vertical",
+  maxHeight: "220px",
+  resize: "none",
   padding: "0",
   color: "var(--ink)",
   border: "0",
@@ -536,6 +729,39 @@ globalStyle(".assistant-message.pending p", {
   color: "var(--muted)",
 });
 
+globalStyle(".thinking-stage", {
+  display: "flex",
+  minHeight: "0",
+  alignItems: "center",
+  marginTop: "22px",
+  color: "var(--muted)",
+  fontSize: "14px",
+  fontWeight: "450",
+  fontVariantNumeric: "tabular-nums",
+  lineHeight: "1.25",
+});
+
+globalStyle(".thinking-stage > span:first-child", {
+  color: "transparent",
+  backgroundImage:
+    "linear-gradient(90deg, var(--muted) 0%, var(--muted) 40%, var(--ink) 50%, var(--muted) 60%, var(--muted) 100%)",
+  backgroundPosition: "100% 50%",
+  backgroundSize: "220% 100%",
+  backgroundClip: "text",
+  WebkitBackgroundClip: "text",
+  animation: `${thinkingTextSweep} 1750ms linear infinite`,
+  contain: "paint",
+  transform: "translateZ(0)",
+  willChange: "background-position",
+  "@media": {
+    "(prefers-reduced-motion: reduce)": {
+      color: "var(--muted)",
+      backgroundImage: "none",
+      animation: "none",
+    },
+  },
+});
+
 globalStyle(".thinking-dots", {
   marginLeft: "4px",
   color: "var(--blue)",
@@ -554,23 +780,29 @@ globalStyle(".stream-cursor", {
 });
 
 globalStyle(".agent-run", {
-  marginTop: "26px",
+  marginTop: "22px",
+});
+
+globalStyle(".agent-run-heading", {
   borderBottom: "1px solid var(--line)",
 });
 
 globalStyle(".agent-run-toggle", {
   display: "inline-flex",
-  minHeight: "34px",
+  minHeight: "0",
   alignItems: "center",
   gap: "5px",
-  padding: "0",
+  padding: "0 0 7px",
   color: "var(--muted)",
   border: "0",
   background: "transparent",
   cursor: "pointer",
-  fontFamily: 'Georgia, "Noto Serif SC", serif',
-  fontSize: "11px",
-  fontStyle: "italic",
+  fontFamily: "inherit",
+  fontSize: "14px",
+  fontWeight: "450",
+  fontStyle: "normal",
+  fontVariantNumeric: "tabular-nums",
+  lineHeight: "1.25",
 });
 
 globalStyle(".agent-run-toggle svg", {
@@ -584,6 +816,7 @@ globalStyle(".agent-run.expanded .agent-run-toggle svg", {
 globalStyle(".agent-run-events", {
   display: "grid",
   gridTemplateRows: "0fr",
+  overflow: "hidden",
   opacity: "0",
   transition:
     "grid-template-rows 200ms cubic-bezier(0.2, 0.75, 0.25, 1), opacity 150ms ease",
@@ -599,6 +832,11 @@ globalStyle(".agent-run-events-inner", {
   minHeight: "0",
   gap: "12px",
   overflow: "hidden",
+  padding: "0",
+  transition: "padding 200ms cubic-bezier(0.2, 0.75, 0.25, 1)",
+});
+
+globalStyle(".agent-run.expanded .agent-run-events-inner", {
   padding: "5px 0 16px",
 });
 
@@ -643,38 +881,229 @@ globalStyle(".task-error-banner", {
 });
 
 globalStyle(".conversation-footer", {
-  padding: "12px 28px 18px",
-  background: "linear-gradient(transparent, #fff 20%)",
+  position: "absolute",
+  zIndex: "12",
+  right: "0",
+  bottom: "0",
+  left: "0",
+  padding: "0 clamp(12px, 3vw, 38px) 18px clamp(12px, 3vw, 28px)",
+  background: "transparent",
+  pointerEvents: "none",
+});
+
+globalStyle(".conversation-footer::after", {
+  position: "absolute",
+  zIndex: "0",
+  right: "0",
+  bottom: "0",
+  left: "0",
+  height: "38px",
+  background: "var(--surface)",
+  content: '""',
+});
+
+globalStyle(".approval-dock,\n.conversation-composer-wrap", {
+  pointerEvents: "auto",
+});
+
+globalStyle(".conversation-composer-wrap", {
+  position: "relative",
+});
+
+globalStyle(".scroll-to-bottom", {
+  position: "absolute",
+  zIndex: "3",
+  top: "-48px",
+  left: "50%",
+  display: "grid",
+  width: "36px",
+  height: "36px",
+  padding: "0",
+  placeItems: "center",
+  color: "var(--ink)",
+  border: "1px solid var(--line-strong)",
+  borderRadius: "50%",
+  outline: "0",
+  background: "var(--surface)",
+  boxShadow: "0 5px 16px rgb(28 35 45 / 12%)",
+  cursor: "pointer",
+  transform: "translateX(-50%)",
+});
+
+globalStyle(".scroll-to-bottom:hover", {
+  color: "var(--ink)",
+  borderColor: "var(--subtle)",
+});
+
+globalStyle(".scroll-to-bottom:focus-visible", {
+  outline: "2px solid var(--blue)",
+  outlineOffset: "2px",
+});
+
+globalStyle(".scroll-to-bottom-dots", {
+  display: "flex",
+  height: "8px",
+  alignItems: "center",
+  gap: "3px",
+});
+
+globalStyle(".scroll-to-bottom-dots i", {
+  display: "block",
+  width: "4px",
+  height: "4px",
+  borderRadius: "50%",
+  background: "currentColor",
+  animation: `${bottomStatusDot} 900ms ease-in-out infinite`,
+});
+
+globalStyle(".scroll-to-bottom-dots i:nth-child(2)", {
+  animationDelay: "120ms",
+});
+
+globalStyle(".scroll-to-bottom-dots i:nth-child(3)", {
+  animationDelay: "240ms",
 });
 
 globalStyle(".follow-up-composer", {
+  width: "100%",
+  minWidth: "0",
   padding: "12px 13px 11px",
-  border: "1px solid var(--line-strong)",
+  border: "1px solid color-mix(in srgb, var(--line) 58%, transparent)",
   borderRadius: "20px",
   background: "#f8f9fb",
-  boxShadow: "0 10px 32px rgb(28 35 45 / 8%)",
+  boxShadow: "0 1px 4px rgb(28 35 45 / 8%)",
 });
 
 globalStyle(".follow-up-composer textarea", {
   minHeight: "46px",
+  maxHeight: "180px",
   padding: "0 2px",
   fontSize: "12px",
   lineHeight: "1.55",
+  overflowY: "hidden",
 });
 
-globalStyle(".follow-up-composer > div", {
+globalStyle(".follow-up-composer > .composer-toolbar", {
   display: "flex",
+  minWidth: "0",
   alignItems: "center",
   justifyContent: "space-between",
+  gap: "8px",
+});
+
+globalStyle(".composer-attach", {
+  flex: "0 1 auto",
+  minWidth: "30px",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(".composer-controls", {
+  display: "flex",
+  minWidth: "0",
+  alignItems: "center",
+  justifyContent: "flex-end",
+  gap: "3px",
+});
+
+globalStyle(".context-usage-ring", {
+  position: "relative",
+  width: "16px",
+  height: "16px",
+  flex: "0 0 16px",
+  margin: "0 5px 0 2px",
+  borderRadius: "50%",
+  background:
+    "conic-gradient(var(--muted) var(--context-progress), color-mix(in srgb, var(--subtle) 30%, transparent) 0)",
+});
+
+globalStyle(".context-usage-ring::after", {
+  position: "absolute",
+  inset: "3px",
+  borderRadius: "50%",
+  background: "var(--surface-soft)",
+  content: '""',
+});
+
+globalStyle(".composer-select", {
+  position: "relative",
+  display: "flex",
+  minWidth: "0",
+  height: "30px",
+  alignItems: "center",
+  color: "var(--ink)",
+});
+
+globalStyle(".composer-select select", {
+  width: "100%",
+  height: "30px",
+  padding: "0 18px 0 5px",
+  overflow: "hidden",
+  color: "inherit",
+  border: "0",
+  outline: "0",
+  appearance: "none",
+  background: "transparent",
+  cursor: "pointer",
+  fontSize: "14px",
+  textOverflow: "ellipsis",
+});
+
+globalStyle(".composer-select > svg", {
+  position: "absolute",
+  right: "3px",
+  color: "var(--muted)",
+  pointerEvents: "none",
+});
+
+globalStyle(".model-select", {
+  width: "112px",
+  maxWidth: "28vw",
+});
+
+globalStyle(".reasoning-select", {
+  width: "48px",
+  flex: "0 0 48px",
+});
+
+globalStyle(".composer-attach span", {
+  "@media": {
+    "(max-width: 720px)": {
+      display: "none",
+    },
+  },
+});
+
+globalStyle(".model-select", {
+  "@media": {
+    "(max-width: 560px)": {
+      width: "88px",
+      maxWidth: "88px",
+    },
+  },
 });
 
 globalStyle(".follow-up-composer .send-follow-up", {
   width: "32px",
   height: "32px",
   padding: "0",
-  color: "#fff",
+  color: "var(--surface)",
   border: "0",
-  background: "var(--blue)",
+  borderRadius: "50%",
+  background: "var(--ink)",
+  boxShadow: "none",
+});
+
+globalStyle(
+  ".follow-up-composer .send-follow-up:hover:not(:disabled)",
+  {
+    color: "var(--surface)",
+    borderColor: "transparent",
+    background: "var(--ink)",
+  },
+);
+
+globalStyle(".follow-up-composer .send-follow-up.is-stopping svg", {
+  borderRadius: "1px",
 });
 
 globalStyle(".follow-up-composer .send-follow-up:disabled,\n.submit-task:disabled", {

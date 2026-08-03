@@ -1,0 +1,2 @@
+ALTER TABLE model_configuration
+ADD COLUMN context_window INTEGER NOT NULL DEFAULT 128000;

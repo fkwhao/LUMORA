@@ -10,6 +10,7 @@ import { useStore } from "zustand";
 
 import type { LumoraModelApi } from "../shared/model-contract";
 import type { LumoraTaskApi } from "../shared/task-contract";
+import type { ProjectDirectory } from "../shared/window-contract";
 import { AppSidebar } from "./components/AppSidebar";
 import { WindowChrome } from "./components/WindowChrome";
 import {
@@ -22,6 +23,11 @@ import {
 } from "./features/prototype/PrototypePage";
 import { SettingsPage } from "./features/settings/SettingsPage";
 import { HomePage } from "./features/tasks/HomePage";
+import {
+  loadProjectNames,
+  saveActiveProject,
+  saveProjectName,
+} from "./features/tasks/project-context-storage";
 import { TaskPage } from "./features/tasks/TaskPage";
 import { createTaskStore } from "./features/tasks/task-store";
 import {
@@ -82,8 +88,11 @@ function ConnectedApp({ api, modelApi }: Required<Pick<AppProps, "api">> & {
     store,
     (state) => state.isLoadingHistory,
   );
+  const isChatting = useStore(store, (state) => state.isChatting);
   const [view, setView] = useState<AppView>("work");
   const [notice, setNotice] = useState<ToastNotice>();
+  const [homeRevision, setHomeRevision] = useState(0);
+  const [projectNames, setProjectNames] = useState(loadProjectNames);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     loadSidebarCollapsed,
@@ -93,6 +102,7 @@ function ConnectedApp({ api, modelApi }: Required<Pick<AppProps, "api">> & {
     index: 0,
   });
   const applyingNavigationRef = useRef(false);
+  const shellRef = useRef<HTMLDivElement>(null);
   const stopSidebarResizeRef = useRef<() => void>(() => undefined);
   const shellStyle = {
     "--sidebar-width": `${sidebarWidth}px`,
@@ -197,25 +207,53 @@ function ConnectedApp({ api, modelApi }: Required<Pick<AppProps, "api">> & {
     applyLocation(target);
   }
 
+  function openBlankConversation() {
+    saveActiveProject(undefined);
+    setHomeRevision((revision) => revision + 1);
+    navigateTo({ view: "work" });
+  }
+
+  function openNewProjectConversation(project: ProjectDirectory) {
+    saveActiveProject(project);
+    saveProjectName(project.path, project.name);
+    setProjectNames((names) => ({ ...names, [project.path]: project.name }));
+    setHomeRevision((revision) => revision + 1);
+    navigateTo({ view: "work" });
+    notify(`已创建项目：${project.name}`, "success");
+  }
+
   function startSidebarResize(event: React.PointerEvent<HTMLDivElement>) {
     event.preventDefault();
     stopSidebarResizeRef.current();
     const startX = event.clientX;
     const startWidth = sidebarWidth;
     let currentWidth = sidebarWidth;
+    let resizeFrame: number | undefined;
+    const shell = shellRef.current;
 
     document.body.classList.add("resizing-sidebar");
     const handleMove = (moveEvent: PointerEvent) => {
       currentWidth = clampSidebarWidth(
         startWidth + moveEvent.clientX - startX,
       );
-      setSidebarWidth(currentWidth);
+      if (resizeFrame !== undefined) {
+        return;
+      }
+      resizeFrame = window.requestAnimationFrame(() => {
+        resizeFrame = undefined;
+        shell?.style.setProperty("--sidebar-width", `${currentWidth}px`);
+      });
     };
     const stopResize = () => {
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", stopResize);
       window.removeEventListener("pointercancel", stopResize);
+      if (resizeFrame !== undefined) {
+        window.cancelAnimationFrame(resizeFrame);
+      }
+      shell?.style.setProperty("--sidebar-width", `${currentWidth}px`);
       document.body.classList.remove("resizing-sidebar");
+      setSidebarWidth(currentWidth);
       saveSidebarWidth(currentWidth);
       stopSidebarResizeRef.current = () => undefined;
     };
@@ -244,6 +282,7 @@ function ConnectedApp({ api, modelApi }: Required<Pick<AppProps, "api">> & {
     );
     return (
       <div
+        ref={shellRef}
         className={`settings-window-shell${
           sidebarCollapsed ? " sidebar-collapsed" : ""
         }`}
@@ -275,6 +314,7 @@ function ConnectedApp({ api, modelApi }: Required<Pick<AppProps, "api">> & {
 
   return (
     <div
+      ref={shellRef}
       className={`app-shell${
         sidebarCollapsed ? " sidebar-collapsed" : ""
       }`}
@@ -283,30 +323,31 @@ function ConnectedApp({ api, modelApi }: Required<Pick<AppProps, "api">> & {
       {windowChrome}
       <AppSidebar
         activeTaskId={activeTask?.taskId}
+        processingTaskId={isChatting ? activeTask?.taskId : undefined}
         activeView={activeView}
         isLoadingHistory={isLoadingHistory}
         recentTasks={recentTasks}
         taskProjectPaths={taskProjectPaths}
+        projectNames={projectNames}
         archivedTaskIds={archivedTaskIds}
         onArchiveTask={(taskId) => store.getState().archiveTask(taskId)}
+        onNewProject={openNewProjectConversation}
         onNavigate={(nextView) => navigateTo({ view: nextView })}
         notify={notify}
-        onNewTask={() => {
-          navigateTo({ view: "work" });
-        }}
+        onNewTask={openBlankConversation}
         onSettings={() => navigateTo({ view: "settings" })}
         onOpenTask={(taskId) => {
           navigateTo({ view: "work", taskId });
         }}
       />
-      {view === "workspaces" ||
-        view === "automations" ||
+      {view === "automations" ||
         view === "skills" ? (
         <PrototypePage view={view} notify={notify} />
       ) : activeTask ? (
-        <TaskPage store={store} notify={notify} />
+        <TaskPage store={store} modelApi={modelApi} notify={notify} />
       ) : (
         <HomePage
+          key={homeRevision}
           store={store}
           notify={notify}
         />

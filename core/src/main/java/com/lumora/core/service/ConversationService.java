@@ -37,6 +37,8 @@ public interface ConversationService {
     void streamMessage(
             String taskId,
             String content,
+            String model,
+            String reasoningEffort,
             String correlationId,
             Consumer<ChatStreamEvent> eventConsumer,
             Runnable completionCallback,
@@ -60,6 +62,8 @@ public interface ConversationService {
             String taskId,
             String messageId,
             String content,
+            String model,
+            String reasoningEffort,
             String correlationId,
             Consumer<ChatStreamEvent> eventConsumer,
             Runnable completionCallback,

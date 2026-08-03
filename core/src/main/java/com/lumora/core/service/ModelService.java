@@ -4,6 +4,7 @@ import com.lumora.core.model.ChatCompletion;
 import com.lumora.core.model.ChatMessage;
 import com.lumora.core.model.ChatStreamEvent;
 import com.lumora.core.model.ModelSettings;
+import com.lumora.core.agent.model.AgentMemoryCandidate;
 
 import java.util.List;
 import java.util.function.Consumer;
@@ -12,6 +13,20 @@ import java.util.function.Consumer;
  * 模型配置和模型调用的统一业务接口。
  */
 public interface ModelService {
+
+    List<String> listModels(
+            String providerName,
+            String baseUrl,
+            String apiKey,
+            String correlationId
+    );
+
+    List<AgentMemoryCandidate> extractMemories(
+            String userMessage,
+            String assistantMessage,
+            String existingMemorySummary,
+            String correlationId
+    );
 
     /**
      * 获取可安全返回给前端的模型配置。
@@ -39,6 +54,7 @@ public interface ModelService {
             String providerName,
             String baseUrl,
             String model,
+            int contextWindow,
             String apiKey,
             String correlationId
     );
@@ -70,6 +86,9 @@ public interface ModelService {
     void streamChat(
             List<ChatMessage> messages,
             String correlationId,
+            String model,
+            String reasoningEffort,
+            String memorySummary,
             Consumer<ChatStreamEvent> eventConsumer
     );
 }

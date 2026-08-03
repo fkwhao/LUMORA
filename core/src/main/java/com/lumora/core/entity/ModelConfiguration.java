@@ -19,6 +19,8 @@ public class ModelConfiguration {
     private String baseUrl;
     @TableField("model_name")
     private String modelName;
+    @TableField("context_window")
+    private int contextWindow;
     @TableField("api_key_ciphertext")
     private String apiKeyCiphertext;
     @TableField(
@@ -40,6 +42,7 @@ public class ModelConfiguration {
             String providerName,
             String baseUrl,
             String modelName,
+            int contextWindow,
             String apiKeyCiphertext,
             Instant createdAt,
             Instant updatedAt
@@ -48,6 +51,7 @@ public class ModelConfiguration {
         this.providerName = providerName;
         this.baseUrl = baseUrl;
         this.modelName = modelName;
+        this.contextWindow = contextWindow;
         this.apiKeyCiphertext = apiKeyCiphertext;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
@@ -83,6 +87,14 @@ public class ModelConfiguration {
 
     public void setModelName(String modelName) {
         this.modelName = modelName;
+    }
+
+    public int getContextWindow() {
+        return contextWindow;
+    }
+
+    public void setContextWindow(int contextWindow) {
+        this.contextWindow = contextWindow;
     }
 
     public String getApiKeyCiphertext() {

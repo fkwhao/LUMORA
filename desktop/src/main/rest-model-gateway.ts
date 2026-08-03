@@ -3,7 +3,9 @@ import { randomUUID } from "node:crypto";
 import type {
   ChatCompletion,
   ChatMessage,
+  ChatRequestOptions,
   ChatStreamEvent,
+  ListModelsInput,
   ModelSettings,
   UpdateModelSettingsInput,
 } from "../shared/model-contract";
@@ -37,6 +39,18 @@ export class RestModelGateway implements ModelGateway {
     });
   }
 
+  async listModels(input: ListModelsInput): Promise<string[]> {
+    const response = await this.request<{ models: string[] }>(
+      "/api/v1/model/settings/models",
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+      30_000,
+    );
+    return response.models;
+  }
+
   complete(messages: ChatMessage[]): Promise<ChatCompletion> {
     return this.request(
       "/api/v1/chat/completions",
@@ -58,11 +72,12 @@ export class RestModelGateway implements ModelGateway {
     taskId: string,
     content: string,
     onEvent: (event: ChatStreamEvent) => void,
+    options?: ChatRequestOptions,
   ): ModelStreamSubscription {
     const controller = new AbortController();
     const completed = this.consumeMessageStream(
       `/api/v1/tasks/${encodeURIComponent(taskId)}/messages/stream`,
-      content,
+      { content, ...options },
       onEvent,
       controller.signal,
     );
@@ -77,11 +92,12 @@ export class RestModelGateway implements ModelGateway {
     messageId: string,
     content: string,
     onEvent: (event: ChatStreamEvent) => void,
+    options?: ChatRequestOptions,
   ): ModelStreamSubscription {
     const controller = new AbortController();
     const completed = this.consumeMessageStream(
       `/api/v1/tasks/${encodeURIComponent(taskId)}/messages/${encodeURIComponent(messageId)}/regenerate`,
-      content,
+      { content, ...options },
       onEvent,
       controller.signal,
     );
@@ -121,7 +137,7 @@ export class RestModelGateway implements ModelGateway {
 
   private async consumeMessageStream(
     path: string,
-    content: string,
+    body: { content: string } & ChatRequestOptions,
     onEvent: (event: ChatStreamEvent) => void,
     signal: AbortSignal,
   ): Promise<void> {
@@ -135,7 +151,7 @@ export class RestModelGateway implements ModelGateway {
           "Content-Type": "application/json",
           "X-Correlation-Id": randomUUID(),
         },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify(body),
         signal,
       },
     );

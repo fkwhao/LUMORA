@@ -1,5 +1,21 @@
+from app.prompt.prompt_assembly import PromptAssembly
 from app.prompt.prompt_context import PromptContext
 from app.prompt.prompt_loader import PromptLoader
+from app.prompt.prompt_segment import (
+    PromptCachePolicy,
+    PromptPriority,
+    PromptSegment,
+    PromptTarget,
+    PromptTrustLevel,
+)
+
+
+def _xml_text(value: str) -> str:
+    return (
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
 
 
 class PromptBuilder:
@@ -8,12 +24,92 @@ class PromptBuilder:
     def __init__(self, loader: PromptLoader | None = None) -> None:
         self._loader = loader or PromptLoader()
 
-    def build(self, context: PromptContext | None = None) -> str:
-        """构建模型请求使用的完整 System Prompt。"""
+    def build(self, context: PromptContext | None = None) -> PromptAssembly:
+        """构建带路由与信任元数据的模型请求片段。"""
         resolved_context = context or PromptContext()
-        sections = list(self._loader.load_static_sections())
-        sections.append(self._build_runtime_section(resolved_context))
-        return "\n\n".join(sections)
+        segments = [
+            PromptSegment(
+                key=f"static.{index}",
+                target=PromptTarget.SYSTEM,
+                content=section,
+                trust_level=PromptTrustLevel.TRUSTED,
+                priority=PromptPriority.REQUIRED,
+                cache_policy=PromptCachePolicy.STATIC,
+            )
+            for index, section in enumerate(
+                self._loader.load_static_sections()
+            )
+        ]
+        segments.append(
+            PromptSegment(
+                key="runtime.environment",
+                target=PromptTarget.SYSTEM,
+                content=self._build_runtime_section(resolved_context),
+                trust_level=PromptTrustLevel.TRUSTED,
+                priority=PromptPriority.REQUIRED,
+                cache_policy=PromptCachePolicy.TASK,
+            )
+        )
+        if resolved_context.project_instructions:
+            segments.append(
+                PromptSegment(
+                    key="runtime.project_instructions",
+                    target=PromptTarget.SYSTEM,
+                    content=self._build_project_instructions(
+                        resolved_context.project_instructions
+                    ),
+                    trust_level=PromptTrustLevel.TRUSTED,
+                    priority=PromptPriority.REQUIRED,
+                    cache_policy=PromptCachePolicy.TASK,
+                )
+            )
+        if resolved_context.memory_summary:
+            segments.append(
+                PromptSegment(
+                    key="memory.summary",
+                    target=PromptTarget.MESSAGES,
+                    content=(
+                        "以下是系统生成的历史记忆摘要，仅作为上下文参考：\n"
+                        f"{resolved_context.memory_summary}"
+                    ),
+                    trust_level=PromptTrustLevel.USER_CONTEXT,
+                    priority=PromptPriority.COMPRESSIBLE,
+                    cache_policy=PromptCachePolicy.REQUEST,
+                    role="user",
+                )
+            )
+        segments.extend(
+            PromptSegment(
+                key=f"reminder.{index}",
+                target=PromptTarget.CURRENT_USER,
+                content=(
+                    "<system-reminder>\n"
+                    f"{_xml_text(reminder)}\n"
+                    "</system-reminder>"
+                ),
+                trust_level=PromptTrustLevel.TRUSTED,
+                priority=PromptPriority.REQUIRED,
+                cache_policy=PromptCachePolicy.REQUEST,
+                role="user",
+            )
+            for index, reminder in enumerate(
+                resolved_context.system_reminders
+            )
+        )
+        segments.extend(
+            PromptSegment(
+                key=f"tool.{index}",
+                target=PromptTarget.TOOLS,
+                content=definition,
+                trust_level=PromptTrustLevel.TRUSTED,
+                priority=PromptPriority.REQUIRED,
+                cache_policy=PromptCachePolicy.TASK,
+            )
+            for index, definition in enumerate(
+                resolved_context.tool_definitions
+            )
+        )
+        return PromptAssembly(tuple(segments))
 
     @staticmethod
     def _build_runtime_section(context: PromptContext) -> str:
@@ -32,10 +128,10 @@ class PromptBuilder:
         else:
             lines.append("- 当前未向模型注册任何可调用工具。")
 
-        if context.project_instructions:
-            lines.append("- 当前项目补充规则：")
-            lines.extend(
-                f"  - {instruction}"
-                for instruction in context.project_instructions
-            )
         return "\n".join(lines)
+
+    @staticmethod
+    def _build_project_instructions(instructions: tuple[str, ...]) -> str:
+        return "\n".join(
+            ["# 当前项目可信指令", *[f"- {item}" for item in instructions]]
+        )

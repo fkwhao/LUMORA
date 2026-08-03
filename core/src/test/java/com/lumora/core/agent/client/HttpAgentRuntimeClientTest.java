@@ -12,6 +12,7 @@ import com.lumora.core.common.constant.HttpContractConstants;
 import com.lumora.core.config.CoreProperties;
 import com.lumora.core.model.ChatCompletion;
 import com.lumora.core.model.ChatMessage;
+import com.lumora.core.agent.model.AgentMemoryCandidate;
 import com.lumora.core.model.ChatStreamEvent;
 import com.lumora.core.model.ChatStreamEventType;
 import com.lumora.core.model.ModelConnection;
@@ -248,6 +249,92 @@ class HttpAgentRuntimeClientTest {
     }
 
     @Test
+    void listsAvailableProviderModels() {
+        server.expect(requestTo(
+                        "http://127.0.0.1:45101/api/v1/models"
+                ))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(content().json("""
+                        {
+                          "providerName": "DeepSeek",
+                          "baseUrl": "https://api.deepseek.com",
+                          "apiKey": "provider-secret"
+                        }
+                        """))
+                .andRespond(withSuccess("""
+                        {
+                          "models": [
+                            "deepseek-v4-flash",
+                            "deepseek-v4-pro"
+                          ]
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        List<String> models = client.listModels(
+                "DeepSeek",
+                "https://api.deepseek.com",
+                "provider-secret",
+                "correlation-123"
+        );
+
+        assertEquals(
+                List.of("deepseek-v4-flash", "deepseek-v4-pro"),
+                models
+        );
+        server.verify();
+    }
+
+    @Test
+    void extractsStructuredMemoryCandidates() {
+        server.expect(requestTo(
+                        "http://127.0.0.1:45101/api/v1/memory/extractions"
+                ))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(content().json("""
+                        {
+                          "userMessage": "以后回答简洁一点",
+                          "assistantMessage": "好的",
+                          "existingMemorySummary": null,
+                          "connection": {
+                            "apiKey": "provider-secret"
+                          }
+                        }
+                        """, false))
+                .andRespond(withSuccess("""
+                        {
+                          "candidates": [{
+                            "scope": "USER",
+                            "type": "PREFERENCE",
+                            "retention": "LONG_TERM",
+                            "content": "用户偏好简洁回答",
+                            "dedupeKey": "user.response.style",
+                            "subject": "用户",
+                            "predicate": "response_style",
+                            "value": "简洁",
+                            "structuredData": {"style": "concise"},
+                            "confidence": 0.95,
+                            "ttlSeconds": null
+                          }]
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        List<AgentMemoryCandidate> candidates = client.extractMemories(
+                "以后回答简洁一点",
+                "好的",
+                null,
+                CONNECTION,
+                "correlation-123"
+        );
+
+        assertEquals(1, candidates.size());
+        assertEquals("PREFERENCE", candidates.get(0).getType());
+        assertEquals("user.response.style", candidates.get(0).getDedupeKey());
+        assertEquals("concise", candidates.get(0)
+                .getStructuredData().get("style"));
+        server.verify();
+    }
+
+    @Test
     void forwardsTextUsageAndCompletionStreamEvents() {
         server.expect(requestTo(
                         "http://127.0.0.1:45101/api/v1/chat/completions/stream"
@@ -255,6 +342,10 @@ class HttpAgentRuntimeClientTest {
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(content().json("""
                         {
+                          "reasoningEffort": "high",
+                          "promptContext": {
+                            "memorySummary": "- [偏好] 用户偏好简洁回答"
+                          },
                           "connection": {
                             "apiKey": "provider-secret"
                           }
@@ -278,6 +369,8 @@ class HttpAgentRuntimeClientTest {
                 List.of(new ChatMessage("user", "你好")),
                 CONNECTION,
                 "correlation-123",
+                "high",
+                "- [偏好] 用户偏好简洁回答",
                 events::add
         );
 

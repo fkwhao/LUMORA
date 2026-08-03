@@ -31,13 +31,13 @@ describe("task archive flow", () => {
 
     fireEvent.click(
       await screen.findByRole("button", {
-        name: "归档任务：整理项目文档",
+        name: "归档会话：整理项目文档",
       }),
     );
     expect(screen.queryByText("整理项目文档")).not.toBeInTheDocument();
     fireEvent.click(
       screen.getByRole("button", {
-        name: "归档任务：检查代码规范",
+        name: "归档会话：检查代码规范",
       }),
     );
 

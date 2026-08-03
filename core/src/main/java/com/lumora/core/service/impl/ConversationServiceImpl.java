@@ -8,6 +8,7 @@ import com.lumora.core.service.ModelService;
 import com.lumora.core.service.support.conversation.ConversationPersistenceService;
 import com.lumora.core.service.support.conversation.ConversationRunContext;
 import com.lumora.core.service.support.conversation.ConversationStreamAccumulator;
+import com.lumora.core.service.support.memory.MemoryExtractionCoordinator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -17,6 +18,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 会话业务编排器。
@@ -28,9 +31,14 @@ import java.util.function.Supplier;
 @RequiredArgsConstructor
 public class ConversationServiceImpl implements ConversationService {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(
+            ConversationServiceImpl.class
+    );
+
     private final ConversationPersistenceService persistenceService;
     private final ModelService modelService;
     private final ExecutorService executorService;
+    private final MemoryExtractionCoordinator memoryExtractionCoordinator;
     private final Set<String> activeTaskIds = ConcurrentHashMap.newKeySet();
 
     @Override
@@ -42,6 +50,8 @@ public class ConversationServiceImpl implements ConversationService {
     public void streamMessage(
             String taskId,
             String content,
+            String model,
+            String reasoningEffort,
             String correlationId,
             Consumer<ChatStreamEvent> eventConsumer,
             Runnable completionCallback,
@@ -51,6 +61,8 @@ public class ConversationServiceImpl implements ConversationService {
         startGeneration(
                 taskId,
                 requireText(correlationId, "关联 ID"),
+                model,
+                reasoningEffort,
                 () -> persistenceService.prepareNewMessage(
                         taskId,
                         normalizedContent
@@ -66,6 +78,8 @@ public class ConversationServiceImpl implements ConversationService {
             String taskId,
             String messageId,
             String content,
+            String model,
+            String reasoningEffort,
             String correlationId,
             Consumer<ChatStreamEvent> eventConsumer,
             Runnable completionCallback,
@@ -76,6 +90,8 @@ public class ConversationServiceImpl implements ConversationService {
         startGeneration(
                 taskId,
                 requireText(correlationId, "关联 ID"),
+                model,
+                reasoningEffort,
                 () -> persistenceService.prepareRegeneration(
                         taskId,
                         normalizedMessageId,
@@ -90,6 +106,8 @@ public class ConversationServiceImpl implements ConversationService {
     private void startGeneration(
             String taskId,
             String correlationId,
+            String model,
+            String reasoningEffort,
             Supplier<ConversationRunContext> contextSupplier,
             Consumer<ChatStreamEvent> eventConsumer,
             Runnable completionCallback,
@@ -104,6 +122,8 @@ public class ConversationServiceImpl implements ConversationService {
             executorService.submit(() -> executeStream(
                     context,
                     correlationId,
+                    model,
+                    reasoningEffort,
                     eventConsumer,
                     completionCallback,
                     errorCallback
@@ -117,6 +137,8 @@ public class ConversationServiceImpl implements ConversationService {
     private void executeStream(
             ConversationRunContext context,
             String correlationId,
+            String model,
+            String reasoningEffort,
             Consumer<ChatStreamEvent> eventConsumer,
             Runnable completionCallback,
             Consumer<Throwable> errorCallback
@@ -127,6 +149,9 @@ public class ConversationServiceImpl implements ConversationService {
             modelService.streamChat(
                     context.getModelMessages(),
                     correlationId,
+                    model,
+                    reasoningEffort,
+                    context.getMemorySummary(),
                     event -> handleStreamEvent(
                             context,
                             accumulator,
@@ -138,10 +163,37 @@ public class ConversationServiceImpl implements ConversationService {
                 throw new IllegalStateException("模型流未正常结束");
             }
             completionCallback.run();
+            scheduleMemoryExtraction(context, accumulator, correlationId);
         } catch (Throwable error) {
             errorCallback.accept(error);
         } finally {
             activeTaskIds.remove(context.getTaskId());
+        }
+    }
+
+    private void scheduleMemoryExtraction(
+            ConversationRunContext context,
+            ConversationStreamAccumulator accumulator,
+            String correlationId
+    ) {
+        try {
+            executorService.submit(() -> {
+                try {
+                    memoryExtractionCoordinator.extractAndStore(
+                            context.getConversationId(),
+                            context.getCurrentUserMessageId(),
+                            context.getCurrentUserContent(),
+                            accumulator.getContent(),
+                            context.getMemoryExtractionContext(),
+                            correlationId
+                    );
+                } catch (RuntimeException error) {
+                    // 记忆是回答完成后的增强能力，失败不能反向破坏已完成的会话。
+                    LOGGER.warn("异步记忆提取失败", error);
+                }
+            });
+        } catch (RuntimeException error) {
+            LOGGER.warn("无法调度异步记忆提取", error);
         }
     }
 

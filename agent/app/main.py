@@ -17,6 +17,7 @@ from app.dto.response.error_response import ErrorResponse
 from app.prompt.prompt_builder import PromptBuilder
 from app.provider.openai_compatible_provider import OpenAICompatibleProvider
 from app.service.chat_service import ChatService
+from app.service.memory_extraction_service import MemoryExtractionService
 from app.service.planner_service import PlannerService
 
 
@@ -29,16 +30,22 @@ def create_app(
     settings: AgentSettings,
     planner_service: PlannerService,
     chat_service: ChatService | None = None,
+    memory_extraction_service: MemoryExtractionService | None = None,
 ) -> FastAPI:
     app = FastAPI(title=SERVICE_TITLE, version=SERVICE_VERSION)
+    provider = OpenAICompatibleProvider()
     resolved_chat_service = chat_service or ChatService(
-        OpenAICompatibleProvider(),
+        provider,
         PromptBuilder(),
+    )
+    resolved_memory_extraction_service = (
+        memory_extraction_service or MemoryExtractionService(provider)
     )
     controller = AgentHttpController(
         settings,
         planner_service,
         resolved_chat_service,
+        resolved_memory_extraction_service,
     )
     app.include_router(controller.router)
 

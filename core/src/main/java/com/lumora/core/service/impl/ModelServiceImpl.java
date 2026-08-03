@@ -1,6 +1,7 @@
 package com.lumora.core.service.impl;
 
 import com.lumora.core.agent.client.AgentRuntimeClient;
+import com.lumora.core.agent.model.AgentMemoryCandidate;
 import com.lumora.core.common.constant.ModelConfigurationConstants;
 import com.lumora.core.entity.ModelConfiguration;
 import com.lumora.core.mapper.ModelConfigurationMapper;
@@ -36,6 +37,50 @@ public class ModelServiceImpl implements ModelService {
     private final Clock clock;
 
     @Override
+    public List<String> listModels(
+            String providerName,
+            String baseUrl,
+            String apiKey,
+            String correlationId
+    ) {
+        requireText(correlationId, "关联 ID");
+        String normalizedProvider = requireText(providerName, "模型供应商");
+        String normalizedBaseUrl = validateBaseUrl(baseUrl);
+        String normalizedApiKey = apiKey == null ? "" : apiKey.trim();
+        if (normalizedApiKey.isEmpty()) {
+            ModelConfiguration existing = loadConfiguration();
+            if (!hasEncryptedApiKey(existing)) {
+                throw new IllegalArgumentException("请先输入 API Key");
+            }
+            normalizedApiKey = secretProtector.unprotect(
+                    existing.getApiKeyCiphertext()
+            );
+        }
+        return agentRuntimeClient.listModels(
+                normalizedProvider,
+                normalizedBaseUrl,
+                normalizedApiKey,
+                correlationId
+        );
+    }
+
+    @Override
+    public List<AgentMemoryCandidate> extractMemories(
+            String userMessage,
+            String assistantMessage,
+            String existingMemorySummary,
+            String correlationId
+    ) {
+        return agentRuntimeClient.extractMemories(
+                requireText(userMessage, "用户消息"),
+                requireText(assistantMessage, "助手回答"),
+                existingMemorySummary,
+                requireConnection(),
+                requireText(correlationId, "关联 ID")
+        );
+    }
+
+    @Override
     public ModelSettings getSettings(String correlationId) {
         requireText(correlationId, "关联 ID");
         ModelConfiguration configuration = loadConfiguration();
@@ -44,6 +89,7 @@ public class ModelServiceImpl implements ModelService {
                     "OpenAI Compatible",
                     "https://api.openai.com/v1",
                     "",
+                    128_000,
                     false
             );
         }
@@ -56,6 +102,7 @@ public class ModelServiceImpl implements ModelService {
             String providerName,
             String baseUrl,
             String model,
+            int contextWindow,
             String apiKey,
             String correlationId
     ) {
@@ -64,6 +111,9 @@ public class ModelServiceImpl implements ModelService {
         String normalizedProvider = requireText(providerName, "模型供应商");
         String normalizedBaseUrl = validateBaseUrl(baseUrl);
         String normalizedModel = requireText(model, "模型名称");
+        if (contextWindow < 1 || contextWindow > 10_000_000) {
+            throw new IllegalArgumentException("上下文长度必须在 1 到 10000000 之间");
+        }
         String normalizedApiKey = apiKey == null ? "" : apiKey.trim();
 
         // 2. 留空表示保留已有 Key；输入新 Key 时才执行 DPAPI 加密。
@@ -80,6 +130,7 @@ public class ModelServiceImpl implements ModelService {
                 normalizedProvider,
                 normalizedBaseUrl,
                 normalizedModel,
+                contextWindow,
                 apiKeyCiphertext,
                 now
         );
@@ -107,6 +158,7 @@ public class ModelServiceImpl implements ModelService {
             String providerName,
             String baseUrl,
             String modelName,
+            int contextWindow,
             String apiKeyCiphertext,
             Instant now
     ) {
@@ -116,6 +168,7 @@ public class ModelServiceImpl implements ModelService {
                     providerName,
                     baseUrl,
                     modelName,
+                    contextWindow,
                     apiKeyCiphertext,
                     now,
                     now
@@ -125,6 +178,7 @@ public class ModelServiceImpl implements ModelService {
         existing.setProviderName(providerName);
         existing.setBaseUrl(baseUrl);
         existing.setModelName(modelName);
+        existing.setContextWindow(contextWindow);
         existing.setApiKeyCiphertext(apiKeyCiphertext);
         existing.setUpdatedAt(now);
         configurationMapper.updateById(existing);
@@ -149,6 +203,9 @@ public class ModelServiceImpl implements ModelService {
     public void streamChat(
             List<ChatMessage> messages,
             String correlationId,
+            String model,
+            String reasoningEffort,
+            String memorySummary,
             Consumer<ChatStreamEvent> eventConsumer
     ) {
         if (messages == null || messages.isEmpty()) {
@@ -156,13 +213,19 @@ public class ModelServiceImpl implements ModelService {
         }
         agentRuntimeClient.streamChat(
                 List.copyOf(messages),
-                requireConnection(),
+                requireConnection(model),
                 correlationId,
+                reasoningEffort,
+                memorySummary,
                 eventConsumer
         );
     }
 
     private ModelConnection requireConnection() {
+        return requireConnection(null);
+    }
+
+    private ModelConnection requireConnection(String modelOverride) {
         ModelConfiguration configuration = loadConfiguration();
         if (configuration == null || !hasEncryptedApiKey(configuration)) {
             throw new IllegalStateException("请先在设置中配置模型 API");
@@ -171,7 +234,9 @@ public class ModelServiceImpl implements ModelService {
         return new ModelConnection(
                 configuration.getProviderName(),
                 configuration.getBaseUrl(),
-                configuration.getModelName(),
+                modelOverride == null || modelOverride.isBlank()
+                        ? configuration.getModelName()
+                        : modelOverride.trim(),
                 secretProtector.unprotect(
                         configuration.getApiKeyCiphertext()
                 )
@@ -191,6 +256,7 @@ public class ModelServiceImpl implements ModelService {
                 configuration.getProviderName(),
                 configuration.getBaseUrl(),
                 configuration.getModelName(),
+                configuration.getContextWindow(),
                 hasEncryptedApiKey(configuration)
         );
     }

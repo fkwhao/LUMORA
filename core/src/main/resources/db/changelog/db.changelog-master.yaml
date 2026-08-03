@@ -64,3 +64,30 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 008-model-context-window
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V8__model_context_window.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false
+  - changeSet:
+      id: 009-memory-item
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V9__memory_item.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false
+  - changeSet:
+      id: 010-memory-semantic-slot
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V10__memory_semantic_slot.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

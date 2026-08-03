@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
   File,
@@ -15,6 +15,7 @@ import {
 import { useStore } from "zustand";
 
 import type { ProjectDirectory } from "../../../shared/window-contract";
+import { resizeTextarea } from "../../utils/auto-resize-textarea";
 import { submitFormOnEnter } from "../../utils/submit-on-enter";
 import {
   loadActiveProject,
@@ -41,8 +42,11 @@ export function HomePage({ store, notify }: HomePageProps) {
     loadActiveProject,
   );
   const fileInput = useRef<HTMLInputElement>(null);
+  const goalInput = useRef<HTMLTextAreaElement>(null);
   const isCreating = useStore(store, (state) => state.isCreating);
   const error = useStore(store, (state) => state.error);
+
+  useEffect(() => resizeTextarea(goalInput.current, 220), [goal]);
 
   async function submitGoal(event: React.FormEvent) {
     event.preventDefault();
@@ -151,6 +155,7 @@ export function HomePage({ store, notify }: HomePageProps) {
               }}
             />
             <textarea
+              ref={goalInput}
               id="task-goal"
               aria-label="告诉 LUMORA 你的目标"
               value={goal}
