@@ -1,7 +1,7 @@
 package com.lumora.core.controller;
 
 import com.lumora.core.common.constant.ApiPathConstants;
-import com.lumora.core.service.TaskEventService;
+import com.lumora.core.controller.support.TaskEventStreamRegistry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,13 +18,13 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @RequestMapping(ApiPathConstants.TASKS)
 public class TaskEventController {
 
-    private final TaskEventService taskEventService;
+    private final TaskEventStreamRegistry eventStreamRegistry;
 
     @GetMapping(
             value = ApiPathConstants.TASK_EVENTS,
             produces = MediaType.TEXT_EVENT_STREAM_VALUE
     )
     public SseEmitter subscribe(@PathVariable String taskId) {
-        return taskEventService.subscribe(taskId);
+        return eventStreamRegistry.subscribe(taskId);
     }
 }

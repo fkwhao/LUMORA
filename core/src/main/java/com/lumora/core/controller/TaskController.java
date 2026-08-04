@@ -2,6 +2,7 @@ package com.lumora.core.controller;
 
 import com.lumora.core.common.constant.ApiPathConstants;
 import com.lumora.core.common.constant.HttpContractConstants;
+import com.lumora.core.converter.TaskResponseConverter;
 import com.lumora.core.dto.request.CreateTaskRequest;
 import com.lumora.core.dto.response.TaskResponse;
 import com.lumora.core.service.TaskService;
@@ -29,6 +30,7 @@ import java.util.List;
 public class TaskController {
 
     private final TaskService taskService;
+    private final TaskResponseConverter responseConverter;
 
     @PostMapping
     public ResponseEntity<TaskResponse> createTask(
@@ -42,18 +44,18 @@ public class TaskController {
         );
         return ResponseEntity
                 .status(HttpStatus.CREATED)
-                .body(TaskResponse.fromDetails(task));
+                .body(responseConverter.fromDetails(task));
     }
 
     @GetMapping
     public List<TaskResponse> listTasks() {
         return taskService.listTasks().stream()
-                .map(TaskResponse::fromEntity)
+                .map(responseConverter::fromTask)
                 .toList();
     }
 
     @GetMapping(ApiPathConstants.TASK_BY_ID)
     public TaskResponse getTask(@PathVariable String taskId) {
-        return TaskResponse.fromDetails(taskService.getTaskDetails(taskId));
+        return responseConverter.fromDetails(taskService.getTaskDetails(taskId));
     }
 }

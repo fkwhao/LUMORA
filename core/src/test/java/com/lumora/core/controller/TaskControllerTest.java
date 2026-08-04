@@ -1,5 +1,6 @@
 package com.lumora.core.controller;
 
+import com.lumora.core.converter.TaskResponseConverter;
 import com.lumora.core.entity.AgentTask;
 import com.lumora.core.entity.TaskPlanStep;
 import com.lumora.core.entity.TaskStatus;
@@ -100,7 +101,10 @@ class TaskControllerTest {
     }
 
     private static MockMvc mockMvc(TaskService service) {
-        return standaloneSetup(new TaskController(service))
+        return standaloneSetup(new TaskController(
+                service,
+                new TaskResponseConverter()
+        ))
                 .setControllerAdvice(new RestExceptionHandler())
                 .build();
     }

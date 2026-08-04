@@ -217,6 +217,26 @@ components:
             $ref: "#/components/schemas/ChatMessage"
         connection:
           $ref: "#/components/schemas/ModelConnection"
+        promptContext:
+          $ref: "#/components/schemas/PromptContext"
+        reasoningEffort:
+          type: string
+          enum: [low, medium, high, xhigh, max]
+    PromptContext:
+      type: object
+      additionalProperties: false
+      properties:
+        workspacePath:
+          type: string
+          maxLength: 1000
+        projectInstructions:
+          type: array
+          items: { type: string }
+        availableTools:
+          type: array
+          items: { type: string }
+        memorySummary:
+          type: string
     ModelConnection:
       type: object
       additionalProperties: false
@@ -269,7 +289,16 @@ components:
       properties:
         type:
           type: string
-          enum: [text_delta, reasoning_delta, usage, completed, failed]
+          enum:
+            - text_delta
+            - reasoning_delta
+            - progress_message
+            - tool_started
+            - tool_completed
+            - tool_failed
+            - usage
+            - completed
+            - failed
         delta:
           type: string
         model:
@@ -278,6 +307,27 @@ components:
           $ref: "#/components/schemas/TokenUsage"
         errorMessage:
           type: string
+        itemId:
+          type: string
+        toolCallId:
+          type: string
+        toolName:
+          type: string
+        title:
+          type: string
+        arguments:
+          type: object
+          additionalProperties: true
+        output:
+          type: string
+        durationMs:
+          type: integer
+          minimum: 0
+        exitCode:
+          type: integer
+        metadata:
+          type: object
+          additionalProperties: true
     TokenUsage:
       type: object
       additionalProperties: false

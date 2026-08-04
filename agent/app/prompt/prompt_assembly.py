@@ -27,15 +27,6 @@ class PromptAssembly:
         )
 
     @property
-    def current_user_content_blocks(self) -> tuple[dict[str, str], ...]:
-        return tuple(
-            {"type": "text", "text": segment.content}
-            for segment in self.segments
-            if segment.target == PromptTarget.CURRENT_USER
-            and isinstance(segment.content, str)
-        )
-
-    @property
     def tools(self) -> tuple[dict[str, Any], ...]:
         return tuple(
             segment.content

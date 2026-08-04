@@ -102,7 +102,6 @@ describe("task store", () => {
     expect(store.getState().messages[1]).toMatchObject({
       role: "assistant",
       content: "可以开始整理。",
-      reasoningContent: "先识别目录结构。",
       durationMs: 2_100,
     });
   });
@@ -254,7 +253,6 @@ function createModelApi(): LumoraModelApi {
       {
         role: "assistant" as const,
         content: "可以开始整理。",
-        reasoningContent: "先识别目录结构。",
         durationMs: 2_100,
       },
     ]),

@@ -1,9 +1,5 @@
 package com.lumora.core.dto.response;
 
-import com.lumora.core.entity.AgentTask;
-import com.lumora.core.entity.TaskStatus;
-import com.lumora.core.task.model.TaskDetails;
-
 import java.time.Instant;
 import java.util.List;
 
@@ -11,7 +7,7 @@ public class TaskResponse {
 
     private String taskId;
     private String goal;
-    private TaskStatus status;
+    private String status;
     private long lastEventSequence;
     private String activeStep;
     private String resultSummary;
@@ -21,30 +17,6 @@ public class TaskResponse {
     private Instant updatedAt;
 
     public TaskResponse() {
-    }
-
-    public static TaskResponse fromEntity(AgentTask task) {
-        TaskResponse response = new TaskResponse();
-        response.setTaskId(task.getTaskId());
-        response.setGoal(task.getGoal());
-        response.setStatus(task.getStatus());
-        response.setLastEventSequence(task.getLastEventSequence());
-        response.setActiveStep(task.getActiveStep());
-        response.setResultSummary(task.getResultSummary());
-        response.setFailureReason(task.getFailureReason());
-        response.setCreatedAt(task.getCreatedAt());
-        response.setUpdatedAt(task.getUpdatedAt());
-        return response;
-    }
-
-    public static TaskResponse fromDetails(TaskDetails details) {
-        TaskResponse response = fromEntity(details.getTask());
-        response.setPlanSteps(
-                details.getPlanSteps().stream()
-                        .map(TaskPlanStepResponse::fromEntity)
-                        .toList()
-        );
-        return response;
     }
 
     public String getTaskId() {
@@ -63,11 +35,11 @@ public class TaskResponse {
         this.goal = goal;
     }
 
-    public TaskStatus getStatus() {
+    public String getStatus() {
         return status;
     }
 
-    public void setStatus(TaskStatus status) {
+    public void setStatus(String status) {
         this.status = status;
     }
 

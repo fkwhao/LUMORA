@@ -1,7 +1,5 @@
 package com.lumora.core.dto.response;
 
-import com.lumora.core.entity.TaskPlanStep;
-
 public class TaskPlanStepResponse {
 
     private String stepId;
@@ -10,15 +8,6 @@ public class TaskPlanStepResponse {
     private boolean requiresApproval;
 
     public TaskPlanStepResponse() {
-    }
-
-    public static TaskPlanStepResponse fromEntity(TaskPlanStep step) {
-        TaskPlanStepResponse response = new TaskPlanStepResponse();
-        response.setStepId(step.getStepId());
-        response.setTitle(step.getTitle());
-        response.setDescription(step.getDescription());
-        response.setRequiresApproval(step.isRequiresApproval());
-        return response;
     }
 
     public String getStepId() {

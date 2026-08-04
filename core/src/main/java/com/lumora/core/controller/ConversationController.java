@@ -2,6 +2,7 @@ package com.lumora.core.controller;
 
 import com.lumora.core.common.constant.ApiPathConstants;
 import com.lumora.core.common.constant.HttpContractConstants;
+import com.lumora.core.converter.ConversationMessageResponseConverter;
 import com.lumora.core.dto.request.SendMessageRequest;
 import com.lumora.core.dto.response.ConversationMessageResponse;
 import com.lumora.core.model.ChatStreamEvent;
@@ -11,6 +12,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -21,6 +23,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 会话 REST/SSE 入口。
@@ -33,13 +36,14 @@ import java.util.List;
 public class ConversationController {
 
     private final ConversationService conversationService;
+    private final ConversationMessageResponseConverter responseConverter;
 
     @GetMapping(ApiPathConstants.TASK_MESSAGES)
     public List<ConversationMessageResponse> listMessages(
             @PathVariable String taskId
     ) {
         return conversationService.listMessages(taskId).stream()
-                .map(ConversationMessageResponse::fromEntity)
+                .map(responseConverter::fromEntity)
                 .toList();
     }
 
@@ -59,6 +63,7 @@ public class ConversationController {
                 request.getContent(),
                 request.getModel(),
                 request.getReasoningEffort(),
+                request.getWorkspacePath(),
                 correlationId,
                 event -> sendEvent(emitter, event),
                 emitter::complete,
@@ -85,12 +90,23 @@ public class ConversationController {
                 request.getContent(),
                 request.getModel(),
                 request.getReasoningEffort(),
+                request.getWorkspacePath(),
                 correlationId,
                 event -> sendEvent(emitter, event),
                 emitter::complete,
                 error -> completeWithStreamError(emitter, error)
         );
         return emitter;
+    }
+
+    @DeleteMapping(ApiPathConstants.TASK_MESSAGE_CANCEL)
+    public Map<String, Boolean> cancelGeneration(
+            @PathVariable String taskId
+    ) {
+        return Map.of(
+                "cancelled",
+                conversationService.cancelGeneration(taskId)
+        );
     }
 
     private void completeWithStreamError(

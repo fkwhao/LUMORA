@@ -206,6 +206,7 @@ public class ModelServiceImpl implements ModelService {
             String model,
             String reasoningEffort,
             String memorySummary,
+            String workspacePath,
             Consumer<ChatStreamEvent> eventConsumer
     ) {
         if (messages == null || messages.isEmpty()) {
@@ -217,6 +218,7 @@ public class ModelServiceImpl implements ModelService {
                 correlationId,
                 reasoningEffort,
                 memorySummary,
+                workspacePath,
                 eventConsumer
         );
     }

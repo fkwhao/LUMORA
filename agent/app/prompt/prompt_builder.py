@@ -10,14 +10,6 @@ from app.prompt.prompt_segment import (
 )
 
 
-def _xml_text(value: str) -> str:
-    return (
-        value.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
-
-
 class PromptBuilder:
     """组合稳定规则与当前任务上下文，生成最终 System Prompt。"""
 
@@ -80,24 +72,6 @@ class PromptBuilder:
             )
         segments.extend(
             PromptSegment(
-                key=f"reminder.{index}",
-                target=PromptTarget.CURRENT_USER,
-                content=(
-                    "<system-reminder>\n"
-                    f"{_xml_text(reminder)}\n"
-                    "</system-reminder>"
-                ),
-                trust_level=PromptTrustLevel.TRUSTED,
-                priority=PromptPriority.REQUIRED,
-                cache_policy=PromptCachePolicy.REQUEST,
-                role="user",
-            )
-            for index, reminder in enumerate(
-                resolved_context.system_reminders
-            )
-        )
-        segments.extend(
-            PromptSegment(
                 key=f"tool.{index}",
                 target=PromptTarget.TOOLS,
                 content=definition,
@@ -113,10 +87,7 @@ class PromptBuilder:
 
     @staticmethod
     def _build_runtime_section(context: PromptContext) -> str:
-        lines = [
-            "# 当前运行上下文",
-            f"- 默认回复语言：{context.response_language}",
-        ]
+        lines = ["# 当前运行上下文"]
         if context.workspace_path:
             lines.append(f"- 当前工作区：{context.workspace_path}")
 

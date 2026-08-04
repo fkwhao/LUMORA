@@ -1,35 +1,49 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Check,
+  ChevronDown,
   ChevronRight,
-  CircleDashed,
+  FilePenLine,
+  FileSearch,
+  FolderSearch,
   TerminalSquare,
 } from "lucide-react";
 
+import type { WorkLogItem } from "../../../shared/model-contract";
 import type { TaskEvent } from "../../../shared/task-contract";
 
 interface AgentRunSummaryProps {
   startedAt?: number;
   durationMs?: number;
-  events: TaskEvent[];
+  events?: TaskEvent[];
+  workLog?: WorkLogItem[];
   running: boolean;
   stopped?: boolean;
+  onReviewChange?(item: WorkLogItem): void;
 }
 
-/**
- * 展示可验证的 Agent 运行事件。这里不会渲染模型隐藏推理，
- * 避免把不稳定的思维文本误认为真实执行记录。
- */
+interface WorkPhase {
+  phaseId: string;
+  title: string;
+  items: WorkLogItem[];
+}
+
+/** 展示公开的进度说明和真实工具事件，不渲染模型隐藏推理。 */
 export function AgentRunSummary({
   startedAt,
   durationMs,
-  events,
+  events = [],
+  workLog = [],
   running,
   stopped = false,
+  onReviewChange,
 }: AgentRunSummaryProps) {
   const [expanded, setExpanded] = useState(running);
   const [elapsedMs, setElapsedMs] = useState(durationMs ?? 0);
   const wasRunning = useRef(running);
+  const phases = useMemo(
+    () => buildWorkPhases(workLog.length > 0 ? workLog : taskEventsAsWorkLog(events)),
+    [events, workLog],
+  );
 
   useEffect(() => {
     if (!running) {
@@ -52,67 +66,275 @@ export function AgentRunSummary({
     wasRunning.current = running;
   }, [running]);
 
-  const visibleEvents = events.slice(-8);
   return (
     <section className={`agent-run${expanded ? " expanded" : ""}`}>
       <div className="agent-run-heading">
         <button
-          className="agent-run-toggle"
+          className={`agent-run-toggle${running ? " is-running" : ""}`}
           type="button"
           aria-expanded={expanded}
           onClick={() => setExpanded((current) => !current)}
         >
-          <span>
-            {running
-              ? `正在处理 ${formatDuration(elapsedMs, false)}`
-              : stopped && durationMs
-                ? `你在 ${formatDuration(durationMs)} 后停止了`
-              : durationMs
-                ? `已处理 ${formatDuration(durationMs)}`
-                : "已处理"}
-          </span>
+          <span>{summaryLabel(running, stopped, elapsedMs, durationMs)}</span>
           <ChevronRight size={15} />
         </button>
       </div>
       <div className="agent-run-events" aria-hidden={!expanded}>
         <div className="agent-run-events-inner">
-          {visibleEvents.length > 0 ? (
-            visibleEvents.map((event) => (
-              <div className="agent-run-event" key={event.sequence}>
-                <span>
-                  {event.type === "PLAN_STEP_COMPLETED" ? (
-                    <Check size={13} />
-                  ) : (
-                    <TerminalSquare size={13} />
-                  )}
-                </span>
-                <div>
-                  <strong>{event.title || eventTypeLabel(event.type)}</strong>
-                  {event.userMessage && <p>{event.userMessage}</p>}
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="agent-run-event">
-              <span>
-                <CircleDashed size={13} />
-              </span>
-              <div>
-                <strong>
-                  {running
-                    ? "正在生成回答"
-                    : stopped
-                      ? "已停止生成"
-                      : "回答生成完成"}
-                </strong>
-                <p>当前链路还没有返回更细的工具执行事件。</p>
-              </div>
-            </div>
+          {phases.map((phase, index) => (
+            <WorkPhaseEntry
+              active={running && index === phases.length - 1}
+              key={phase.phaseId}
+              onReviewChange={onReviewChange}
+              phase={phase}
+            />
+          ))}
+          {phases.length === 0 && (
+            <p className={`work-log-placeholder${running ? " shimmer-text" : ""}`}>
+              {running ? "正在准备工作环境" : stopped ? "已停止生成" : "回答生成完成"}
+            </p>
           )}
         </div>
       </div>
     </section>
   );
+}
+
+function WorkPhaseEntry({
+  phase,
+  active,
+  onReviewChange,
+}: {
+  phase: WorkPhase;
+  active: boolean;
+  onReviewChange?: (item: WorkLogItem) => void;
+}) {
+  const running = active || phase.items.some((item) => item.status === "running");
+  const [expanded, setExpanded] = useState(running);
+
+  useEffect(() => {
+    if (running) {
+      setExpanded(true);
+    }
+  }, [running]);
+
+  return (
+    <section className={`work-phase${expanded ? " expanded" : ""}`}>
+      <button
+        className={`work-phase-toggle${running ? " shimmer-text" : ""}`}
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((current) => !current)}
+      >
+        <span>{phase.title}</span>
+        {phase.items.length > 0 && (
+          <ChevronDown className="work-phase-chevron" size={14} />
+        )}
+      </button>
+      {phase.items.length > 0 && (
+        <div className="work-phase-steps" aria-hidden={!expanded}>
+          <div className="work-phase-steps-inner">
+          {phase.items.map((item) => (
+            <ToolCallItem
+              item={item}
+              key={item.itemId}
+              onReviewChange={onReviewChange}
+            />
+          ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ToolCallItem({
+  item,
+  onReviewChange,
+}: {
+  item: WorkLogItem;
+  onReviewChange?: (item: WorkLogItem) => void;
+}) {
+  // 单次调用默认保持一行摘要；即使正在执行，也只对摘要做扫光。
+  // 详细参数和输出由用户按需展开，避免执行轨迹退化成大块调试面板。
+  const [expanded, setExpanded] = useState(false);
+  const command = stringArgument(item, "command");
+  const path = stringArgument(item, "path");
+  const primaryDetail = command || path || item.title || item.toolName || "工具调用";
+  const isEdit = item.toolName === "write_file" || item.toolName === "apply_patch";
+  const Icon = toolIcon(item.toolName ?? "");
+
+  function activate() {
+    if (isEdit && path && onReviewChange) {
+      onReviewChange(item);
+      return;
+    }
+    setExpanded((current) => !current);
+  }
+
+  return (
+    <article
+      className={`tool-call-item${expanded ? " expanded" : ""}`}
+      data-status={item.status}
+    >
+      <button
+        className={item.status === "running" ? "shimmer-text" : ""}
+        type="button"
+        aria-expanded={isEdit ? undefined : expanded}
+        onClick={activate}
+      >
+        <Icon size={15} />
+        <span>{toolCallLabel(item, primaryDetail)}</span>
+        {isEdit && path && <ChevronRight className="tool-call-review-chevron" size={13} />}
+      </button>
+      {!isEdit && <div className="tool-call-detail-region" aria-hidden={!expanded}>
+        <div
+          className={`tool-call-detail${command ? " tool-call-detail-shell" : ""}`}
+        >
+          {command && (
+            <div>
+              <span>Shell 脚本</span>
+              <pre><code>{command}</code></pre>
+            </div>
+          )}
+          {!command && Object.keys(item.arguments ?? {}).length > 0 && (
+            <div>
+              <span>调用参数</span>
+              <pre><code>{JSON.stringify(item.arguments, null, 2)}</code></pre>
+            </div>
+          )}
+          {(item.output || item.errorMessage) && (
+            <div>
+              <span>{item.status === "failed" ? "错误输出" : "执行结果"}</span>
+              <pre><code>{item.output || item.errorMessage}</code></pre>
+            </div>
+          )}
+          <footer>
+            {item.exitCode !== undefined && <span>退出码 {item.exitCode}</span>}
+            {item.durationMs !== undefined && <span>耗时 {formatDuration(item.durationMs)}</span>}
+          </footer>
+        </div>
+      </div>}
+    </article>
+  );
+}
+
+function buildWorkPhases(items: WorkLogItem[]): WorkPhase[] {
+  const phases: WorkPhase[] = [];
+  let current: WorkPhase | undefined;
+  for (const item of items) {
+    if (item.kind === "progress") {
+      current = {
+        phaseId: item.itemId,
+        title: phaseTitle(item.content),
+        items: [],
+      };
+      phases.push(current);
+      continue;
+    }
+    if (!current) {
+      current = {
+        phaseId: `phase-${item.itemId}`,
+        title: fallbackPhaseTitle(item),
+        items: [],
+      };
+      phases.push(current);
+    }
+    current.items.push(item);
+  }
+  return phases;
+}
+
+function phaseTitle(content?: string): string {
+  const normalized = (content ?? "")
+    .replace(/[`*_#>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return "正在处理任务";
+  const firstSentence = normalized.split(/(?<=[。！？!?])\s*/)[0] ?? normalized;
+  const activeTitle = firstSentence
+    .replace(/^(我会先|我先|接下来我会|接下来)[，,：:]?\s*/, "正在")
+    .replace(/[。！？!?]$/, "");
+  return activeTitle.length > 96
+    ? `${activeTitle.slice(0, 96)}…`
+    : activeTitle;
+}
+
+function fallbackPhaseTitle(item: WorkLogItem): string {
+  if (item.toolName === "read_file" || item.toolName === "search_in_file") {
+    return "正在定位相关内容";
+  }
+  if (item.toolName === "write_file" || item.toolName === "apply_patch") {
+    return "正在修改文件";
+  }
+  if (item.toolName === "list_files") return "正在检查项目结构";
+  return "正在执行命令";
+}
+
+function taskEventsAsWorkLog(events: TaskEvent[]): WorkLogItem[] {
+  return events.slice(-8).map((event) => ({
+    itemId: `task-event-${event.sequence}`,
+    kind: "progress",
+    status: "completed",
+    content: event.userMessage || event.title,
+  }));
+}
+
+function summaryLabel(
+  running: boolean,
+  stopped: boolean,
+  elapsedMs: number,
+  durationMs?: number,
+) {
+  if (running) {
+    return `正在处理 ${formatDuration(elapsedMs, false)}`;
+  }
+  if (stopped && durationMs) {
+    return `你在 ${formatDuration(durationMs)} 后停止了`;
+  }
+  return durationMs ? `已处理 ${formatDuration(durationMs)}` : "已处理";
+}
+
+function toolCallLabel(item: WorkLogItem, detail: string) {
+  const fileDetail = fileName(detail);
+  if (item.status === "running") {
+    if (item.toolName === "read_file") return `正在读取 ${fileDetail}`;
+    if (item.toolName === "write_file" || item.toolName === "apply_patch") {
+      return `正在编辑 ${fileDetail}`;
+    }
+    if (item.toolName === "list_files" || item.toolName === "search_in_file") {
+      return `正在搜索 ${detail}`;
+    }
+    return `正在运行 ${detail}`;
+  }
+  if (item.status === "failed") return `运行失败 ${fileDetail}`;
+  if (item.toolName === "read_file") return `已读取 ${fileDetail}`;
+  if (item.toolName === "write_file" || item.toolName === "apply_patch") {
+    return `已编辑 ${fileDetail}`;
+  }
+  if (item.toolName === "list_files" || item.toolName === "search_in_file") {
+    return `已搜索 ${detail}`;
+  }
+  return item.durationMs
+    ? `已在 ${formatDuration(item.durationMs)} 内运行 ${detail}`
+    : `已运行 ${detail}`;
+}
+
+function fileName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+}
+
+function toolIcon(toolName: string) {
+  if (toolName === "read_file") return FileSearch;
+  if (toolName === "write_file" || toolName === "apply_patch") return FilePenLine;
+  if (toolName === "list_files") return FolderSearch;
+  if (toolName === "search_in_file") return FileSearch;
+  return TerminalSquare;
+}
+
+function stringArgument(item: WorkLogItem, key: string) {
+  const value = item.arguments?.[key];
+  return typeof value === "string" ? value : "";
 }
 
 function formatDuration(durationMs: number, minimumOne = true): string {
@@ -123,18 +345,4 @@ function formatDuration(durationMs: number, minimumOne = true): string {
   const minutes = Math.floor(durationMs / 60_000);
   const seconds = Math.round((durationMs % 60_000) / 1000);
   return `${minutes}m ${seconds}s`;
-}
-
-function eventTypeLabel(type: TaskEvent["type"]): string {
-  const labels: Record<TaskEvent["type"], string> = {
-    TASK_CREATED: "任务已创建",
-    STATUS_CHANGED: "任务状态已更新",
-    PLAN_STEP_STARTED: "开始执行计划步骤",
-    PLAN_STEP_COMPLETED: "计划步骤已完成",
-    APPROVAL_REQUESTED: "等待操作确认",
-    APPROVAL_DECIDED: "操作确认已处理",
-    RESULT_AVAILABLE: "结果已生成",
-    TASK_ERROR: "执行出现错误",
-  };
-  return labels[type];
 }

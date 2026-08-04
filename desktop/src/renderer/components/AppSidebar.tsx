@@ -12,7 +12,7 @@ import {
   SquarePen,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import type { TaskSummary } from "../../shared/task-contract";
@@ -359,6 +359,32 @@ function HistoryRow({
   onArchiveTask,
   notify,
 }: HistoryRowProps) {
+  const titleViewportRef = useRef<HTMLSpanElement>(null);
+  const [titleOverflow, setTitleOverflow] = useState(0);
+
+  useEffect(() => {
+    const viewport = titleViewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    const measure = () => {
+      setTitleOverflow(
+        Math.max(0, Math.ceil(viewport.scrollWidth - viewport.clientWidth)),
+      );
+    };
+    measure();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(measure);
+    observer?.observe(viewport);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [task.goal]);
+
   return (
     <div
       className={`history-row${
@@ -371,7 +397,15 @@ function HistoryRow({
         title={task.goal}
         onClick={() => onOpenTask(task.taskId)}
       >
-        <span className="history-title-viewport">
+        <span
+          className={`history-title-viewport${titleOverflow > 1 ? " is-overflowing" : ""}`}
+          ref={titleViewportRef}
+          style={
+            {
+              "--history-title-overflow": `${titleOverflow}px`,
+            } as CSSProperties
+          }
+        >
           <span className="history-title-text">{task.goal}</span>
         </span>
       </button>

@@ -9,6 +9,7 @@ import type {
   ModelSettings,
   UpdateModelSettingsInput,
 } from "../shared/model-contract";
+import { workLogFromEvents } from "../shared/work-log";
 import type { JavaConnection } from "./java-connection";
 import { validateJavaConnection } from "./java-connection";
 import type { ModelGateway } from "./model-gateway";
@@ -62,10 +63,11 @@ export class RestModelGateway implements ModelGateway {
     );
   }
 
-  listMessages(taskId: string): Promise<ChatMessage[]> {
-    return this.request(
+  async listMessages(taskId: string): Promise<ChatMessage[]> {
+    const messages = await this.request<ChatMessage[]>(
       `/api/v1/tasks/${encodeURIComponent(taskId)}/messages`,
     );
+    return messages.map(hydrateWorkLog);
   }
 
   streamMessage(
@@ -82,7 +84,10 @@ export class RestModelGateway implements ModelGateway {
       controller.signal,
     );
     return {
-      cancel: () => controller.abort(),
+      cancel: () => {
+        controller.abort();
+        void this.cancelMessageStream(taskId);
+      },
       completed,
     };
   }
@@ -102,9 +107,23 @@ export class RestModelGateway implements ModelGateway {
       controller.signal,
     );
     return {
-      cancel: () => controller.abort(),
+      cancel: () => {
+        controller.abort();
+        void this.cancelMessageStream(taskId);
+      },
       completed,
     };
+  }
+
+  private async cancelMessageStream(taskId: string): Promise<void> {
+    try {
+      await this.request<{ cancelled: boolean }>(
+        `/api/v1/tasks/${encodeURIComponent(taskId)}/messages/cancel`,
+        { method: "DELETE" },
+      );
+    } catch {
+      // 本地流已经中断；取消通知失败不能把界面重新置为失败态。
+    }
   }
 
   private async request<T>(
@@ -183,6 +202,18 @@ export class RestModelGateway implements ModelGateway {
         return;
       }
     }
+  }
+}
+
+function hydrateWorkLog(message: ChatMessage): ChatMessage {
+  if (!message.workLogJson) {
+    return message;
+  }
+  try {
+    const events = JSON.parse(message.workLogJson) as ChatStreamEvent[];
+    return { ...message, workLog: workLogFromEvents(events) };
+  } catch {
+    return { ...message, workLog: [] };
   }
 }
 

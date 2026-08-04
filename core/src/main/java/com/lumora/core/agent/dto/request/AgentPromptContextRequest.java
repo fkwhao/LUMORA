@@ -1,7 +1,6 @@
 package com.lumora.core.agent.dto.request;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * Prompt 组装所需的运行时上下文。
@@ -11,32 +10,21 @@ import java.util.Map;
  */
 public class AgentPromptContextRequest {
 
-    private final String responseLanguage;
     private final String workspacePath;
     private final List<String> projectInstructions;
     private final List<String> availableTools;
     private final String memorySummary;
-    private final List<String> systemReminders;
-    private final List<Map<String, Object>> toolDefinitions;
 
     public AgentPromptContextRequest(
-            String responseLanguage,
             String workspacePath,
             List<String> projectInstructions,
             List<String> availableTools,
-            String memorySummary,
-            List<String> systemReminders,
-            List<Map<String, Object>> toolDefinitions
+            String memorySummary
     ) {
-        this.responseLanguage = responseLanguage;
         this.workspacePath = workspacePath;
         this.projectInstructions = List.copyOf(projectInstructions);
         this.availableTools = List.copyOf(availableTools);
         this.memorySummary = memorySummary;
-        this.systemReminders = List.copyOf(systemReminders);
-        this.toolDefinitions = toolDefinitions.stream()
-                .map(Map::copyOf)
-                .toList();
     }
 
     public static AgentPromptContextRequest defaultContext() {
@@ -47,18 +35,33 @@ public class AgentPromptContextRequest {
             String memorySummary
     ) {
         return new AgentPromptContextRequest(
-                "简体中文",
                 null,
                 List.of(),
                 List.of(),
-                memorySummary,
-                List.of(),
-                List.of()
+                memorySummary
         );
     }
 
-    public String getResponseLanguage() {
-        return responseLanguage;
+    public static AgentPromptContextRequest forWorkspace(
+            String memorySummary,
+            String workspacePath
+    ) {
+        if (workspacePath == null || workspacePath.isBlank()) {
+            return withMemorySummary(memorySummary);
+        }
+        return new AgentPromptContextRequest(
+                workspacePath.trim(),
+                List.of(),
+                List.of(
+                        "list_files",
+                        "search_in_file",
+                        "read_file",
+                        "apply_patch",
+                        "write_file",
+                        "shell_command"
+                ),
+                memorySummary
+        );
     }
 
     public String getWorkspacePath() {
@@ -77,11 +80,4 @@ public class AgentPromptContextRequest {
         return memorySummary;
     }
 
-    public List<String> getSystemReminders() {
-        return systemReminders;
-    }
-
-    public List<Map<String, Object>> getToolDefinitions() {
-        return toolDefinitions;
-    }
 }

@@ -3,7 +3,6 @@ import { createStore } from "zustand/vanilla";
 import type {
   ChatMessage,
   ChatRequestOptions,
-  ChatStreamEvent,
   LumoraModelApi,
 } from "../../../shared/model-contract";
 import type {
@@ -13,6 +12,7 @@ import type {
   TaskSnapshot,
   TaskSummary,
 } from "../../../shared/task-contract";
+import { applyChatEvent } from "./chat-event-handler";
 import {
   loadArchivedTaskIds,
   loadDeletedTaskIds,
@@ -23,8 +23,9 @@ import {
   loadTaskProjectPaths,
   saveTaskProjectPaths,
 } from "./project-context-storage";
+import { reduceTaskEvent } from "./task-event-reducer";
 
-interface TaskState {
+export interface TaskState {
   activeTask?: TaskSnapshot;
   recentTasks: TaskSummary[];
   archivedTaskIds: string[];
@@ -239,7 +240,11 @@ export function createTaskStore(
           (event) => {
             applyChatEvent(event, task.taskId, modelApi, get, set, resolve);
           },
-          options,
+          {
+            ...options,
+            workspacePath:
+              options?.workspacePath ?? get().taskProjectPaths[task.taskId],
+          },
         );
       });
       resolveChat = undefined;
@@ -367,7 +372,11 @@ export function createTaskStore(
           (event) => {
             applyChatEvent(event, task.taskId, modelApi, get, set, resolve);
           },
-          options,
+          {
+            ...options,
+            workspacePath:
+              options?.workspacePath ?? get().taskProjectPaths[task.taskId],
+          },
         );
       });
       resolveChat = undefined;
@@ -512,158 +521,13 @@ export function createTaskStore(
   }));
 }
 
-function applyChatEvent(
-  event: ChatStreamEvent,
-  taskId: string,
-  modelApi: LumoraModelApi,
-  get: () => TaskState,
-  set: (partial: Partial<TaskState>) => void,
-  resolve: () => void,
-): void {
-  if (event.type === "text_delta") {
-    const messages = [...get().messages];
-    const last = messages.at(-1);
-    if (last?.role === "assistant") {
-      messages[messages.length - 1] = {
-        ...last,
-        content: last.content + event.delta,
-        model: event.model || last.model,
-      };
-      set({ messages });
-    }
-    return;
-  }
-  if (event.type === "reasoning_delta") {
-    const messages = [...get().messages];
-    const last = messages.at(-1);
-    if (last?.role === "assistant") {
-      messages[messages.length - 1] = {
-        ...last,
-        reasoningContent:
-          (last.reasoningContent ?? "") + event.delta,
-        model: event.model || last.model,
-      };
-      set({ messages });
-    }
-    return;
-  }
-  if (event.type === "usage") {
-    const messages = [...get().messages];
-    const last = messages.at(-1);
-    if (last?.role === "assistant") {
-      messages[messages.length - 1] = {
-        ...last,
-        usage: event.usage,
-        model: event.model || last.model,
-      };
-      set({ messages });
-    }
-    return;
-  }
-  if (event.type === "completed") {
-    const chatStartedAt = get().chatStartedAt;
-    const lastChatDurationMs = chatStartedAt
-      ? Date.now() - chatStartedAt
-      : undefined;
-    void modelApi
-      .listMessages(taskId)
-      .then((messages) =>
-        set({
-          messages,
-          isChatting: false,
-          chatWasStopped: false,
-          chatStartedAt: undefined,
-          lastChatDurationMs,
-        }),
-      )
-      .catch(() =>
-        set({
-          isChatting: false,
-          chatWasStopped: false,
-          chatStartedAt: undefined,
-          lastChatDurationMs,
-        }),
-      )
-      .finally(resolve);
-    return;
-  }
-  if (event.type === "failed") {
-    const chatStartedAt = get().chatStartedAt;
-    const lastChatDurationMs = chatStartedAt
-      ? Date.now() - chatStartedAt
-      : undefined;
-    void modelApi
-      .listMessages(taskId)
-      .then((messages) =>
-        set({
-          messages,
-          isChatting: false,
-          chatWasStopped: false,
-          chatStartedAt: undefined,
-          lastChatDurationMs,
-          chatError: event.errorMessage || "模型流式响应失败",
-        }),
-      )
-      .catch(() =>
-        set({
-          isChatting: false,
-          chatWasStopped: false,
-          chatStartedAt: undefined,
-          lastChatDurationMs,
-          chatError: event.errorMessage || "模型流式响应失败",
-        }),
-      )
-      .finally(resolve);
-  }
-}
-
 function applyEvent(
   event: TaskEvent,
   get: () => TaskState,
   set: (partial: Partial<TaskState>) => void,
 ): void {
-  const current = get().activeTask;
-  // 事件可在断线后重放，序号检查防止旧事件覆盖当前任务快照。
-  if (
-    !current ||
-    current.taskId !== event.taskId ||
-    event.sequence <= current.lastEventSequence
-  ) {
-    return;
-  }
-
-  set({
-    activeTask: {
-      ...current,
-      status: event.status,
-      lastEventSequence: event.sequence,
-      activeStep: event.title,
-      approval:
-        event.status === "WAITING_APPROVAL"
-          ? event.approval ?? current.approval
-          : undefined,
-      errorMessage: event.errorMessage,
-      resultSummary:
-        event.type === "RESULT_AVAILABLE"
-          ? event.userMessage
-          : current.resultSummary,
-    },
-    recentTasks: get().recentTasks.map((task) =>
-      task.taskId === event.taskId
-        ? {
-            ...task,
-            status: event.status,
-            updatedAt: new Date().toISOString(),
-          }
-        : task,
-    ),
-    taskEvents: [
-      ...get().taskEvents.filter(
-        (currentEvent) => currentEvent.sequence !== event.sequence,
-      ),
-      event,
-    ].sort((first, second) => first.sequence - second.sequence),
-  });
+  const nextState = reduceTaskEvent(event, get());
+  if (nextState) set(nextState);
 }
 
 function toErrorMessage(error: unknown): string {

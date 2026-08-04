@@ -25,11 +25,30 @@ export interface ChatMessage {
   sequence?: number;
   role: "user" | "assistant";
   content: string;
-  reasoningContent?: string;
   model?: string;
   usage?: TokenUsage;
   durationMs?: number;
+  workLog?: WorkLogItem[];
+  workLogJson?: string;
   createdAt?: string;
+}
+
+export type WorkLogItemStatus = "running" | "completed" | "failed";
+
+export interface WorkLogItem {
+  itemId: string;
+  kind: "progress" | "tool";
+  status: WorkLogItemStatus;
+  content?: string;
+  toolCallId?: string;
+  toolName?: string;
+  title?: string;
+  arguments?: Record<string, unknown>;
+  output?: string;
+  durationMs?: number;
+  exitCode?: number;
+  errorMessage?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface TokenUsage {
@@ -49,11 +68,16 @@ export type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max";
 export interface ChatRequestOptions {
   model?: string;
   reasoningEffort?: ReasoningEffort;
+  workspacePath?: string;
 }
 
 export type ChatStreamEventType =
   | "text_delta"
   | "reasoning_delta"
+  | "progress_message"
+  | "tool_started"
+  | "tool_completed"
+  | "tool_failed"
   | "usage"
   | "completed"
   | "failed";
@@ -64,6 +88,15 @@ export interface ChatStreamEvent {
   model: string;
   usage?: TokenUsage;
   errorMessage: string;
+  itemId?: string;
+  toolCallId?: string;
+  toolName?: string;
+  title?: string;
+  arguments?: Record<string, unknown>;
+  output?: string;
+  durationMs?: number;
+  exitCode?: number;
+  metadata?: Record<string, unknown>;
 }
 
 export interface LumoraModelApi {

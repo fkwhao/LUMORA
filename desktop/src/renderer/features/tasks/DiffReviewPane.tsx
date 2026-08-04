@@ -1,10 +1,21 @@
-import { FileDiff, X } from "lucide-react";
+import { FileDiff, FilePenLine, X } from "lucide-react";
 import { useRef, type CSSProperties, type PointerEvent } from "react";
 
 interface DiffReviewPaneProps {
   width: number;
+  changes: FileChange[];
+  selectedChangeId?: string;
   onClose(): void;
+  onSelectChange(changeId: string): void;
   onWidthChange(width: number): void;
+}
+
+export interface FileChange {
+  changeId: string;
+  path: string;
+  oldText: string;
+  newText: string;
+  previewAvailable: boolean;
 }
 
 const MIN_REVIEW_WIDTH = 340;
@@ -13,18 +24,22 @@ const MAX_REVIEW_WIDTH = 720;
 /**
  * 文件变更审阅面板。
  *
- * 当前执行链路尚未返回文件 Diff，因此先提供真实的审阅容器和空状态；
- * 后续接入变更事件时，只需要向主体区域填充文件列表与逐行 Diff。
+ * 展示工具事件携带的有界局部补丁，不读取或复制整份工作区文件。
  */
 export function DiffReviewPane({
   width,
+  changes,
+  selectedChangeId,
   onClose,
+  onSelectChange,
   onWidthChange,
 }: DiffReviewPaneProps) {
   const dragStart = useRef<{ x: number; width: number } | undefined>(
     undefined,
   );
   const style = { "--review-width": `${width}px` } as CSSProperties;
+  const selected =
+    changes.find((change) => change.changeId === selectedChangeId) ?? changes[0];
 
   function startResize(event: PointerEvent<HTMLDivElement>) {
     dragStart.current = { x: event.clientX, width };
@@ -72,17 +87,76 @@ export function DiffReviewPane({
       </header>
       <div className="review-toolbar">
         <button className="active" type="button">
-          未提交的更改
+          文件改动
         </button>
-        <span>0 个文件</span>
+        <span>{changes.length} 项改动</span>
       </div>
-      <div className="review-empty">
+      {changes.length > 0 && (
+        <div className="review-file-list" aria-label="已修改文件">
+          {changes.map((change) => (
+            <button
+              className={change.changeId === selected?.changeId ? "active" : ""}
+              key={change.changeId}
+              type="button"
+              onClick={() => onSelectChange(change.changeId)}
+            >
+              <FilePenLine size={13} />
+              <span>{fileName(change.path)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {!selected ? <div className="review-empty">
         <span>
           <FileDiff size={22} />
         </span>
         <strong>暂无文件变更</strong>
-        <p>Agent 编辑、创建或删除文件后，可在这里逐项查看 Diff。</p>
-      </div>
+        <p>Agent 编辑文件后，可从处理步骤直接打开局部 Diff。</p>
+      </div> : (
+        <div className="review-change-preview">
+          <header>
+            <strong>{fileName(selected.path)}</strong>
+            <span>{selected.path}</span>
+          </header>
+          {selected.previewAvailable ? (
+            <div className="review-diff" aria-label={`${selected.path} 文件改动`}>
+              <DiffBlock kind="removed" text={selected.oldText} />
+              <DiffBlock kind="added" text={selected.newText} />
+            </div>
+          ) : (
+            <div className="review-preview-unavailable">
+              <FileDiff size={20} />
+              <strong>此历史记录没有补丁预览</strong>
+              <p>较早的记录只保存了文件名；重新执行一次修改即可查看局部 Diff。</p>
+            </div>
+          )}
+        </div>
+      )}
     </aside>
   );
+}
+
+function DiffBlock({
+  kind,
+  text,
+}: {
+  kind: "removed" | "added";
+  text: string;
+}) {
+  const marker = kind === "removed" ? "−" : "+";
+  const lines = text.split("\n");
+  return (
+    <div className={`review-diff-block ${kind}`}>
+      {lines.map((line, index) => (
+        <div className="review-diff-line" key={`${kind}-${index}`}>
+          <span>{marker}</span>
+          <code>{line || " "}</code>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function fileName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 }

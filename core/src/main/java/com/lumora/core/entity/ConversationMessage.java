@@ -21,8 +21,6 @@ public class ConversationMessage {
     private ChatMessageRole role;
     @TableField("content")
     private String content;
-    @TableField("reasoning_content")
-    private String reasoningContent;
     @TableField("model")
     private String model;
     @TableField("prompt_tokens")
@@ -33,6 +31,8 @@ public class ConversationMessage {
     private int totalTokens;
     @TableField("duration_ms")
     private long durationMs;
+    @TableField("work_log_json")
+    private String workLogJson;
     @TableField(
             value = "created_at",
             typeHandler = SqliteInstantTypeHandler.class
@@ -48,7 +48,6 @@ public class ConversationMessage {
             int sequence,
             ChatMessageRole role,
             String content,
-            String reasoningContent,
             String model,
             int promptTokens,
             int completionTokens,
@@ -61,7 +60,6 @@ public class ConversationMessage {
                 sequence,
                 role,
                 content,
-                reasoningContent,
                 model,
                 promptTokens,
                 completionTokens,
@@ -77,7 +75,6 @@ public class ConversationMessage {
             int sequence,
             ChatMessageRole role,
             String content,
-            String reasoningContent,
             String model,
             int promptTokens,
             int completionTokens,
@@ -90,12 +87,12 @@ public class ConversationMessage {
         this.sequence = sequence;
         this.role = role;
         this.content = content;
-        this.reasoningContent = reasoningContent;
         this.model = model;
         this.promptTokens = promptTokens;
         this.completionTokens = completionTokens;
         this.totalTokens = totalTokens;
         this.durationMs = durationMs;
+        this.workLogJson = "[]";
         this.createdAt = createdAt;
     }
 
@@ -139,14 +136,6 @@ public class ConversationMessage {
         this.content = content;
     }
 
-    public String getReasoningContent() {
-        return reasoningContent;
-    }
-
-    public void setReasoningContent(String reasoningContent) {
-        this.reasoningContent = reasoningContent;
-    }
-
     public String getModel() {
         return model;
     }
@@ -185,6 +174,14 @@ public class ConversationMessage {
 
     public void setDurationMs(long durationMs) {
         this.durationMs = durationMs;
+    }
+
+    public String getWorkLogJson() {
+        return workLogJson;
+    }
+
+    public void setWorkLogJson(String workLogJson) {
+        this.workLogJson = workLogJson;
     }
 
     public Instant getCreatedAt() {

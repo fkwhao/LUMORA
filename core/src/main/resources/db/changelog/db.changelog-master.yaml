@@ -91,3 +91,12 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 011-conversation-work-log
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V11__conversation_work_log.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

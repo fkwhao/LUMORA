@@ -1,6 +1,8 @@
 package com.lumora.core.service.support.conversation;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lumora.core.common.constant.ConversationConstants;
 import com.lumora.core.entity.ChatMessageRole;
 import com.lumora.core.entity.Conversation;
@@ -34,6 +36,7 @@ public class ConversationPersistenceService {
     private final MemoryService memoryService;
     private final Clock clock;
     private final TransactionTemplate transactionTemplate;
+    private final ObjectMapper objectMapper;
 
     public List<ConversationMessage> listMessages(String taskId) {
         taskService.getTask(taskId);
@@ -175,24 +178,37 @@ public class ConversationPersistenceService {
                 (System.nanoTime() - context.getStartedAtNanos())
                         / 1_000_000L
         );
-        messageMapper.insert(new ConversationMessage(
+        ConversationMessage assistantMessage = new ConversationMessage(
                 UUID.randomUUID().toString(),
                 context.getConversationId(),
                 context.getAssistantSequence(),
                 ChatMessageRole.ASSISTANT,
                 accumulator.getContent(),
-                accumulator.getReasoningContent(),
                 accumulator.getModel(),
                 usage.getPromptTokens(),
                 usage.getCompletionTokens(),
                 usage.getTotalTokens(),
                 durationMs,
                 now
-        ));
+        );
+        assistantMessage.setWorkLogJson(serializeWorkLog(accumulator));
+        messageMapper.insert(assistantMessage);
         Conversation conversation = conversationMapper.selectById(
                 context.getConversationId()
         );
         touchConversation(conversation, context.getTaskId(), now);
+    }
+
+    private String serializeWorkLog(
+            ConversationStreamAccumulator accumulator
+    ) {
+        try {
+            return objectMapper.writeValueAsString(
+                    accumulator.getWorkLogEvents()
+            );
+        } catch (JsonProcessingException error) {
+            throw new IllegalStateException("无法保存工作过程记录", error);
+        }
     }
 
     private void deleteMessagesAfter(
@@ -316,7 +332,6 @@ public class ConversationPersistenceService {
                 sequence,
                 ChatMessageRole.USER,
                 content,
-                "",
                 "",
                 0,
                 0,

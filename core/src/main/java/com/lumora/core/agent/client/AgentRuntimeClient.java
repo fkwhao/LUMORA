@@ -77,4 +77,14 @@ public interface AgentRuntimeClient {
             String memorySummary,
             Consumer<ChatStreamEvent> eventConsumer
     );
+
+    void streamChat(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String correlationId,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            Consumer<ChatStreamEvent> eventConsumer
+    );
 }

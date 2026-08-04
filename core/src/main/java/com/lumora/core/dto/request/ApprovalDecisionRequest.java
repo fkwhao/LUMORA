@@ -1,21 +1,25 @@
 package com.lumora.core.dto.request;
 
-import com.lumora.core.entity.ApprovalDecision;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 
 public class ApprovalDecisionRequest {
 
     @NotNull(message = "审批决定不能为空")
-    private ApprovalDecision decision;
+    @Pattern(
+            regexp = "ALLOW_ONCE|REJECT",
+            message = "审批决定无效"
+    )
+    private String decision;
 
     public ApprovalDecisionRequest() {
     }
 
-    public ApprovalDecision getDecision() {
+    public String getDecision() {
         return decision;
     }
 
-    public void setDecision(ApprovalDecision decision) {
+    public void setDecision(String decision) {
         this.decision = decision;
     }
 }

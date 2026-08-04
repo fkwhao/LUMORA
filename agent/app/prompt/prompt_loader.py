@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import ClassVar
 
 
 class PromptLoader:
@@ -11,6 +12,9 @@ class PromptLoader:
         "30_tools_and_safety.md",
         "40_response.md",
     )
+    _SPECIALIZED_FILES: ClassVar[dict[str, str]] = {
+        "memory_extraction": "memory_extraction.md",
+    }
 
     def __init__(self, template_directory: Path | None = None) -> None:
         self._template_directory = (
@@ -34,3 +38,16 @@ class PromptLoader:
             sections.append(content)
         self._cached_sections = tuple(sections)
         return self._cached_sections
+
+    def load_specialized(self, name: str) -> str:
+        """加载受控的专用 Prompt，调用方不能传入任意文件路径。"""
+        try:
+            file_name = self._SPECIALIZED_FILES[name]
+        except KeyError as error:
+            raise ValueError(f"未知专用 Prompt：{name}") from error
+        content = (self._template_directory / file_name).read_text(
+            encoding="utf-8"
+        ).strip()
+        if not content:
+            raise ValueError(f"专用 Prompt 不能为空：{file_name}")
+        return content

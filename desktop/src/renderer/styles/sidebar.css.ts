@@ -3,8 +3,7 @@ import { globalStyle, keyframes } from "@vanilla-extract/css";
 const historyTitleMarquee = keyframes({
   from: { transform: "translateX(0)" },
   to: {
-    transform:
-      "translateX(min(0px, calc(-100% + var(--sidebar-width) - 78px)))",
+    transform: "translateX(calc(-1 * var(--history-title-overflow, 0px)))",
   },
 });
 
@@ -404,7 +403,7 @@ globalStyle(
   },
 );
 
-globalStyle(".history-row:hover .history-title-viewport", {
+globalStyle(".history-row:hover .history-title-viewport.is-overflowing", {
   WebkitMaskImage:
     "linear-gradient(90deg, transparent 0, #000 9px, #000 calc(100% - 9px), transparent 100%)",
   maskImage:
@@ -418,7 +417,7 @@ globalStyle(".history-title-text", {
 });
 
 globalStyle(
-  ".history-row:hover .history-title-text",
+  ".history-row:hover .history-title-viewport.is-overflowing .history-title-text",
   {
     animation: `${historyTitleMarquee} 18s 700ms linear infinite alternate`,
   },

@@ -1,9 +1,11 @@
 package com.lumora.core.controller;
 
 import com.lumora.core.common.constant.ApiPathConstants;
+import com.lumora.core.converter.TaskResponseConverter;
 import com.lumora.core.dto.request.ApprovalDecisionRequest;
 import com.lumora.core.dto.response.TaskResponse;
 import com.lumora.core.entity.AgentTask;
+import com.lumora.core.entity.ApprovalDecision;
 import com.lumora.core.service.ApprovalService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class ApprovalController {
 
     private final ApprovalService approvalService;
+    private final TaskResponseConverter responseConverter;
 
     @PostMapping(ApiPathConstants.APPROVAL_BY_ID)
     public TaskResponse decideApproval(
@@ -32,8 +35,8 @@ public class ApprovalController {
         AgentTask task = approvalService.decideApproval(
                 taskId,
                 approvalId,
-                request.getDecision()
+                ApprovalDecision.valueOf(request.getDecision())
         );
-        return TaskResponse.fromEntity(task);
+        return responseConverter.fromTask(task);
     }
 }

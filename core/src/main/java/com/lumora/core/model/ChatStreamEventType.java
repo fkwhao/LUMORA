@@ -6,6 +6,10 @@ import com.fasterxml.jackson.annotation.JsonValue;
 public enum ChatStreamEventType {
     TEXT_DELTA("text_delta"),
     REASONING_DELTA("reasoning_delta"),
+    PROGRESS_MESSAGE("progress_message"),
+    TOOL_STARTED("tool_started"),
+    TOOL_COMPLETED("tool_completed"),
+    TOOL_FAILED("tool_failed"),
     USAGE("usage"),
     COMPLETED("completed"),
     FAILED("failed");

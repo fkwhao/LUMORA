@@ -58,6 +58,22 @@ public class AgentDtoMapper {
             String reasoningEffort,
             String memorySummary
     ) {
+        return toChatRequest(
+                messages,
+                connection,
+                reasoningEffort,
+                memorySummary,
+                null
+        );
+    }
+
+    public AgentChatCompletionRequest toChatRequest(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath
+    ) {
         List<AgentChatMessageRequest> requestMessages = messages.stream()
                 .map(message -> new AgentChatMessageRequest(
                         message.getRole(),
@@ -67,7 +83,10 @@ public class AgentDtoMapper {
         return new AgentChatCompletionRequest(
                 requestMessages,
                 new AgentModelConnectionRequest(connection),
-                AgentPromptContextRequest.withMemorySummary(memorySummary),
+                AgentPromptContextRequest.forWorkspace(
+                        memorySummary,
+                        workspacePath
+                ),
                 reasoningEffort
         );
     }
@@ -118,7 +137,16 @@ public class AgentDtoMapper {
                 response.getDelta(),
                 response.getModel(),
                 usage == null ? null : toTokenUsage(usage),
-                response.getErrorMessage()
+                response.getErrorMessage(),
+                response.getItemId(),
+                response.getToolCallId(),
+                response.getToolName(),
+                response.getTitle(),
+                response.getArguments(),
+                response.getOutput(),
+                response.getDurationMs(),
+                response.getExitCode(),
+                response.getMetadata()
         );
     }
 

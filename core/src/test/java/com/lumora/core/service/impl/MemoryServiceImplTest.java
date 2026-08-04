@@ -7,6 +7,7 @@ import com.lumora.core.entity.MemoryStatus;
 import com.lumora.core.entity.MemoryType;
 import com.lumora.core.mapper.MemoryItemMapper;
 import com.lumora.core.model.MemoryWriteRequest;
+import com.lumora.core.service.support.memory.MemoryValueNormalizer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -37,7 +38,7 @@ class MemoryServiceImplTest {
         service = new MemoryServiceImpl(
                 mapper,
                 Clock.fixed(NOW, ZoneOffset.UTC),
-                new ObjectMapper()
+                new MemoryValueNormalizer(new ObjectMapper())
         );
     }
 

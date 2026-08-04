@@ -1,5 +1,6 @@
 package com.lumora.core.controller;
 
+import com.lumora.core.converter.TaskResponseConverter;
 import com.lumora.core.entity.AgentTask;
 import com.lumora.core.entity.ApprovalDecision;
 import com.lumora.core.entity.TaskStatus;
@@ -28,7 +29,10 @@ class ApprovalControllerTest {
                 "approval-1",
                 ApprovalDecision.ALLOW_ONCE
         )).thenReturn(task());
-        MockMvc mockMvc = standaloneSetup(new ApprovalController(service))
+        MockMvc mockMvc = standaloneSetup(new ApprovalController(
+                service,
+                new TaskResponseConverter()
+        ))
                 .setControllerAdvice(new RestExceptionHandler())
                 .build();
 
@@ -50,7 +54,10 @@ class ApprovalControllerTest {
     void rejectsAnUnknownDecision() throws Exception {
         ApprovalService service =
                 org.mockito.Mockito.mock(ApprovalService.class);
-        MockMvc mockMvc = standaloneSetup(new ApprovalController(service))
+        MockMvc mockMvc = standaloneSetup(new ApprovalController(
+                service,
+                new TaskResponseConverter()
+        ))
                 .setControllerAdvice(new RestExceptionHandler())
                 .build();
 

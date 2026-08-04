@@ -34,8 +34,10 @@ Python Agent Runtime
 
 - FastAPI 提供版本化 REST/SSE 接口。
 - 负责模型 Provider、流式响应解析、Agent Harness 和动态编排。
-- 文件、命令和浏览器等本机操作通过 Java 的受控能力执行。
-- 不直接获得无限制 Shell、任意磁盘或系统凭据权限。
+- 当前文件与命令工具由 Python Tool Registry 在 Java 授权的工作区和工具白名单内
+  执行；未来浏览器、系统级能力仍应通过单独的受控 Capability 接入。
+- Python 不获得任意磁盘或系统凭据权限。文件路径必须位于工作区内，Shell 只允许
+  非交互命令，并在执行前经过参数与危险模式校验。
 
 ## 2. 通信原则
 
@@ -44,6 +46,8 @@ Python Agent Runtime
 - Java 与 Python：REST 处理短请求，真实运行阶段使用异步 Run + SSE。
 - 所有本机 HTTP 服务只绑定 `127.0.0.1`，使用本机开发令牌认证。
 - 跨进程契约使用版本号、关联 ID、稳定错误码和独立 DTO。
+- Agent OpenAPI 的关键枚举和 PromptContext 字段由契约一致性测试校验，防止 Python
+  DTO 与公开契约静默漂移。
 
 ## 3. Agent Harness
 
@@ -66,7 +70,8 @@ Capability，不是固定 Agent 类型。首版本机调度使用 `asyncio.Queue
 
 ## 4. 统一运行事件
 
-下一阶段使用统一 `RunEvent` 表达实时执行过程：
+统一执行过程逐步收敛到 `RunEvent`。当前会话链路已经实现模型文本、进度消息和
+工具调用事件，后续 Agent/Artifact 等事件继续沿用同一结构扩展：
 
 ```text
 RunEvent
@@ -115,11 +120,34 @@ LUMORA 采用与现代 Agent Harness 一致的分层装配方式，而不是把�
 稳定规则按身份、协作、执行、工具安全和回复要求拆分，并保持供应商无关，因此
 DeepSeek、OpenAI 兼容模型和后续 Managed Provider 可以共用。当前工作区、项目
 指令和能力列表在请求时动态注入；API Key、启动令牌和其他凭据永远不进入 Prompt。
+记忆提取等专用任务使用 `prompt/templates` 下的独立模板并由 `PromptLoader` 读取，
+Service 不再内嵌另一套长提示词。
 
 工具定义不复制到 System Prompt，也不注册尚未实现的“虚拟工具”。每个实际能力由
-Harness 的 Tool Registry 提供名称、用途、输入 JSON Schema、风险级别和执行入口，
-模型请求只携带当前 Run 被授权的工具。Java 继续强制执行路径范围、权限、审批和
-幂等约束，Prompt 只负责指导模型，不能代替安全边界。
+Python Harness 的 Tool Registry 提供名称、用途、输入 JSON Schema、风险属性、
+并发策略和执行入口，模型请求只携带 Java 为当前工作区授权且注册中心真实存在的
+工具。注册中心是工具 Schema 的唯一事实来源；Java 只传工具名称白名单，不再维护
+重复 Schema。
+
+当前实现包含 `list_files`、`search_in_file`、`read_file`、`apply_patch`、
+`write_file` 和 `shell_command`。大文件默认先搜索定位、再按行分段读取，现有文件的
+局部修改通过唯一文本匹配的原子补丁完成。注册中心
+统一执行 Schema 校验、业务校验、工作区约束、并发锁和 UI metadata 装配。工具返回
+的 `content` 会反馈给模型，`metadata` 只沿 SSE 事件发送给 UI，不进入模型上下文。
+破坏性属性目前用于审计和界面表达；真正的执行前审批闸门尚未接入，因此新增高风险
+工具前必须先补齐审批调度，不能只依赖 Prompt 或 `isDestructive` 标记。
+
+Java 发给 Python 的 PromptContext 只包含 `workspacePath`、`projectInstructions`、
+`availableTools` 和 `memorySummary`。稳定行为规则只存在于 Python 静态 Prompt；工具
+Schema 只由 Python Tool Registry 生成。跨进程接口不再提供 `systemReminders` 或
+`toolDefinitions` 这类可注入稳定规则、复制 Schema 的旁路。
+
+Provider 只负责供应商请求和响应适配；最多二十轮的模型—工具循环由独立
+`AgentLoopRunner` 编排。这样新增 Provider 不需要复制工具生命周期逻辑，工具开始、
+完成、失败、阶段说明和累计 TokenUsage 仍通过同一事件协议输出。
+
+完整设计与扩展方式见
+[工具调用运行时设计](tool-calling-runtime-design.md)。
 
 设计参考资料：
 
@@ -137,8 +165,14 @@ Java：任务、会话、消息、审批、工具调用、审计和业务投影
 Python：Agent 编排状态、模型适配和 Harness Checkpoint
 ```
 
-模型最终消息和 TokenUsage 写入 Java；模型 token 增量只用于实时展示。Python
-重启时通过 Java Snapshot 与自身 Checkpoint 恢复运行，不依赖内存事件队列。
+模型最终消息和 TokenUsage 写入 Java；模型 token 增量只用于实时展示。隐藏推理不
+写入数据库，也不返回 Renderer。工具事件持久化前会移除整文件写入正文；局部补丁仅
+保存有界的前后片段供右侧 Diff 审阅，同时截断其他参数、输出与错误，并限制单次回答
+的工作记录数量。
+
+当前 Python 尚未实现持久化 Checkpoint，因此进程重启后不能恢复执行中的模型调用；
+后续恢复能力应以 Java Run Snapshot 和 Python Checkpoint 共同实现。本文不把目标能力
+描述为当前已经具备的行为。
 
 ### 会话消息生命周期
 
@@ -154,9 +188,22 @@ POST /api/v1/tasks/{taskId}/messages/{messageId}/regenerate
 `duration_ms`。用户消息发送时间与 Assistant 回答耗时均由 Java 返回，Electron
 只维护流式生成期间的临时投影，因此应用重启后仍可恢复。
 
+Controller 不直接调用 Entity 的静态映射方法：任务和会话响应由独立 Converter
+完成；SSE 连接表属于 `controller/support`，持久化裁剪则由 conversation support
+下的 Projector 完成，避免 Web、DTO、Entity 与持久化策略互相渗透。
+记忆输入的规范化、JSON 校验与稳定哈希集中在 `MemoryValueNormalizer`，业务 Service
+只负责记忆选择、版本更新和持久化流程。
+
+Desktop 的 Zustand Store 负责动作和状态生命周期；聊天流事件处理、任务事件归并和
+历史/实时工作记录映射分别位于独立模块，避免网关与 Store 各自维护一套事件投影。
+
 重新生成仅允许编辑最后一条用户消息。Java 在事务中更新目标消息并删除它之后的旧
 Assistant 回答，然后使用更新后的上下文重新调用模型。服务端会再次检查任务归属、
 消息角色和消息顺序，前端的“仅最后一条可编辑”不作为安全边界。
+
+停止生成会同时中断 Electron 到 Java 的流，并调用 Java 取消端点。Java 保存每个任务
+的活动 `FutureTask`，取消后中断其 Python SSE 读取；Python Shell 工具在协程取消时
+终止子进程，避免界面停止后后台继续生成或写入结果。
 
 界面始终显示消息时间，复制与编辑操作只在气泡悬停或键盘聚焦时出现。旧数据库记录
 没有耗时值时只显示“已处理”，不会用客户端估算值覆盖历史数据。
@@ -166,7 +213,7 @@ Assistant 回答，然后使用更新后的上下文重新调用模型。服务�
 - API Key 不进入 LocalStorage、日志或 Git。
 - Java 使用当前 Windows 用户的 DPAPI 加密 API Key，SQLite 只保存密文。
 - Python 仅在已认证的 localhost 模型请求中临时使用明文 Key，不持久化。
-- 工具执行采用最小权限、风险分级和审批机制。
+- 工具执行采用工作区限制、风险分级和有界输出；高风险审批仍是待完成安全边界。
 - 文件路径、命令参数和工具结果进入事件前必须脱敏。
 - 平台 Provider Key 只存在于独立部署的云端服务，不下发到桌面端。
 

@@ -89,6 +89,7 @@ public interface ModelService {
             String model,
             String reasoningEffort,
             String memorySummary,
+            String workspacePath,
             Consumer<ChatStreamEvent> eventConsumer
     );
 }

@@ -96,6 +96,13 @@ describe("visible task flow", () => {
     expect(screen.queryByText("分析目录内容")).not.toBeInTheDocument();
     expect(screen.queryByText("整理文件")).not.toBeInTheDocument();
     expect(screen.queryByText("执行活动")).not.toBeInTheDocument();
+    expect(screen.getByRole("meter", { name: "上下文已用" })).toHaveAttribute(
+      "aria-describedby",
+      "context-usage-tooltip",
+    );
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      /背景信息窗口：约 0% 已用已用约 \d+ 标记，共 128k/,
+    );
     fireEvent.click(
       screen.getByRole("button", { name: "审阅文件变更" }),
     );

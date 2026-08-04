@@ -121,13 +121,35 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
             String memorySummary,
             Consumer<ChatStreamEvent> eventConsumer
     ) {
+        streamChat(
+                messages,
+                connection,
+                correlationId,
+                reasoningEffort,
+                memorySummary,
+                null,
+                eventConsumer
+        );
+    }
+
+    @Override
+    public void streamChat(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String correlationId,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            Consumer<ChatStreamEvent> eventConsumer
+    ) {
         sseClient.streamChat(
                 correlationId,
                 dtoMapper.toChatRequest(
                         messages,
                         connection,
                         reasoningEffort,
-                        memorySummary
+                        memorySummary,
+                        workspacePath
                 ),
                 eventConsumer
         );

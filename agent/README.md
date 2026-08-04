@@ -13,8 +13,8 @@ Python 3.12 Agent 推理与编排运行时。
 ## 边界
 
 - 本工程不得导入 `desktop/` 或 `core/` 的源码。
-- 不直接执行 Playwright、Shell 或无限制系统工具。
-- 需要使用本机能力时，只能通过受控 HTTP 接口交给 Java Local Core。
+- 文件和命令工具由 Tool Registry 在 Java 授权的工作区与工具白名单内执行。
+- 不获得任意磁盘、无限制 Shell、浏览器或系统凭据权限。
 
 ## IDE 配置
 
@@ -33,8 +33,9 @@ app/dto/               REST 请求与响应模型
 app/security/          本机启动令牌校验
 app/service/           Agent 规划与编排业务
 app/model/             Pydantic 数据模型
-app/provider/          模型供应商适配与流式事件转换
+app/provider/          模型供应商适配、流式事件转换与独立 Agent 工具循环
 app/prompt/            分层 System Prompt、动态上下文和模板装配
+app/tool/              工具工厂、注册中心和受工作区限制的内置工具
 app/config/            YAML 运行配置
 app/exception/         运行时异常
 app/main.py            FastAPI 与 Uvicorn 生命周期

@@ -331,7 +331,7 @@ globalStyle('[data-theme="dark"] .markdown-body a:hover', {
 });
 
 globalStyle('[data-theme="dark"] .markdown-body code', {
-  color: "#f0a8c2",
+  color: "#f4f5f6",
   borderColor: "#3b4047",
   background: "#30343a",
 });

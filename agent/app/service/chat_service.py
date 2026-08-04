@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import httpx
 
@@ -12,6 +13,9 @@ from app.model.model_connection_settings import ModelConnectionSettings
 from app.prompt.prompt_builder import PromptBuilder
 from app.prompt.prompt_context import PromptContext
 from app.provider.openai_compatible_provider import OpenAICompatibleProvider
+from app.tool.base import ToolContext
+from app.tool.registry import ToolRegistry
+from app.tool.tool_runtime import create_default_tool_registry
 
 
 class ModelProviderError(RuntimeError):
@@ -23,9 +27,11 @@ class ChatService:
         self,
         provider: OpenAICompatibleProvider,
         prompt_builder: PromptBuilder,
+        tool_registry: ToolRegistry | None = None,
     ) -> None:
         self._provider = provider
         self._prompt_builder = prompt_builder
+        self._tool_registry = tool_registry or create_default_tool_registry()
 
     async def list_models(self, request: ModelListRequest) -> list[str]:
         connection = request
@@ -38,7 +44,7 @@ class ChatService:
         settings.validate()
         try:
             return await self._provider.list_models(settings)
-        except (httpx.HTTPError, ValueError) as error:
+        except (httpx.HTTPError, TypeError, ValueError) as error:
             raise ModelProviderError(
                 "获取模型列表失败，请检查地址和 API Key"
             ) from error
@@ -56,7 +62,7 @@ class ChatService:
                 request.messages,
                 request.reasoning_effort,
             )
-        except (httpx.HTTPError, ValueError) as error:
+        except (httpx.HTTPError, TypeError, ValueError) as error:
             # Provider 响应可能包含敏感内容，HTTP 边界只返回稳定错误。
             raise ModelProviderError(
                 "模型 API 调用失败，请检查地址、Key 和模型名称"
@@ -69,29 +75,53 @@ class ChatService:
         try:
             settings = self._connection(request)
             prompt = self._prompt_builder.build(self._prompt_context(request))
-            async for event in self._provider.stream(
-                settings,
-                prompt,
-                request.messages,
-                request.reasoning_effort,
-            ):
+            workspace_path = request.prompt_context.workspace_path
+            tool_context = (
+                ToolContext(
+                    workspace_path=Path(workspace_path)
+                    .expanduser()
+                    .resolve(strict=True)
+                )
+                if workspace_path and prompt.tools
+                else None
+            )
+            stream = (
+                self._provider.agent_stream(
+                    settings,
+                    prompt,
+                    request.messages,
+                    request.reasoning_effort,
+                    self._tool_registry,
+                    tool_context,
+                )
+                if tool_context is not None
+                else self._provider.stream(
+                    settings,
+                    prompt,
+                    request.messages,
+                    request.reasoning_effort,
+                )
+            )
+            async for event in stream:
                 yield event
-        except (httpx.HTTPError, ValueError) as error:
+        except (httpx.HTTPError, OSError, TypeError, ValueError) as error:
             raise ModelProviderError(
                 "模型 API 流式调用失败，请检查地址、Key 和模型名称"
             ) from error
 
-    @staticmethod
-    def _prompt_context(request: ChatCompletionRequest) -> PromptContext:
+    def _prompt_context(self, request: ChatCompletionRequest) -> PromptContext:
         context = request.prompt_context
+        allowed_names = tuple(
+            name
+            for name in context.available_tools
+            if name in self._tool_registry.names()
+        )
         return PromptContext(
-            response_language=context.response_language,
             workspace_path=context.workspace_path,
             project_instructions=tuple(context.project_instructions),
-            available_tools=tuple(context.available_tools),
-            tool_definitions=tuple(context.tool_definitions),
+            available_tools=allowed_names,
+            tool_definitions=self._tool_registry.model_definitions(allowed_names),
             memory_summary=context.memory_summary,
-            system_reminders=tuple(context.system_reminders),
         )
 
     @staticmethod

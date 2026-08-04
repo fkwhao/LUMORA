@@ -39,6 +39,7 @@ public interface ConversationService {
             String content,
             String model,
             String reasoningEffort,
+            String workspacePath,
             String correlationId,
             Consumer<ChatStreamEvent> eventConsumer,
             Runnable completionCallback,
@@ -64,9 +65,18 @@ public interface ConversationService {
             String content,
             String model,
             String reasoningEffort,
+            String workspacePath,
             String correlationId,
             Consumer<ChatStreamEvent> eventConsumer,
             Runnable completionCallback,
             Consumer<Throwable> errorCallback
     );
+
+    /**
+     * 取消指定任务当前正在进行的模型生成。
+     *
+     * @param taskId 任务 ID
+     * @return 找到并取消活动生成时为 true
+     */
+    boolean cancelGeneration(String taskId);
 }

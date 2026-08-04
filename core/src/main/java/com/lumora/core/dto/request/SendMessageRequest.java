@@ -23,6 +23,9 @@ public class SendMessageRequest {
     )
     private String reasoningEffort;
 
+    @Size(max = 1000, message = "工作区路径过长")
+    private String workspacePath;
+
     public SendMessageRequest() {
     }
 
@@ -52,5 +55,13 @@ public class SendMessageRequest {
 
     public void setReasoningEffort(String reasoningEffort) {
         this.reasoningEffort = reasoningEffort;
+    }
+
+    public String getWorkspacePath() {
+        return workspacePath;
+    }
+
+    public void setWorkspacePath(String workspacePath) {
+        this.workspacePath = workspacePath;
     }
 }

@@ -16,9 +16,11 @@ import {
 import { useStore } from "zustand";
 
 import type {
+  ChatMessage,
   LumoraModelApi,
   ModelSettings,
   ReasoningEffort,
+  WorkLogItem,
 } from "../../../shared/model-contract";
 import type { TaskStatus } from "../../../shared/task-contract";
 import { MarkdownMessage } from "../../components/MarkdownMessage";
@@ -26,7 +28,7 @@ import { resizeTextarea } from "../../utils/auto-resize-textarea";
 import { submitFormOnEnter } from "../../utils/submit-on-enter";
 import { ApprovalDock } from "./ApprovalDock";
 import { AgentRunSummary } from "./AgentRunSummary";
-import { DiffReviewPane } from "./DiffReviewPane";
+import { DiffReviewPane, type FileChange } from "./DiffReviewPane";
 import type { TaskStore } from "./task-store";
 
 interface TaskPageProps {
@@ -51,6 +53,7 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
   const [moreOpen, setMoreOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewWidth, setReviewWidth] = useState(460);
+  const [selectedChangeId, setSelectedChangeId] = useState<string>();
   const [editingMessageId, setEditingMessageId] = useState<string>();
   const [editingContent, setEditingContent] = useState("");
   const [modelSettings, setModelSettings] = useState<ModelSettings>();
@@ -200,6 +203,7 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
             createdAt: task.createdAt,
           },
         ];
+  const fileChanges = fileChangesFromMessages(displayMessages);
   const latestUserMessage = [...displayMessages]
     .reverse()
     .find((message) => message.role === "user");
@@ -415,10 +419,12 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
   const contextLimit = modelSettings?.contextWindow ?? 128_000;
   const reportedTotalTokens = [...messages]
     .reverse()
-    .find((message) => message.usage)?.usage?.totalTokens;
-  const estimatedTokens = Math.ceil(
-    messages.reduce((total, message) => total + message.content.length, 0) / 4,
-  );
+    .find(
+      (message) =>
+        message.role === "assistant" &&
+        (message.usage?.totalTokens ?? 0) > 0,
+    )?.usage?.totalTokens;
+  const estimatedTokens = estimateConversationTokens(messages);
   const contextTokens = reportedTotalTokens ?? estimatedTokens;
   const contextPercent = Math.min(
     100,
@@ -589,6 +595,7 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
                 const isThinkingStage =
                   isCurrentAssistant &&
                   !message.content.trim() &&
+                  (message.workLog?.length ?? 0) === 0 &&
                   taskEvents.length === 0;
                 return (
                 <Fragment
@@ -608,6 +615,7 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
                             ? taskEvents
                             : []
                         }
+                        workLog={message.workLog}
                         running={
                           isChatting &&
                           index === displayMessages.length - 1
@@ -616,6 +624,10 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
                           chatWasStopped &&
                           index === displayMessages.length - 1
                         }
+                        onReviewChange={(item) => {
+                          setSelectedChangeId(item.itemId);
+                          setReviewOpen(true);
+                        }}
                       />
                     )}
                   {message.role === "user" ? (
@@ -781,18 +793,55 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
                       <span>添加上下文</span>
                     </button>
                     <div className="composer-controls">
-                      <span
-                        className="context-usage-ring"
-                        role="meter"
-                        aria-label="上下文已用"
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-valuenow={contextPercent}
-                        title={`当前会话上下文 ${contextTokens.toLocaleString()} / ${contextLimit.toLocaleString()} Token${reportedTotalTokens === undefined ? "（估算）" : "（模型精确用量）"}`}
-                        style={{
-                          "--context-progress": `${contextPercent * 3.6}deg`,
-                        } as React.CSSProperties}
-                      />
+                      <span className="context-usage-control">
+                        <span
+                          className="context-usage-ring"
+                          role="meter"
+                          aria-describedby="context-usage-tooltip"
+                          aria-label="上下文已用"
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-valuenow={contextPercent}
+                          tabIndex={0}
+                        >
+                          <svg
+                            aria-hidden="true"
+                            preserveAspectRatio="xMidYMid meet"
+                            viewBox="0 0 20 20"
+                          >
+                            <circle
+                              className="context-usage-track"
+                              cx="10"
+                              cy="10"
+                              r="8"
+                            />
+                            <circle
+                              className="context-usage-value"
+                              cx="10"
+                              cy="10"
+                              pathLength="100"
+                              r="8"
+                              strokeDasharray={`${contextPercent} 100`}
+                            />
+                          </svg>
+                        </span>
+                        <span
+                          className="context-usage-tooltip"
+                          id="context-usage-tooltip"
+                          role="tooltip"
+                        >
+                          <span>背景信息窗口：</span>
+                          <strong>
+                            {reportedTotalTokens === undefined ? "约 " : ""}
+                            {contextPercent}% 已用
+                          </strong>
+                          <b>
+                            已用{reportedTotalTokens === undefined ? "约 " : " "}
+                            {formatTokenCount(contextTokens)} 标记，共{" "}
+                            {formatTokenCount(contextLimit)}
+                          </b>
+                        </span>
+                      </span>
                       <label className="composer-select model-select">
                         <span className="visually-hidden">选择模型</span>
                         <select
@@ -863,14 +912,55 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
 
         {reviewOpen && (
           <DiffReviewPane
+            changes={fileChanges}
             width={reviewWidth}
+            selectedChangeId={selectedChangeId}
             onClose={() => setReviewOpen(false)}
+            onSelectChange={setSelectedChangeId}
             onWidthChange={setReviewWidth}
           />
         )}
       </div>
     </main>
   );
+}
+
+function fileChangesFromMessages(messages: ChatMessage[]): FileChange[] {
+  return messages.flatMap((message) =>
+    (message.workLog ?? []).flatMap((item) => {
+      const change = fileChangeFromWorkLog(item);
+      return change ? [change] : [];
+    }),
+  );
+}
+
+function fileChangeFromWorkLog(item: WorkLogItem): FileChange | undefined {
+  if (item.toolName !== "apply_patch" && item.toolName !== "write_file") {
+    return undefined;
+  }
+  const path = stringValue(item.arguments?.path);
+  if (!path) return undefined;
+  const unavailableMarker = "[内容未持久化]";
+  const oldText =
+    item.toolName === "apply_patch"
+      ? stringValue(item.arguments?.oldText)
+      : "";
+  const newText =
+    item.toolName === "apply_patch"
+      ? stringValue(item.arguments?.newText)
+      : stringValue(item.arguments?.content);
+  return {
+    changeId: item.itemId,
+    path,
+    oldText,
+    newText,
+    previewAvailable:
+      newText !== unavailableMarker && oldText !== unavailableMarker,
+  };
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 function modelDisplayName(model: string): string {
@@ -881,6 +971,34 @@ function modelDisplayName(model: string): string {
     return "5.6 Terra";
   }
   return model;
+}
+
+function formatTokenCount(tokens: number): string {
+  if (tokens < 1_000) {
+    return tokens.toLocaleString();
+  }
+  const compact = tokens / 1_000;
+  return `${compact >= 10 ? Math.round(compact) : compact.toFixed(1).replace(/\.0$/, "")}k`;
+}
+
+function estimateConversationTokens(messages: ChatMessage[]): number {
+  return messages.reduce(
+    (total, message) => total + 6 + estimateTextTokens(message.content),
+    0,
+  );
+}
+
+function estimateTextTokens(content: string): number {
+  let asciiCharacters = 0;
+  let nonAsciiCharacters = 0;
+  for (const character of content) {
+    if (character.codePointAt(0)! <= 0x7f) {
+      asciiCharacters += 1;
+    } else {
+      nonAsciiCharacters += 1;
+    }
+  }
+  return nonAsciiCharacters + Math.ceil(asciiCharacters / 4);
 }
 
 function statusLabel(status: TaskStatus): string {

@@ -1,19 +1,18 @@
-package com.lumora.core.service;
+package com.lumora.core.controller.support;
 
-import com.lumora.core.dto.response.TaskResponse;
+import com.lumora.core.service.TaskService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-@Service
+@Component
 @RequiredArgsConstructor
-public class TaskEventService {
+public class TaskEventStreamRegistry {
 
     private final TaskService taskService;
     private final Map<String, List<SseEmitter>> subscribers =
@@ -36,27 +35,6 @@ public class TaskEventService {
         emitter.onTimeout(() -> remove(taskId, emitter));
         emitter.onError(ignored -> remove(taskId, emitter));
         return emitter;
-    }
-
-    /**
-     * Service 完成状态变更后调用，Controller 不直接管理订阅者生命周期。
-     *
-     * @param taskId 任务 ID
-     * @param event 最新任务快照
-     */
-    public void publish(String taskId, TaskResponse event) {
-        List<SseEmitter> emitters = subscribers.getOrDefault(
-                taskId,
-                List.of()
-        );
-        for (SseEmitter emitter : emitters) {
-            try {
-                emitter.send(SseEmitter.event().name("task").data(event));
-            } catch (IOException error) {
-                emitter.completeWithError(error);
-                remove(taskId, emitter);
-            }
-        }
     }
 
     private void remove(String taskId, SseEmitter emitter) {

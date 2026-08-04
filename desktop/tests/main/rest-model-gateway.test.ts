@@ -169,6 +169,36 @@ describe("Java REST model gateway", () => {
     );
     expect(JSON.parse(receivedBody)).toEqual({ content: "更新后的问题" });
   });
+
+  it("notifies Java Core when a model stream is cancelled", async () => {
+    let resolveCancelled!: (path: string) => void;
+    const cancelled = new Promise<string>((resolve) => {
+      resolveCancelled = resolve;
+    });
+    const server = createServer((request, response) => {
+      if (request.method === "DELETE") {
+        resolveCancelled(request.url ?? "");
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end('{"cancelled":true}');
+        return;
+      }
+      response.writeHead(200, { "Content-Type": "text/event-stream" });
+      response.write(": connected\n\n");
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address() as AddressInfo;
+    const gateway = new RestModelGateway({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      sessionToken: "test-token",
+    });
+
+    const subscription = gateway.streamMessage("task-1", "停止测试", () => undefined);
+    subscription.cancel();
+
+    await expect(subscription.completed).rejects.toMatchObject({ name: "AbortError" });
+    await expect(cancelled).resolves.toBe("/api/v1/tasks/task-1/messages/cancel");
+  });
 });
 
 async function listen(

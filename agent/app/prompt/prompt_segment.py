@@ -6,7 +6,6 @@ from typing import Any, Literal
 class PromptTarget(StrEnum):
     SYSTEM = "system"
     MESSAGES = "messages"
-    CURRENT_USER = "current_user"
     TOOLS = "tools"
 
 
@@ -51,8 +50,3 @@ class PromptSegment:
                 raise ValueError("tools 片段必须是 JSON Schema 对象")
         elif not isinstance(self.content, str):
             raise ValueError("system/messages 片段必须是文本")
-        if self.target == PromptTarget.CURRENT_USER:
-            if self.trust_level != PromptTrustLevel.TRUSTED:
-                raise ValueError("只有可信片段可以进入当前用户消息")
-            if self.role != "user":
-                raise ValueError("当前用户消息片段必须使用 user 角色")

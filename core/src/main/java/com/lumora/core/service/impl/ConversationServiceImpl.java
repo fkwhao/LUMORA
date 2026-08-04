@@ -13,9 +13,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.FutureTask;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
@@ -39,7 +39,8 @@ public class ConversationServiceImpl implements ConversationService {
     private final ModelService modelService;
     private final ExecutorService executorService;
     private final MemoryExtractionCoordinator memoryExtractionCoordinator;
-    private final Set<String> activeTaskIds = ConcurrentHashMap.newKeySet();
+    private final ConcurrentHashMap<String, FutureTask<Void>> activeRuns =
+            new ConcurrentHashMap<>();
 
     @Override
     public List<ConversationMessage> listMessages(String taskId) {
@@ -52,6 +53,7 @@ public class ConversationServiceImpl implements ConversationService {
             String content,
             String model,
             String reasoningEffort,
+            String workspacePath,
             String correlationId,
             Consumer<ChatStreamEvent> eventConsumer,
             Runnable completionCallback,
@@ -63,6 +65,7 @@ public class ConversationServiceImpl implements ConversationService {
                 requireText(correlationId, "关联 ID"),
                 model,
                 reasoningEffort,
+                workspacePath,
                 () -> persistenceService.prepareNewMessage(
                         taskId,
                         normalizedContent
@@ -80,6 +83,7 @@ public class ConversationServiceImpl implements ConversationService {
             String content,
             String model,
             String reasoningEffort,
+            String workspacePath,
             String correlationId,
             Consumer<ChatStreamEvent> eventConsumer,
             Runnable completionCallback,
@@ -92,6 +96,7 @@ public class ConversationServiceImpl implements ConversationService {
                 requireText(correlationId, "关联 ID"),
                 model,
                 reasoningEffort,
+                workspacePath,
                 () -> persistenceService.prepareRegeneration(
                         taskId,
                         normalizedMessageId,
@@ -103,35 +108,53 @@ public class ConversationServiceImpl implements ConversationService {
         );
     }
 
-    private void startGeneration(
+    private synchronized void startGeneration(
             String taskId,
             String correlationId,
             String model,
             String reasoningEffort,
+            String workspacePath,
             Supplier<ConversationRunContext> contextSupplier,
             Consumer<ChatStreamEvent> eventConsumer,
             Runnable completionCallback,
             Consumer<Throwable> errorCallback
     ) {
-        if (!activeTaskIds.add(taskId)) {
+        if (activeRuns.containsKey(taskId)) {
             throw new IllegalStateException("当前任务正在生成回复");
         }
 
         try {
             ConversationRunContext context = contextSupplier.get();
-            executorService.submit(() -> executeStream(
-                    context,
-                    correlationId,
-                    model,
-                    reasoningEffort,
-                    eventConsumer,
-                    completionCallback,
-                    errorCallback
-            ));
+            FutureTask<Void> run = new FutureTask<>(() -> {
+                executeStream(
+                        context,
+                        correlationId,
+                        model,
+                        reasoningEffort,
+                        workspacePath,
+                        eventConsumer,
+                        completionCallback,
+                        errorCallback
+                );
+                return null;
+            }) {
+                @Override
+                protected void done() {
+                    activeRuns.remove(taskId, this);
+                }
+            };
+            activeRuns.put(taskId, run);
+            executorService.execute(run);
         } catch (RuntimeException error) {
-            activeTaskIds.remove(taskId);
+            activeRuns.remove(taskId);
             throw error;
         }
+    }
+
+    @Override
+    public boolean cancelGeneration(String taskId) {
+        FutureTask<Void> run = activeRuns.remove(taskId);
+        return run != null && run.cancel(true);
     }
 
     private void executeStream(
@@ -139,6 +162,7 @@ public class ConversationServiceImpl implements ConversationService {
             String correlationId,
             String model,
             String reasoningEffort,
+            String workspacePath,
             Consumer<ChatStreamEvent> eventConsumer,
             Runnable completionCallback,
             Consumer<Throwable> errorCallback
@@ -152,6 +176,7 @@ public class ConversationServiceImpl implements ConversationService {
                     model,
                     reasoningEffort,
                     context.getMemorySummary(),
+                    workspacePath,
                     event -> handleStreamEvent(
                             context,
                             accumulator,
@@ -165,9 +190,9 @@ public class ConversationServiceImpl implements ConversationService {
             completionCallback.run();
             scheduleMemoryExtraction(context, accumulator, correlationId);
         } catch (Throwable error) {
-            errorCallback.accept(error);
-        } finally {
-            activeTaskIds.remove(context.getTaskId());
+            if (!Thread.currentThread().isInterrupted()) {
+                errorCallback.accept(error);
+            }
         }
     }
 

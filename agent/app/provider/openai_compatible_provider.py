@@ -1,4 +1,5 @@
 import json
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -14,6 +15,13 @@ from app.dto.response.chat_stream_event_response import (
 )
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.prompt.prompt_assembly import PromptAssembly
+from app.provider.agent_loop import (
+    AgentLoopRunner,
+    ProviderToolCall,
+    ProviderTurn,
+)
+from app.tool.base import ToolContext
+from app.tool.registry import ToolRegistry
 
 
 class OpenAICompatibleProvider:
@@ -35,7 +43,7 @@ class OpenAICompatibleProvider:
             payload = response.json()
         data = payload.get("data") if isinstance(payload, dict) else None
         if not isinstance(data, list):
-            raise ValueError("模型列表响应格式无效")
+            raise TypeError("模型列表响应格式无效")
         models = {
             item.get("id", "").strip()
             for item in data
@@ -140,6 +148,84 @@ class OpenAICompatibleProvider:
             model=resolved_model,
         )
 
+    async def agent_stream(
+        self,
+        settings: ModelConnectionSettings,
+        prompt: PromptAssembly,
+        messages: list[ChatMessageRequest],
+        reasoning_effort: str | None,
+        registry: ToolRegistry,
+        tool_context: ToolContext,
+    ) -> AsyncIterator[ChatStreamEventResponse]:
+        """执行最多二十轮的模型工具循环，并输出可验证的工作过程事件。"""
+        async for event in AgentLoopRunner(self._complete_agent_turn).stream(
+            settings,
+            prompt,
+            messages,
+            reasoning_effort,
+            registry,
+            tool_context,
+        ):
+            yield event
+
+    async def _complete_agent_turn(
+        self,
+        settings: ModelConnectionSettings,
+        messages: list[dict[str, Any]],
+        tools: tuple[dict[str, Any], ...],
+        reasoning_effort: str | None,
+    ) -> ProviderTurn:
+        request_body: dict[str, Any] = {
+            "model": settings.model,
+            "messages": messages,
+            "tools": list(tools),
+            "tool_choice": "auto",
+            "stream": False,
+        }
+        if reasoning_effort:
+            request_body["reasoning_effort"] = reasoning_effort
+        if self._is_deepseek(settings):
+            request_body["reasoning_effort"] = reasoning_effort or "high"
+            request_body["thinking"] = {"type": "enabled"}
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                f"{settings.base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=request_body,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        try:
+            message = payload["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError) as error:
+            raise ValueError("模型响应缺少消息") from error
+        raw_calls = message.get("tool_calls") or []
+        calls = tuple(
+            ProviderToolCall(
+                call_id=str(call.get("id") or uuid.uuid4()),
+                name=str((call.get("function") or {}).get("name") or ""),
+                arguments_json=str(
+                    (call.get("function") or {}).get("arguments") or "{}"
+                ),
+            )
+            for call in raw_calls
+            if isinstance(call, dict)
+        )
+        return ProviderTurn(
+            content=str(message.get("content") or ""),
+            reasoning=str(
+                message.get("reasoning_content")
+                or message.get("reasoning")
+                or ""
+            ),
+            model=str(payload.get("model") or settings.model),
+            usage=self._parse_usage(payload.get("usage") or {}),
+            tool_calls=calls,
+        )
+
     def _request_body(
         self,
         settings: ModelConnectionSettings,
@@ -156,11 +242,6 @@ class OpenAICompatibleProvider:
                 for message in messages
             ],
         ]
-        self._attach_current_user_blocks(
-            request_messages,
-            prompt.current_user_content_blocks,
-            flatten=self._is_deepseek(settings),
-        )
         request_body: dict[str, Any] = {
             "model": settings.model,
             "messages": request_messages,
@@ -177,37 +258,6 @@ class OpenAICompatibleProvider:
             request_body["reasoning_effort"] = reasoning_effort or "high"
             request_body["thinking"] = {"type": "enabled"}
         return request_body
-
-    @staticmethod
-    def _attach_current_user_blocks(
-        messages: list[dict[str, Any]],
-        reminder_blocks: tuple[dict[str, str], ...],
-        flatten: bool,
-    ) -> None:
-        if not reminder_blocks:
-            return
-        current_user = next(
-            (
-                message
-                for message in reversed(messages)
-                if message.get("role") == "user"
-            ),
-            None,
-        )
-        if current_user is None:
-            raise ValueError("动态提醒缺少当前用户消息")
-        user_content = current_user.get("content")
-        if not isinstance(user_content, str) or not user_content:
-            raise ValueError("当前用户消息内容格式无效")
-        blocks = [
-            *[dict(block) for block in reminder_blocks],
-            {"type": "text", "text": user_content},
-        ]
-        current_user["content"] = (
-            "\n\n".join(block["text"] for block in blocks)
-            if flatten
-            else blocks
-        )
 
     @staticmethod
     def _is_deepseek(settings: ModelConnectionSettings) -> bool:

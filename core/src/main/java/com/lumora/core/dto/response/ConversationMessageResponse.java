@@ -1,7 +1,5 @@
 package com.lumora.core.dto.response;
 
-import com.lumora.core.entity.ConversationMessage;
-
 import java.time.Instant;
 
 public class ConversationMessageResponse {
@@ -10,10 +8,10 @@ public class ConversationMessageResponse {
     private final int sequence;
     private final String role;
     private final String content;
-    private final String reasoningContent;
     private final String model;
     private final TokenUsageResponse usage;
     private final long durationMs;
+    private final String workLogJson;
     private final Instant createdAt;
 
     public ConversationMessageResponse(
@@ -21,41 +19,21 @@ public class ConversationMessageResponse {
             int sequence,
             String role,
             String content,
-            String reasoningContent,
             String model,
             TokenUsageResponse usage,
             long durationMs,
+            String workLogJson,
             Instant createdAt
     ) {
         this.messageId = messageId;
         this.sequence = sequence;
         this.role = role;
         this.content = content;
-        this.reasoningContent = reasoningContent;
         this.model = model;
         this.usage = usage;
         this.durationMs = durationMs;
+        this.workLogJson = workLogJson == null ? "[]" : workLogJson;
         this.createdAt = createdAt;
-    }
-
-    public static ConversationMessageResponse fromEntity(
-            ConversationMessage message
-    ) {
-        return new ConversationMessageResponse(
-                message.getMessageId(),
-                message.getSequence(),
-                message.getRole().name().toLowerCase(),
-                message.getContent(),
-                message.getReasoningContent(),
-                message.getModel(),
-                new TokenUsageResponse(
-                        message.getPromptTokens(),
-                        message.getCompletionTokens(),
-                        message.getTotalTokens()
-                ),
-                message.getDurationMs(),
-                message.getCreatedAt()
-        );
     }
 
     public String getMessageId() {
@@ -74,10 +52,6 @@ public class ConversationMessageResponse {
         return content;
     }
 
-    public String getReasoningContent() {
-        return reasoningContent;
-    }
-
     public String getModel() {
         return model;
     }
@@ -88,6 +62,10 @@ public class ConversationMessageResponse {
 
     public long getDurationMs() {
         return durationMs;
+    }
+
+    public String getWorkLogJson() {
+        return workLogJson;
     }
 
     public Instant getCreatedAt() {

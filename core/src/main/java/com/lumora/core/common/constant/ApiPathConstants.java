@@ -19,6 +19,8 @@ public final class ApiPathConstants {
     public static final String TASK_MESSAGES = TASK_BY_ID + "/messages";
     public static final String TASK_MESSAGE_STREAM =
             TASK_MESSAGES + "/stream";
+    public static final String TASK_MESSAGE_CANCEL =
+            TASK_MESSAGES + "/cancel";
     public static final String TASK_MESSAGE_REGENERATE =
             TASK_MESSAGES + "/{messageId}/regenerate";
     public static final String TASK_APPROVALS =

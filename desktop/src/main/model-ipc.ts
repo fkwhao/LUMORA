@@ -166,7 +166,11 @@ function validateChatRequestOptions(
   if (reasoningEffort && !allowed.has(reasoningEffort)) {
     throw new TypeError("推理强度无效");
   }
-  return { model, reasoningEffort };
+  const workspacePath = options.workspacePath?.trim() || undefined;
+  if (workspacePath && workspacePath.length > 1000) {
+    throw new TypeError("工作区路径过长");
+  }
+  return { model, reasoningEffort, workspacePath };
 }
 
 function validateMessages(messages: ChatMessage[]): ChatMessage[] {

@@ -24,12 +24,6 @@ class ModelConnectionRequest(BaseModel):
 class PromptContextRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    response_language: str = Field(
-        default="简体中文",
-        alias="responseLanguage",
-        min_length=1,
-        max_length=80,
-    )
     workspace_path: str | None = Field(
         default=None,
         alias="workspacePath",
@@ -49,16 +43,6 @@ class PromptContextRequest(BaseModel):
         default=None,
         alias="memorySummary",
         max_length=100_000,
-    )
-    system_reminders: list[str] = Field(
-        default_factory=list,
-        alias="systemReminders",
-        max_length=20,
-    )
-    tool_definitions: list[dict] = Field(
-        default_factory=list,
-        alias="toolDefinitions",
-        max_length=100,
     )
 
 

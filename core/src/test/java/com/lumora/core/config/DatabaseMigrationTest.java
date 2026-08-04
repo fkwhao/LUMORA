@@ -63,14 +63,14 @@ class DatabaseMigrationTest {
 
         assertThat(businessTableCount).isEqualTo(7);
         assertThat(foreignKeysEnabled).isEqualTo(1);
-        assertThat(applicationChangeSetCount()).isEqualTo(10);
+        assertThat(applicationChangeSetCount()).isEqualTo(11);
         assertThat(taskPlanStepPrimaryKeyColumns())
                 .containsExactly("plan_step_id");
 
         // 对同一数据库重复执行迁移，必须只校验历史而不能再次建表。
         liquibase.afterPropertiesSet();
 
-        assertThat(applicationChangeSetCount()).isEqualTo(10);
+        assertThat(applicationChangeSetCount()).isEqualTo(11);
     }
 
     private Integer applicationChangeSetCount() {
@@ -88,7 +88,8 @@ class DatabaseMigrationTest {
                     '007-conversation-message-duration',
                     '008-model-context-window',
                     '009-memory-item',
-                    '010-memory-semantic-slot'
+                    '010-memory-semantic-slot',
+                    '011-conversation-work-log'
                 )
                 AND AUTHOR = 'lumora'
                 """,
