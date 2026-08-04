@@ -100,3 +100,21 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 012-model-provider
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V12__model_provider.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false
+  - changeSet:
+      id: 013-provider-model
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V13__provider_model.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

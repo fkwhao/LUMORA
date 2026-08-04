@@ -40,7 +40,7 @@ def test_prompt_assembly_routes_context_and_tools_to_api_fields() -> None:
     assert body["tools"][0]["function"]["name"] == "file_read"
 
 
-def test_deepseek_thinking_strength_uses_official_openai_format() -> None:
+def test_reasoning_strength_uses_nested_reasoning_format() -> None:
     provider = OpenAICompatibleProvider()
     body = provider._request_body(
         ModelConnectionSettings(
@@ -52,10 +52,29 @@ def test_deepseek_thinking_strength_uses_official_openai_format() -> None:
         PromptBuilder().build(),
         [ChatMessageRequest(role="user", content="你好")],
         stream=True,
-        reasoning_effort="max",
+        reasoning_effort="none",
     )
 
-    assert body["thinking"] == {"type": "enabled"}
-    assert body["reasoning_effort"] == "max"
+    assert body["reasoning"] == {"effort": "none"}
+    assert "reasoning_effort" not in body
+    assert "thinking" not in body
     assert isinstance(body["messages"][-1]["content"], str)
     assert body["messages"][-1]["content"] == "你好"
+
+
+def test_model_max_output_tokens_are_sent_as_max_tokens() -> None:
+    provider = OpenAICompatibleProvider()
+    body = provider._request_body(
+        ModelConnectionSettings(
+            provider_name="DeepSeek",
+            base_url="https://api.deepseek.com",
+            model="deepseek-chat",
+            api_key="secret",
+            max_output_tokens=32_768,
+        ),
+        PromptBuilder().build(),
+        [ChatMessageRequest(role="user", content="你好")],
+        stream=False,
+    )
+
+    assert body["max_tokens"] == 32_768

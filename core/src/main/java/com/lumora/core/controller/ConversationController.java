@@ -4,6 +4,7 @@ import com.lumora.core.common.constant.ApiPathConstants;
 import com.lumora.core.common.constant.HttpContractConstants;
 import com.lumora.core.converter.ConversationMessageResponseConverter;
 import com.lumora.core.dto.request.SendMessageRequest;
+import com.lumora.core.dto.request.ToolApprovalDecisionRequest;
 import com.lumora.core.dto.response.ConversationMessageResponse;
 import com.lumora.core.model.ChatStreamEvent;
 import com.lumora.core.model.ChatStreamEventType;
@@ -64,6 +65,7 @@ public class ConversationController {
                 request.getModel(),
                 request.getReasoningEffort(),
                 request.getWorkspacePath(),
+                request.getPermissionMode(),
                 correlationId,
                 event -> sendEvent(emitter, event),
                 emitter::complete,
@@ -91,6 +93,7 @@ public class ConversationController {
                 request.getModel(),
                 request.getReasoningEffort(),
                 request.getWorkspacePath(),
+                request.getPermissionMode(),
                 correlationId,
                 event -> sendEvent(emitter, event),
                 emitter::complete,
@@ -107,6 +110,20 @@ public class ConversationController {
                 "cancelled",
                 conversationService.cancelGeneration(taskId)
         );
+    }
+
+    @PostMapping(ApiPathConstants.TASK_TOOL_APPROVAL)
+    public Map<String, Boolean> decideToolApproval(
+            @PathVariable String taskId,
+            @PathVariable String approvalId,
+            @Valid @RequestBody ToolApprovalDecisionRequest request
+    ) {
+        conversationService.decideToolApproval(
+                taskId,
+                approvalId,
+                request.getDecision()
+        );
+        return Map.of("accepted", true);
     }
 
     private void completeWithStreamError(

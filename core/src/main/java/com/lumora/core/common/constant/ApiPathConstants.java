@@ -26,6 +26,8 @@ public final class ApiPathConstants {
     public static final String TASK_APPROVALS =
             TASKS + TASK_BY_ID + "/approvals";
     public static final String APPROVAL_BY_ID = "/{approvalId}";
+    public static final String TASK_TOOL_APPROVAL =
+            TASK_BY_ID + "/tool-approvals/{approvalId}";
 
     private ApiPathConstants() {
     }

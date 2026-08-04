@@ -1,0 +1,53 @@
+package com.lumora.core.entity;
+
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import com.lumora.core.mapper.typehandler.SqliteInstantTypeHandler;
+
+import java.time.Instant;
+
+@TableName(value = "model_configuration_model", autoResultMap = true)
+public class ModelConfigurationModel {
+    @TableId(value = "model_configuration_model_id", type = IdType.INPUT)
+    private String modelConfigurationModelId;
+    @TableField("configuration_id")
+    private String configurationId;
+    @TableField("model_id")
+    private String modelId;
+    @TableField("context_window")
+    private int contextWindow;
+    @TableField("max_output_tokens")
+    private int maxOutputTokens;
+    @TableField(value = "created_at", typeHandler = SqliteInstantTypeHandler.class)
+    private Instant createdAt;
+    @TableField(value = "updated_at", typeHandler = SqliteInstantTypeHandler.class)
+    private Instant updatedAt;
+
+    public ModelConfigurationModel() {}
+
+    public ModelConfigurationModel(String id, String configurationId,
+            String modelId, int contextWindow, int maxOutputTokens,
+            Instant createdAt, Instant updatedAt) {
+        this.modelConfigurationModelId = id;
+        this.configurationId = configurationId;
+        this.modelId = modelId;
+        this.contextWindow = contextWindow;
+        this.maxOutputTokens = maxOutputTokens;
+        this.createdAt = createdAt;
+        this.updatedAt = updatedAt;
+    }
+
+    public String getModelConfigurationModelId() { return modelConfigurationModelId; }
+    public String getConfigurationId() { return configurationId; }
+    public String getModelId() { return modelId; }
+    public void setModelId(String modelId) { this.modelId = modelId; }
+    public int getContextWindow() { return contextWindow; }
+    public void setContextWindow(int contextWindow) { this.contextWindow = contextWindow; }
+    public int getMaxOutputTokens() { return maxOutputTokens; }
+    public void setMaxOutputTokens(int maxOutputTokens) { this.maxOutputTokens = maxOutputTokens; }
+    public Instant getCreatedAt() { return createdAt; }
+    public Instant getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+}

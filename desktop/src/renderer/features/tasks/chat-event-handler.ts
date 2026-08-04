@@ -13,6 +13,37 @@ export function applyChatEvent(
   set: (partial: Partial<TaskState>) => void,
   resolve: () => void,
 ): void {
+  if (event.type === "tool_approval_requested") {
+    if (!event.approvalId || !event.itemId || !event.toolName) return;
+    set({
+      pendingToolApproval: {
+        approvalId: event.approvalId,
+        itemId: event.itemId,
+        toolCallId: event.toolCallId ?? "",
+        toolName: event.toolName,
+        title: event.title || event.toolName,
+        arguments: event.arguments ?? {},
+        permissionLayer: event.permissionLayer ?? "mode",
+        reason: event.reason ?? "当前权限模式需要用户确认",
+        riskLevel: event.riskLevel ?? "MEDIUM",
+        reversible: event.reversible,
+      },
+      isDecidingToolApproval: false,
+    });
+    return;
+  }
+  if (event.type === "tool_approval_resolved") {
+    if (
+      !event.approvalId ||
+      get().pendingToolApproval?.approvalId === event.approvalId
+    ) {
+      set({
+        pendingToolApproval: undefined,
+        isDecidingToolApproval: false,
+      });
+    }
+    return;
+  }
   if (
     event.type === "progress_message" ||
     event.type === "tool_started" ||
@@ -79,6 +110,8 @@ export function applyChatEvent(
           chatWasStopped: false,
           chatStartedAt: undefined,
           lastChatDurationMs,
+          pendingToolApproval: undefined,
+          isDecidingToolApproval: false,
         }),
       )
       .catch(() =>
@@ -87,6 +120,8 @@ export function applyChatEvent(
           chatWasStopped: false,
           chatStartedAt: undefined,
           lastChatDurationMs,
+          pendingToolApproval: undefined,
+          isDecidingToolApproval: false,
         }),
       )
       .finally(resolve);
@@ -109,6 +144,8 @@ export function applyChatEvent(
           chatStartedAt: undefined,
           lastChatDurationMs,
           chatError: event.errorMessage || "模型流式响应失败",
+          pendingToolApproval: undefined,
+          isDecidingToolApproval: false,
         });
       })
       .catch(() =>
@@ -118,6 +155,8 @@ export function applyChatEvent(
           chatStartedAt: undefined,
           lastChatDurationMs,
           chatError: event.errorMessage || "模型流式响应失败",
+          pendingToolApproval: undefined,
+          isDecidingToolApproval: false,
         }),
       )
       .finally(resolve);

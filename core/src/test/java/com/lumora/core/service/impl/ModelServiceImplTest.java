@@ -3,7 +3,9 @@ package com.lumora.core.service.impl;
 import com.lumora.core.agent.client.AgentRuntimeClient;
 import com.lumora.core.entity.ModelConfiguration;
 import com.lumora.core.mapper.ModelConfigurationMapper;
+import com.lumora.core.mapper.ModelConfigurationModelMapper;
 import com.lumora.core.model.ModelSettings;
+import com.lumora.core.model.ModelProvider;
 import com.lumora.core.security.secret.SecretProtector;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,12 +27,14 @@ class ModelServiceImplTest {
     private final AtomicReference<ModelConfiguration> stored =
             new AtomicReference<>();
     private ModelConfigurationMapper mapper;
+    private ModelConfigurationModelMapper modelMapper;
     private SecretProtector protector;
     private ModelServiceImpl service;
 
     @BeforeEach
     void setUp() {
         mapper = mock(ModelConfigurationMapper.class);
+        modelMapper = mock(ModelConfigurationModelMapper.class);
         protector = mock(SecretProtector.class);
         AgentRuntimeClient runtimeClient = mock(AgentRuntimeClient.class);
         when(mapper.selectById("default")).thenAnswer(
@@ -46,9 +50,11 @@ class ModelServiceImplTest {
         }).when(mapper).updateById(any(ModelConfiguration.class));
         when(protector.protect("provider-secret"))
                 .thenReturn("dpapi-ciphertext");
+        when(mapper.selectCount(null)).thenReturn(0L);
 
         service = new ModelServiceImpl(
                 mapper,
+                modelMapper,
                 protector,
                 runtimeClient,
                 Clock.fixed(
@@ -104,5 +110,24 @@ class ModelServiceImplTest {
                 .isEqualTo("dpapi-ciphertext");
         assertThat(stored.get().getModelName())
                 .isEqualTo("deepseek-v4-flash");
+    }
+
+    @Test
+    void createsFirstCustomProviderAsActiveAndPersistsApiFormat() {
+        ModelProvider result = service.createProvider(
+                "DeepSeek",
+                "https://api.deepseek.com",
+                "deepseek-chat",
+                128_000,
+                "responses",
+                "provider-secret",
+                "correlation-provider"
+        );
+
+        assertThat(result.isActive()).isTrue();
+        assertThat(result.getApiFormat()).isEqualTo("responses");
+        assertThat(stored.get().getConfigurationId()).isNotEqualTo("default");
+        assertThat(stored.get().getApiKeyCiphertext())
+                .isEqualTo("dpapi-ciphertext");
     }
 }

@@ -21,6 +21,10 @@ public class ModelConfiguration {
     private String modelName;
     @TableField("context_window")
     private int contextWindow;
+    @TableField("api_format")
+    private String apiFormat;
+    @TableField("is_active")
+    private boolean active;
     @TableField("api_key_ciphertext")
     private String apiKeyCiphertext;
     @TableField(
@@ -47,12 +51,31 @@ public class ModelConfiguration {
             Instant createdAt,
             Instant updatedAt
     ) {
+        this(configurationId, providerName, baseUrl, modelName,
+                contextWindow, apiKeyCiphertext, "chat-completions", true,
+                createdAt, updatedAt);
+    }
+
+    public ModelConfiguration(
+            String configurationId,
+            String providerName,
+            String baseUrl,
+            String modelName,
+            int contextWindow,
+            String apiKeyCiphertext,
+            String apiFormat,
+            boolean active,
+            Instant createdAt,
+            Instant updatedAt
+    ) {
         this.configurationId = configurationId;
         this.providerName = providerName;
         this.baseUrl = baseUrl;
         this.modelName = modelName;
         this.contextWindow = contextWindow;
         this.apiKeyCiphertext = apiKeyCiphertext;
+        this.apiFormat = apiFormat;
+        this.active = active;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
     }
@@ -103,6 +126,22 @@ public class ModelConfiguration {
 
     public void setApiKeyCiphertext(String apiKeyCiphertext) {
         this.apiKeyCiphertext = apiKeyCiphertext;
+    }
+
+    public String getApiFormat() {
+        return apiFormat;
+    }
+
+    public void setApiFormat(String apiFormat) {
+        this.apiFormat = apiFormat;
+    }
+
+    public boolean isActive() {
+        return active;
+    }
+
+    public void setActive(boolean active) {
+        this.active = active;
     }
 
     public Instant getCreatedAt() {

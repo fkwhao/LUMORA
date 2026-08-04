@@ -4,6 +4,43 @@ export interface ModelSettings {
   model: string;
   contextWindow: number;
   apiKeyConfigured: boolean;
+  models: ProviderModel[];
+}
+
+export type ApiFormat = "anthropic" | "chat-completions" | "responses";
+
+export interface ModelProvider {
+  providerId: string;
+  providerName: string;
+  baseUrl: string;
+  model: string;
+  contextWindow: number;
+  apiFormat: ApiFormat;
+  active: boolean;
+  apiKeyConfigured: boolean;
+  models: ProviderModel[];
+}
+
+export interface ProviderModel {
+  modelConfigurationId: string;
+  modelId: string;
+  contextWindow: number;
+  maxOutputTokens: number;
+}
+
+export interface SaveProviderModelInput {
+  modelId: string;
+  contextWindow: number;
+  maxOutputTokens: number;
+}
+
+export interface SaveModelProviderInput {
+  providerName: string;
+  baseUrl: string;
+  model: string;
+  contextWindow: number;
+  apiFormat: ApiFormat;
+  apiKey?: string;
 }
 
 export interface UpdateModelSettingsInput {
@@ -63,12 +100,35 @@ export interface ChatCompletion {
   usage: TokenUsage;
 }
 
-export type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max";
+export type ReasoningEffort =
+  | "none"
+  | "low"
+  | "high"
+  | "max";
+export type PermissionMode =
+  | "full_access"
+  | "auto_approve"
+  | "request_approval";
+export type ToolApprovalDecision = "allow_once" | "allow_always" | "deny";
+
+export interface ToolApprovalRequest {
+  approvalId: string;
+  itemId: string;
+  toolCallId: string;
+  toolName: string;
+  title: string;
+  arguments: Record<string, unknown>;
+  permissionLayer: string;
+  reason: string;
+  riskLevel: string;
+  reversible?: boolean;
+}
 
 export interface ChatRequestOptions {
   model?: string;
   reasoningEffort?: ReasoningEffort;
   workspacePath?: string;
+  permissionMode?: PermissionMode;
 }
 
 export type ChatStreamEventType =
@@ -78,6 +138,8 @@ export type ChatStreamEventType =
   | "tool_started"
   | "tool_completed"
   | "tool_failed"
+  | "tool_approval_requested"
+  | "tool_approval_resolved"
   | "usage"
   | "completed"
   | "failed";
@@ -97,14 +159,36 @@ export interface ChatStreamEvent {
   durationMs?: number;
   exitCode?: number;
   metadata?: Record<string, unknown>;
+  approvalId?: string;
+  permissionLayer?: string;
+  reason?: string;
+  riskLevel?: string;
+  reversible?: boolean;
+  decision?: "allow" | "deny" | "";
 }
 
 export interface LumoraModelApi {
+  listProviders(): Promise<ModelProvider[]>;
+  createProvider(input: SaveModelProviderInput): Promise<ModelProvider>;
+  updateProvider(providerId: string, input: SaveModelProviderInput): Promise<ModelProvider>;
+  activateProvider(providerId: string): Promise<ModelProvider>;
+  disableProvider(providerId: string): Promise<ModelProvider>;
+  deleteProvider(providerId: string): Promise<void>;
+  listProviderModels(providerId: string, apiKey?: string): Promise<string[]>;
+  createProviderModel(providerId: string, input: SaveProviderModelInput): Promise<ProviderModel>;
+  updateProviderModel(providerId: string, modelConfigurationId: string, input: SaveProviderModelInput): Promise<ProviderModel>;
+  deleteProviderModel(providerId: string, modelConfigurationId: string): Promise<void>;
+  testProviderModel(providerId: string, modelConfigurationId: string): Promise<boolean>;
   getSettings(): Promise<ModelSettings>;
   updateSettings(input: UpdateModelSettingsInput): Promise<ModelSettings>;
   listModels(input: ListModelsInput): Promise<string[]>;
   complete(messages: ChatMessage[]): Promise<ChatCompletion>;
   listMessages(taskId: string): Promise<ChatMessage[]>;
+  decideToolApproval(
+    taskId: string,
+    approvalId: string,
+    decision: ToolApprovalDecision,
+  ): Promise<void>;
   streamMessage(
     taskId: string,
     content: string,

@@ -21,6 +21,7 @@ class ToolCategory(StrEnum):
 class ToolContext:
     workspace_path: Path
     correlation_id: str = ""
+    allow_external_paths: bool = False
     cancelled: Callable[[], bool] = field(default=lambda: False, repr=False)
 
 

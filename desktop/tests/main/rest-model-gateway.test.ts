@@ -122,7 +122,11 @@ describe("Java REST model gateway", () => {
           reasoningEvents.push(event.delta);
         }
       },
-      { model: "gpt-5.6-sol", reasoningEffort: "high" },
+      {
+        model: "gpt-5.6-sol",
+        reasoningEffort: "high",
+        permissionMode: "request_approval",
+      },
     );
     await subscription.completed;
 
@@ -130,9 +134,35 @@ describe("Java REST model gateway", () => {
       content: "你好",
       model: "gpt-5.6-sol",
       reasoningEffort: "high",
+      permissionMode: "request_approval",
     });
     expect(events.join("")).toBe("你好");
     expect(reasoningEvents.join("")).toBe("分析问题");
+  });
+
+  it("forwards a human tool approval decision to the task endpoint", async () => {
+    let receivedPath = "";
+    let receivedBody = "";
+    const baseUrl = await listen(async (request) => {
+      receivedPath = request.url ?? "";
+      receivedBody = await readBody(request);
+      return { accepted: true };
+    });
+    const gateway = new RestModelGateway({
+      baseUrl,
+      sessionToken: "test-token",
+    });
+
+    await gateway.decideToolApproval(
+      "task-1",
+      "approval-1",
+      "allow_always",
+    );
+
+    expect(receivedPath).toBe(
+      "/api/v1/tasks/task-1/tool-approvals/approval-1",
+    );
+    expect(JSON.parse(receivedBody)).toEqual({ decision: "allow_always" });
   });
 
   it("regenerates from the selected user message endpoint", async () => {

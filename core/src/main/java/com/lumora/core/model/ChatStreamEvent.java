@@ -18,6 +18,12 @@ public class ChatStreamEvent {
     private final long durationMs;
     private final Integer exitCode;
     private final Map<String, Object> metadata;
+    private final String approvalId;
+    private final String permissionLayer;
+    private final String reason;
+    private final String riskLevel;
+    private final Boolean reversible;
+    private final String decision;
 
     public ChatStreamEvent(
             ChatStreamEventType type,
@@ -28,7 +34,8 @@ public class ChatStreamEvent {
     ) {
         this(
                 type, delta, model, usage, errorMessage,
-                "", "", "", "", Map.of(), "", 0L, null, Map.of()
+                "", "", "", "", Map.of(), "", 0L, null, Map.of(),
+                "", "", "", "", null, ""
         );
     }
 
@@ -48,6 +55,35 @@ public class ChatStreamEvent {
             Integer exitCode,
             Map<String, Object> metadata
     ) {
+        this(
+                type, delta, model, usage, errorMessage, itemId, toolCallId,
+                toolName, title, arguments, output, durationMs, exitCode,
+                metadata, "", "", "", "", null, ""
+        );
+    }
+
+    public ChatStreamEvent(
+            ChatStreamEventType type,
+            String delta,
+            String model,
+            TokenUsage usage,
+            String errorMessage,
+            String itemId,
+            String toolCallId,
+            String toolName,
+            String title,
+            Map<String, Object> arguments,
+            String output,
+            long durationMs,
+            Integer exitCode,
+            Map<String, Object> metadata,
+            String approvalId,
+            String permissionLayer,
+            String reason,
+            String riskLevel,
+            Boolean reversible,
+            String decision
+    ) {
         this.type = type;
         this.delta = delta;
         this.model = model;
@@ -62,6 +98,12 @@ public class ChatStreamEvent {
         this.durationMs = durationMs;
         this.exitCode = exitCode;
         this.metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
+        this.approvalId = approvalId == null ? "" : approvalId;
+        this.permissionLayer = permissionLayer == null ? "" : permissionLayer;
+        this.reason = reason == null ? "" : reason;
+        this.riskLevel = riskLevel == null ? "" : riskLevel;
+        this.reversible = reversible;
+        this.decision = decision == null ? "" : decision;
     }
 
     public ChatStreamEventType getType() {
@@ -93,4 +135,10 @@ public class ChatStreamEvent {
     public long getDurationMs() { return durationMs; }
     public Integer getExitCode() { return exitCode; }
     public Map<String, Object> getMetadata() { return metadata; }
+    public String getApprovalId() { return approvalId; }
+    public String getPermissionLayer() { return permissionLayer; }
+    public String getReason() { return reason; }
+    public String getRiskLevel() { return riskLevel; }
+    public Boolean getReversible() { return reversible; }
+    public String getDecision() { return decision; }
 }

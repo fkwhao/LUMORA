@@ -2,6 +2,8 @@ package com.lumora.core.dto.response;
 
 import com.lumora.core.model.ModelSettings;
 
+import java.util.List;
+
 public class ModelSettingsResponse {
 
     private final String providerName;
@@ -9,6 +11,7 @@ public class ModelSettingsResponse {
     private final String model;
     private final int contextWindow;
     private final boolean apiKeyConfigured;
+    private final List<ProviderModelResponse> models;
 
     public ModelSettingsResponse(
             String providerName,
@@ -17,11 +20,24 @@ public class ModelSettingsResponse {
             int contextWindow,
             boolean apiKeyConfigured
     ) {
+        this(providerName, baseUrl, model, contextWindow,
+                apiKeyConfigured, List.of());
+    }
+
+    public ModelSettingsResponse(
+            String providerName,
+            String baseUrl,
+            String model,
+            int contextWindow,
+            boolean apiKeyConfigured,
+            List<ProviderModelResponse> models
+    ) {
         this.providerName = providerName;
         this.baseUrl = baseUrl;
         this.model = model;
         this.contextWindow = contextWindow;
         this.apiKeyConfigured = apiKeyConfigured;
+        this.models = List.copyOf(models);
     }
 
     public static ModelSettingsResponse fromModel(ModelSettings settings) {
@@ -30,7 +46,10 @@ public class ModelSettingsResponse {
                 settings.getBaseUrl(),
                 settings.getModel(),
                 settings.getContextWindow(),
-                settings.isApiKeyConfigured()
+                settings.isApiKeyConfigured(),
+                settings.getModels().stream()
+                        .map(ProviderModelResponse::fromModel)
+                        .toList()
         );
     }
 
@@ -52,5 +71,9 @@ public class ModelSettingsResponse {
 
     public boolean isApiKeyConfigured() {
         return apiKeyConfigured;
+    }
+
+    public List<ProviderModelResponse> getModels() {
+        return models;
     }
 }

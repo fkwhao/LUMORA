@@ -15,6 +15,8 @@ class ChatStreamEventResponse(BaseModel):
         "tool_started",
         "tool_completed",
         "tool_failed",
+        "tool_approval_requested",
+        "tool_approval_resolved",
         "usage",
         "completed",
         "failed",
@@ -32,3 +34,9 @@ class ChatStreamEventResponse(BaseModel):
     duration_ms: int = Field(default=0, alias="durationMs")
     exit_code: int | None = Field(default=None, alias="exitCode")
     metadata: dict[str, Any] = Field(default_factory=dict)
+    approval_id: str = Field(default="", alias="approvalId")
+    permission_layer: str = Field(default="", alias="permissionLayer")
+    reason: str = ""
+    risk_level: str = Field(default="", alias="riskLevel")
+    reversible: bool | None = None
+    decision: Literal["allow", "deny", ""] = ""

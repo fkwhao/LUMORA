@@ -5,16 +5,31 @@ import type {
   ChatRequestOptions,
   ChatStreamEvent,
   ListModelsInput,
+  SaveModelProviderInput,
+  SaveProviderModelInput,
   UpdateModelSettingsInput,
+  ToolApprovalDecision,
 } from "../shared/model-contract";
 import type { ModelGateway } from "./model-gateway";
 
 export const modelIpcChannels = {
+  listProviders: "model:list-providers",
+  createProvider: "model:create-provider",
+  updateProvider: "model:update-provider",
+  activateProvider: "model:activate-provider",
+  disableProvider: "model:disable-provider",
+  deleteProvider: "model:delete-provider",
+  listProviderModels: "model:list-provider-models",
+  createProviderModel: "model:create-provider-model",
+  updateProviderModel: "model:update-provider-model",
+  deleteProviderModel: "model:delete-provider-model",
+  testProviderModel: "model:test-provider-model",
   getSettings: "model:get-settings",
   updateSettings: "model:update-settings",
   listModels: "model:list-models",
   complete: "model:complete",
   listMessages: "model:list-messages",
+  decideToolApproval: "model:decide-tool-approval",
   streamStart: "model:stream-start",
   streamCancel: "model:stream-cancel",
   streamEvent: "model:stream-event",
@@ -22,6 +37,27 @@ export const modelIpcChannels = {
 
 export function registerModelIpc(gateway: ModelGateway): () => void {
   const subscriptions = new Map<string, () => void>();
+  ipcMain.handle(modelIpcChannels.listProviders, () => gateway.listProviders());
+  ipcMain.handle(modelIpcChannels.createProvider, (_event, input: SaveModelProviderInput) =>
+    gateway.createProvider(validateProvider(input)));
+  ipcMain.handle(modelIpcChannels.updateProvider, (_event, providerId: string, input: SaveModelProviderInput) =>
+    gateway.updateProvider(requireText(providerId, "供应商 ID"), validateProvider(input)));
+  ipcMain.handle(modelIpcChannels.activateProvider, (_event, providerId: string) =>
+    gateway.activateProvider(requireText(providerId, "供应商 ID")));
+  ipcMain.handle(modelIpcChannels.disableProvider, (_event, providerId: string) =>
+    gateway.disableProvider(requireText(providerId, "供应商 ID")));
+  ipcMain.handle(modelIpcChannels.deleteProvider, (_event, providerId: string) =>
+    gateway.deleteProvider(requireText(providerId, "供应商 ID")));
+  ipcMain.handle(modelIpcChannels.listProviderModels, (_event, providerId: string, apiKey?: string) =>
+    gateway.listProviderModels(requireText(providerId, "供应商 ID"), apiKey?.trim() || undefined));
+  ipcMain.handle(modelIpcChannels.createProviderModel, (_event, providerId: string, input: SaveProviderModelInput) =>
+    gateway.createProviderModel(requireText(providerId, "供应商 ID"), validateProviderModel(input)));
+  ipcMain.handle(modelIpcChannels.updateProviderModel, (_event, providerId: string, modelConfigurationId: string, input: SaveProviderModelInput) =>
+    gateway.updateProviderModel(requireText(providerId, "供应商 ID"), requireText(modelConfigurationId, "模型配置 ID"), validateProviderModel(input)));
+  ipcMain.handle(modelIpcChannels.deleteProviderModel, (_event, providerId: string, modelConfigurationId: string) =>
+    gateway.deleteProviderModel(requireText(providerId, "供应商 ID"), requireText(modelConfigurationId, "模型配置 ID")));
+  ipcMain.handle(modelIpcChannels.testProviderModel, (_event, providerId: string, modelConfigurationId: string) =>
+    gateway.testProviderModel(requireText(providerId, "供应商 ID"), requireText(modelConfigurationId, "模型配置 ID")));
   ipcMain.handle(modelIpcChannels.getSettings, () => gateway.getSettings());
   ipcMain.handle(
     modelIpcChannels.updateSettings,
@@ -40,6 +76,22 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
   );
   ipcMain.handle(modelIpcChannels.listMessages, (_event, taskId: string) =>
     gateway.listMessages(requireText(taskId, "任务 ID")),
+  );
+  ipcMain.handle(
+    modelIpcChannels.decideToolApproval,
+    (
+      _event,
+      input: {
+        taskId: string;
+        approvalId: string;
+        decision: ToolApprovalDecision;
+      },
+    ) =>
+      gateway.decideToolApproval(
+        requireText(input?.taskId, "任务 ID"),
+        requireText(input?.approvalId, "审批 ID"),
+        validateToolApprovalDecision(input?.decision),
+      ),
   );
   ipcMain.on(modelIpcChannels.streamStart, (event, input: StreamStartInput) => {
     const taskId = requireText(input?.taskId, "任务 ID");
@@ -98,11 +150,23 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
   );
 
   return () => {
+    ipcMain.removeHandler(modelIpcChannels.listProviders);
+    ipcMain.removeHandler(modelIpcChannels.createProvider);
+    ipcMain.removeHandler(modelIpcChannels.updateProvider);
+    ipcMain.removeHandler(modelIpcChannels.activateProvider);
+    ipcMain.removeHandler(modelIpcChannels.disableProvider);
+    ipcMain.removeHandler(modelIpcChannels.deleteProvider);
+    ipcMain.removeHandler(modelIpcChannels.listProviderModels);
+    ipcMain.removeHandler(modelIpcChannels.createProviderModel);
+    ipcMain.removeHandler(modelIpcChannels.updateProviderModel);
+    ipcMain.removeHandler(modelIpcChannels.deleteProviderModel);
+    ipcMain.removeHandler(modelIpcChannels.testProviderModel);
     ipcMain.removeHandler(modelIpcChannels.getSettings);
     ipcMain.removeHandler(modelIpcChannels.updateSettings);
     ipcMain.removeHandler(modelIpcChannels.listModels);
     ipcMain.removeHandler(modelIpcChannels.complete);
     ipcMain.removeHandler(modelIpcChannels.listMessages);
+    ipcMain.removeHandler(modelIpcChannels.decideToolApproval);
     ipcMain.removeAllListeners(modelIpcChannels.streamStart);
     ipcMain.removeAllListeners(modelIpcChannels.streamCancel);
     for (const cancel of subscriptions.values()) {
@@ -110,6 +174,30 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
     }
     subscriptions.clear();
   };
+}
+
+function validateProvider(input: SaveModelProviderInput): SaveModelProviderInput {
+  const validated = validateSettings(input);
+  const formats = new Set(["anthropic", "chat-completions", "responses"]);
+  if (!formats.has(input.apiFormat)) {
+    throw new TypeError("API 格式无效");
+  }
+  return { ...validated, apiFormat: input.apiFormat };
+}
+
+function validateProviderModel(input: SaveProviderModelInput): SaveProviderModelInput {
+  if (!input || typeof input !== "object") {
+    throw new TypeError("模型配置格式无效");
+  }
+  const contextWindow = Number(input.contextWindow);
+  const maxOutputTokens = Number(input.maxOutputTokens);
+  if (!Number.isInteger(contextWindow) || contextWindow < 1 || contextWindow > 10_000_000) {
+    throw new TypeError("上下文长度必须在 1 到 10000000 之间");
+  }
+  if (!Number.isInteger(maxOutputTokens) || maxOutputTokens < 1 || maxOutputTokens > 10_000_000) {
+    throw new TypeError("最大输出 Token 必须在 1 到 10000000 之间");
+  }
+  return { modelId: requireText(input.modelId, "模型 ID"), contextWindow, maxOutputTokens };
 }
 
 interface StreamStartInput {
@@ -161,7 +249,12 @@ function validateChatRequestOptions(
     return undefined;
   }
   const model = options.model?.trim() || undefined;
-  const allowed = new Set(["low", "medium", "high", "xhigh", "max"]);
+  const allowed = new Set([
+    "none",
+    "low",
+    "high",
+    "max",
+  ]);
   const reasoningEffort = options.reasoningEffort;
   if (reasoningEffort && !allowed.has(reasoningEffort)) {
     throw new TypeError("推理强度无效");
@@ -170,7 +263,29 @@ function validateChatRequestOptions(
   if (workspacePath && workspacePath.length > 1000) {
     throw new TypeError("工作区路径过长");
   }
-  return { model, reasoningEffort, workspacePath };
+  const permissionMode = options.permissionMode;
+  const permissionModes = new Set([
+    "full_access",
+    "auto_approve",
+    "request_approval",
+  ]);
+  if (permissionMode && !permissionModes.has(permissionMode)) {
+    throw new TypeError("权限模式无效");
+  }
+  return { model, reasoningEffort, workspacePath, permissionMode };
+}
+
+function validateToolApprovalDecision(
+  decision: unknown,
+): ToolApprovalDecision {
+  if (
+    decision !== "allow_once" &&
+    decision !== "allow_always" &&
+    decision !== "deny"
+  ) {
+    throw new TypeError("工具审批决定无效");
+  }
+  return decision;
 }
 
 function validateMessages(messages: ChatMessage[]): ChatMessage[] {

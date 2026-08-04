@@ -26,10 +26,21 @@ desktop/config/dev-local.example.yml
 Electron 与 Java 使用相同的 Core 令牌；令牌至少 32 个字符，不写入已提交的示例
 配置。端口和服务地址也在这些本地 YAML 中维护。
 
-模型连接通过桌面端“设置 → 模型与 API”配置。非敏感字段和经过 Windows DPAPI
-加密的 API Key 密文统一写入 Java SQLite；Python 只在当前模型请求中临时接收
-明文，不保存到 YAML、日志或数据库。旧的 `agent/config/model-local.yml`
-已不再使用。
+模型连接通过桌面端“设置 → 模型与 API”配置。“套餐”区域仅展示 LUMORA 托管套餐
+入口；“自定义供应商”支持保存多条 BYOK 配置，并从中启用一条作为当前聊天连接。
+供应商名称、Base URL、默认模型指针和 API 格式等非敏感字段，以及经过
+Windows DPAPI 加密的 API Key 密文，统一写入 Java SQLite。Python 只在当前模型请求
+中临时接收明文，不保存到 YAML、日志或数据库。旧的
+`agent/config/model-local.yml` 已不再使用。
+
+API 格式当前可保存 `anthropic`、`chat-completions` 和 `responses`，但运行时仍使用
+现有 Chat Completions Provider；该字段用于后续协议适配，不能据此认为另外两种协议
+已经接通。
+
+每个自定义供应商可以保存多个模型 ID。上下文窗口和最大输出 Token 属于模型配置，
+不属于供应商公共字段；最大输出 Token 会作为 Chat Completions 的 `max_tokens` 发送。
+设置页获取模型目录后会补齐本地模型记录，并允许逐项测试连接、编辑或删除。供应商可
+显式禁用；没有启用供应商时，聊天请求会提示先配置模型 API。
 
 ## Python
 

@@ -174,6 +174,42 @@ Python：Agent 编排状态、模型适配和 Harness Checkpoint
 后续恢复能力应以 Java Run Snapshot 和 Python Checkpoint 共同实现。本文不把目标能力
 描述为当前已经具备的行为。
 
+### 模型供应商配置
+
+桌面设置页把模型来源分成两类：“套餐”是未来 LUMORA Managed Provider 的展示入口；
+“自定义供应商”是当前可用的 BYOK 配置。Java SQLite 的
+`model_configuration` 可保存多行供应商记录，每行包含供应商 ID、名称、Base URL、
+默认模型指针、兼容旧接口的默认上下文缓存、API 格式、DPAPI Key 密文和启用状态。模型 ID 及其上下文窗口、最大
+输出 Token 位于 `model_configuration_model` 子表。V12 迁移为旧单配置行补充
+`api_format=chat-completions` 与 `is_active=1`；V13 再把原模型字段迁移为首条模型
+配置，因此升级不会丢失原有连接。
+
+供应商的创建、修改、删除、启用和模型目录查询通过以下 Java API 暴露给 Electron
+Main，Renderer 仍只经过白名单 Preload IPC：
+
+```text
+GET    /api/v1/model/settings/providers
+POST   /api/v1/model/settings/providers
+PUT    /api/v1/model/settings/providers/{providerId}
+DELETE /api/v1/model/settings/providers/{providerId}
+POST   /api/v1/model/settings/providers/{providerId}/activate
+POST   /api/v1/model/settings/providers/{providerId}/disable
+POST   /api/v1/model/settings/providers/{providerId}/models
+POST   /api/v1/model/settings/providers/{providerId}/model-configurations
+PUT    /api/v1/model/settings/providers/{providerId}/model-configurations/{modelConfigurationId}
+DELETE /api/v1/model/settings/providers/{providerId}/model-configurations/{modelConfigurationId}
+POST   /api/v1/model/settings/providers/{providerId}/model-configurations/{modelConfigurationId}/test
+```
+
+首条自定义供应商自动启用；切换供应商时 Java 在同一事务内取消其他启用项；用户也可
+显式禁用当前供应商，使本地暂时没有启用连接。删除当前启用项时按创建时间启用剩余的
+第一项；删除供应商最后一个模型时自动禁用该供应商。模型连接测试会对指定模型发起
+最小非流式请求。现有 `GET/PUT /api/v1/model/settings` 继续映射
+当前启用项，保证对话与记忆提取链路向后兼容。`api_format` 当前允许
+`anthropic`、`chat-completions`、`responses`，但仅完成选择和持久化；实际模型请求
+仍由现有 Chat Completions Provider 执行。模型级最大输出 Token 会映射为
+Chat Completions 请求的 `max_tokens`；会话上下文占比按当前选中模型的上下文窗口计算。
+
 ### 会话消息生命周期
 
 当前会话链路使用以下 Java API：

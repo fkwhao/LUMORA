@@ -40,6 +40,7 @@ public interface ConversationService {
             String model,
             String reasoningEffort,
             String workspacePath,
+            String permissionMode,
             String correlationId,
             Consumer<ChatStreamEvent> eventConsumer,
             Runnable completionCallback,
@@ -66,6 +67,7 @@ public interface ConversationService {
             String model,
             String reasoningEffort,
             String workspacePath,
+            String permissionMode,
             String correlationId,
             Consumer<ChatStreamEvent> eventConsumer,
             Runnable completionCallback,
@@ -79,4 +81,10 @@ public interface ConversationService {
      * @return 找到并取消活动生成时为 true
      */
     boolean cancelGeneration(String taskId);
+
+    void decideToolApproval(
+            String taskId,
+            String approvalId,
+            String decision
+    );
 }

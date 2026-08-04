@@ -15,6 +15,21 @@ const thinkingTextSweep = keyframes({
   "100%": { backgroundPosition: "-50% 50%" },
 });
 
+const toolApprovalFadeIn = keyframes({
+  from: { opacity: 0 },
+  to: { opacity: 1 },
+});
+
+const toolApprovalRiseIn = keyframes({
+  from: { opacity: 0, transform: "translateY(6px) scale(.99)" },
+  to: { opacity: 1, transform: "translateY(0) scale(1)" },
+});
+
+const composerMenuIn = keyframes({
+  from: { opacity: 0, transform: "translateY(4px) scale(.985)" },
+  to: { opacity: 1, transform: "translateY(0) scale(1)" },
+});
+
 globalStyle(".task-layout", {
   display: "grid",
   gridTemplateRows: "auto minmax(0, 1fr)",
@@ -385,7 +400,7 @@ globalStyle(".user-message", {
   padding: "7px 13px",
   border: "0",
   borderRadius: "16px",
-  background: "#eef0f3",
+  background: "var(--message-bubble)",
 });
 
 globalStyle(".user-message span", {
@@ -405,13 +420,13 @@ globalStyle(".follow-up-message", {
 
 globalStyle(".user-message-meta", {
   display: "flex",
-  minHeight: "30px",
+  minHeight: "24px",
   alignItems: "center",
   justifyContent: "flex-end",
   gap: "8px",
-  padding: "4px 3px 0",
-  color: "var(--muted)",
-  fontSize: "14px",
+  padding: "3px 12px 0 0",
+  color: "var(--subtle)",
+  fontSize: "11px",
   lineHeight: "1",
   opacity: "0",
 });
@@ -428,7 +443,7 @@ globalStyle(".user-message-meta time:empty", {
 });
 
 globalStyle(".user-message-meta time", {
-  fontSize: "14px",
+  fontSize: "11px",
   fontWeight: "450",
   fontVariantNumeric: "tabular-nums",
   lineHeight: "1.4",
@@ -437,18 +452,18 @@ globalStyle(".user-message-meta time", {
 globalStyle(".user-message-actions", {
   display: "inline-flex",
   alignItems: "center",
-  gap: "2px",
+  gap: "4px",
 });
 
 globalStyle(".user-message-actions button", {
   display: "grid",
-  width: "26px",
-  height: "26px",
+  width: "22px",
+  height: "22px",
   padding: "0",
   placeItems: "center",
   color: "var(--subtle)",
   border: "0",
-  borderRadius: "7px",
+  borderRadius: "6px",
   background: "transparent",
   cursor: "pointer",
   transition: "color 120ms ease, background 120ms ease",
@@ -515,6 +530,69 @@ globalStyle(".assistant-message", {
   marginTop: "12px",
   padding: "0",
 });
+
+globalStyle(".assistant-message-group", {
+  maxWidth: "100%",
+});
+
+globalStyle(".assistant-message-meta", {
+  display: "flex",
+  minHeight: "26px",
+  alignItems: "center",
+  gap: "8px",
+  paddingTop: "3px",
+  color: "var(--subtle)",
+  opacity: "0",
+  transition: "opacity 120ms ease",
+});
+
+globalStyle(
+  ".assistant-message-group:hover .assistant-message-meta, .assistant-message-group:focus-within .assistant-message-meta",
+  {
+    opacity: "1",
+  },
+);
+
+globalStyle(".assistant-message-meta time", {
+  color: "var(--subtle)",
+  fontSize: "11px",
+  fontWeight: "450",
+  fontVariantNumeric: "tabular-nums",
+  lineHeight: "1.4",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(".assistant-message-meta time:empty", {
+  display: "none",
+});
+
+globalStyle(".assistant-message-actions", {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "4px",
+});
+
+globalStyle(".assistant-message-actions button", {
+  display: "grid",
+  width: "22px",
+  height: "22px",
+  padding: "0",
+  placeItems: "center",
+  color: "var(--subtle)",
+  border: "0",
+  borderRadius: "6px",
+  background: "transparent",
+  cursor: "pointer",
+  transition: "color 120ms ease, background 120ms ease",
+});
+
+globalStyle(
+  ".assistant-message-actions button:hover, .assistant-message-actions button.active",
+  {
+    color: "var(--ink)",
+    background: "var(--surface-soft)",
+  },
+);
 
 globalStyle(".assistant-message::before", {
   content: "none",
@@ -613,26 +691,82 @@ globalStyle(".markdown-body a:hover", {
 
 globalStyle(".markdown-body code", {
   padding: "2px 5px",
-  color: "#9f3355",
-  border: "1px solid #e3e6ea",
+  color: "inherit",
+  border: "1px solid #d0d7de",
   borderRadius: "5px",
-  background: "#f1f3f5",
+  background: "rgb(175 184 193 / 20%)",
   fontFamily:
     'var(--code-font, "Cascadia Code", "SFMono-Regular", Consolas, monospace)',
   fontSize: "0.9em",
 });
 
 globalStyle(".markdown-body pre", {
-  margin: "12px 0",
-  padding: "14px 15px",
+  margin: "0",
+  padding: "15px 16px 17px",
   overflow: "auto",
-  color: "#d9e0e8",
-  border: "1px solid #2b3038",
-  borderRadius: "10px",
-  background: "#191c22",
-  boxShadow: "inset 0 1px 0 rgb(255 255 255 / 5%)",
+  color: "#1f2328",
+  border: "0",
+  borderRadius: "0",
+  background: "var(--message-bubble)",
+  boxShadow: "none",
   lineHeight: "1.6",
   tabSize: "2",
+});
+
+globalStyle(".markdown-code-block", {
+  margin: "14px 0",
+  overflow: "hidden",
+  border: "1px solid #d0d7de",
+  borderRadius: "11px",
+  background: "var(--message-bubble)",
+  boxShadow:
+    "0 1px 2px rgb(31 35 40 / 8%), inset 0 1px 0 rgb(255 255 255 / 60%)",
+});
+
+globalStyle(".markdown-code-toolbar", {
+  display: "flex",
+  minHeight: "34px",
+  padding: "0 9px 0 13px",
+  alignItems: "center",
+  justifyContent: "space-between",
+  color: "#57606a",
+  borderBottom: "1px solid #d8dee4",
+  background: "var(--message-bubble)",
+  fontFamily: "var(--ui-font)",
+  fontSize: "10px",
+  fontWeight: "500",
+  lineHeight: "1",
+});
+
+globalStyle(".markdown-code-toolbar > span", {
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(".markdown-code-toolbar button", {
+  display: "inline-flex",
+  minHeight: "26px",
+  padding: "0 6px",
+  alignItems: "center",
+  gap: "5px",
+  color: "#57606a",
+  border: "0",
+  borderRadius: "6px",
+  background: "transparent",
+  cursor: "pointer",
+  fontSize: "10px",
+  fontWeight: "500",
+  transition: "color 140ms ease, background-color 140ms ease",
+});
+
+globalStyle(".markdown-code-toolbar button:hover", {
+  color: "#24292f",
+  background: "rgb(175 184 193 / 24%)",
+});
+
+globalStyle(".markdown-code-toolbar button.is-copied", {
+  color: "#1a7f37",
 });
 
 globalStyle(".markdown-body pre code", {
@@ -645,67 +779,90 @@ globalStyle(".markdown-body pre code", {
 });
 
 globalStyle(".markdown-body .hljs-comment,\n.markdown-body .hljs-quote", {
-  color: "#7f8a98",
+  color: "#6e7781",
   fontStyle: "italic",
 });
 
 globalStyle(
   ".markdown-body .hljs-keyword,\n.markdown-body .hljs-selector-tag,\n.markdown-body .hljs-literal,\n.markdown-body .hljs-type",
-  { color: "#c792ea" },
+  { color: "#cf222e" },
 );
 
 globalStyle(
   ".markdown-body .hljs-string,\n.markdown-body .hljs-regexp,\n.markdown-body .hljs-addition,\n.markdown-body .hljs-attribute",
-  { color: "#9acb7c" },
+  { color: "#0a3069" },
 );
 
 globalStyle(
   ".markdown-body .hljs-number,\n.markdown-body .hljs-symbol,\n.markdown-body .hljs-bullet",
-  { color: "#f2b36b" },
+  { color: "#0550ae" },
 );
 
 globalStyle(
   ".markdown-body .hljs-title,\n.markdown-body .hljs-section,\n.markdown-body .hljs-function",
-  { color: "#72b7f2" },
+  { color: "#8250df" },
 );
 
 globalStyle(
   ".markdown-body .hljs-variable,\n.markdown-body .hljs-template-variable,\n.markdown-body .hljs-params",
-  { color: "#e7a2a2" },
+  { color: "#953800" },
 );
 
 globalStyle(".markdown-body .hljs-deletion", {
-  color: "#f07178",
-  background: "rgb(240 113 120 / 12%)",
+  color: "#82071e",
+  background: "#ffebe9",
 });
 
 globalStyle(".markdown-body pre code.language-diff", {
-  color: "#c8d3df",
+  color: "#1f2328",
+});
+
+globalStyle(".markdown-table-scroll", {
+  width: "100%",
+  margin: "14px 0",
+  overflowX: "auto",
+  border: "1px solid #dfe3e8",
+  borderRadius: "10px",
+  background: "#ffffff",
+  boxShadow: "0 1px 2px rgb(20 28 38 / 4%)",
 });
 
 globalStyle(".markdown-body table", {
-  display: "block",
-  width: "100%",
-  margin: "12px 0",
-  overflowX: "auto",
-  borderCollapse: "collapse",
+  width: "max-content",
+  minWidth: "100%",
+  borderCollapse: "separate",
+  borderSpacing: "0",
 });
 
 globalStyle(".markdown-body th,\n.markdown-body td", {
   minWidth: "96px",
-  padding: "7px 9px",
-  border: "1px solid #dfe3e8",
+  padding: "8px 11px",
+  border: "0",
+  borderBottom: "1px solid #e5e8ec",
   textAlign: "left",
   verticalAlign: "top",
 });
 
+globalStyle(".markdown-body th:not(:last-child),\n.markdown-body td:not(:last-child)", {
+  borderRight: "1px solid #e9ebee",
+});
+
 globalStyle(".markdown-body th", {
-  background: "#f3f5f7",
-  fontWeight: "700",
+  color: "#4e5560",
+  background: "#f5f6f8",
+  fontWeight: "600",
 });
 
 globalStyle(".markdown-body tr:nth-child(even) td", {
-  background: "#fafbfc",
+  background: "#fafafb",
+});
+
+globalStyle(".markdown-body tbody tr:last-child td", {
+  borderBottom: "0",
+});
+
+globalStyle(".markdown-body tbody tr:hover td", {
+  background: "#f5f7f9",
 });
 
 globalStyle(".markdown-body hr", {
@@ -1264,17 +1421,18 @@ globalStyle(".scroll-to-bottom-dots i:nth-child(3)", {
 });
 
 globalStyle(".follow-up-composer", {
+  position: "relative",
   width: "100%",
   minWidth: "0",
-  padding: "12px 13px 11px",
+  padding: "13px 14px 10px",
   border: "1px solid color-mix(in srgb, var(--line) 58%, transparent)",
-  borderRadius: "20px",
+  borderRadius: "28px",
   background: "#f8f9fb",
   boxShadow: "0 1px 4px rgb(28 35 45 / 8%)",
 });
 
 globalStyle(".follow-up-composer textarea", {
-  minHeight: "46px",
+  minHeight: "56px",
   maxHeight: "180px",
   padding: "0 2px",
   fontSize: "12px",
@@ -1287,13 +1445,14 @@ globalStyle(".follow-up-composer > .composer-toolbar", {
   minWidth: "0",
   alignItems: "center",
   justifyContent: "space-between",
-  gap: "8px",
+  gap: "12px",
 });
 
-globalStyle(".composer-attach", {
-  flex: "0 1 auto",
-  minWidth: "30px",
-  whiteSpace: "nowrap",
+globalStyle(".composer-toolbar-left", {
+  display: "flex",
+  minWidth: "0",
+  alignItems: "center",
+  gap: "7px",
 });
 
 globalStyle(".composer-controls", {
@@ -1301,7 +1460,378 @@ globalStyle(".composer-controls", {
   minWidth: "0",
   alignItems: "center",
   justifyContent: "flex-end",
+  gap: "2px",
+});
+
+globalStyle(".composer-menu-anchor", {
+  position: "relative",
+  display: "inline-flex",
+  minWidth: "0",
+  alignItems: "center",
+  background: "transparent",
+});
+
+globalStyle(
+  ".follow-up-composer .composer-icon-button, .follow-up-composer .composer-permission-button, .follow-up-composer .composer-choice-button",
+  {
+    height: "30px",
+    minHeight: "30px",
+    padding: "0",
+    color: "var(--muted)",
+    border: "0",
+    borderRadius: "999px",
+    background: "transparent !important",
+    boxShadow: "none",
+    fontFamily: "inherit",
+    fontSize: "12px",
+    fontWeight: "520",
+    lineHeight: "1",
+  },
+);
+
+globalStyle(".follow-up-composer .composer-icon-button", {
+  width: "30px",
+  minWidth: "30px",
+});
+
+globalStyle(".follow-up-composer .composer-permission-button", {
+  maxWidth: "126px",
+  gap: "6px",
+  padding: "0 5px",
+  whiteSpace: "nowrap",
+  transition: "color 120ms ease, background-color 120ms ease",
+});
+
+globalStyle(".follow-up-composer .composer-permission-button > svg", {
+  flex: "0 0 auto",
+});
+
+globalStyle(".follow-up-composer .composer-permission-button.is-dangerous", {
+  color: "#ff7a2f",
+});
+
+globalStyle(
+  ".follow-up-composer .composer-permission-button.is-dangerous:hover:not(:disabled), .follow-up-composer .composer-permission-button.is-dangerous[aria-expanded='true']",
+  {
+    color: "#ff8a42",
+    background: "rgb(255 122 47 / 9%) !important",
+  },
+);
+
+globalStyle(
+  ".follow-up-composer .composer-icon-button:hover:not(:disabled), .follow-up-composer .composer-permission-button:hover:not(:disabled), .follow-up-composer .composer-choice-button:hover:not(:disabled)",
+  {
+    color: "var(--ink)",
+    borderColor: "transparent",
+    background: "color-mix(in srgb, var(--ink) 8%, transparent) !important",
+  },
+);
+
+globalStyle(
+  ".follow-up-composer .composer-icon-button[aria-expanded='true']",
+  {
+    color: "var(--ink)",
+    background: "color-mix(in srgb, var(--ink) 9%, transparent) !important",
+  },
+);
+
+globalStyle(
+  ".follow-up-composer .composer-permission-button[aria-expanded='true'], .follow-up-composer .composer-choice-button[aria-expanded='true']",
+  {
+    color: "var(--ink)",
+    background: "transparent !important",
+  },
+);
+
+globalStyle(".follow-up-composer .model-choice-button", {
+  maxWidth: "190px",
+  padding: "0 6px",
+  color: "var(--ink)",
+  fontSize: "13px",
+  fontWeight: "560",
+});
+
+globalStyle(".model-choice-button > span", {
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(".follow-up-composer .reasoning-choice-button", {
+  minWidth: "45px",
   gap: "3px",
+  padding: "0 4px",
+});
+
+globalStyle(".follow-up-composer .composer-mic-button", {
+  marginLeft: "2px",
+});
+
+globalStyle(".composer-popover", {
+  position: "absolute",
+  zIndex: "55",
+  bottom: "calc(100% + 9px)",
+  left: "0",
+  display: "grid",
+  width: "210px",
+  gap: "2px",
+  padding: "6px",
+  color: "var(--ink)",
+  border: "1px solid var(--line-strong)",
+  borderRadius: "12px",
+  background: "color-mix(in srgb, var(--surface) 94%, var(--ink) 6%)",
+  boxShadow: "0 16px 44px rgb(0 0 0 / 24%)",
+  animation: `${composerMenuIn} 120ms cubic-bezier(.2,.75,.25,1)`,
+});
+
+globalStyle(".composer-popover.align-right", {
+  right: "0",
+  left: "auto",
+});
+
+globalStyle(".composer-popover > b", {
+  padding: "6px 8px 5px",
+  color: "var(--subtle)",
+  fontSize: "10px",
+  fontWeight: "560",
+});
+
+globalStyle(".follow-up-composer .composer-popover > button", {
+  display: "grid",
+  width: "100%",
+  minHeight: "36px",
+  gridTemplateColumns: "18px minmax(0, 1fr)",
+  alignItems: "center",
+  justifyContent: "stretch",
+  gap: "7px",
+  padding: "6px 8px",
+  color: "var(--muted)",
+  border: "0",
+  borderRadius: "8px",
+  background: "transparent !important",
+  boxShadow: "none",
+  textAlign: "left",
+  fontSize: "12px",
+});
+
+globalStyle(
+  ".follow-up-composer .reasoning-popover > button, .follow-up-composer .model-picker-popover > button",
+  {
+    gridTemplateColumns: "minmax(0, 1fr) 18px",
+    gap: "7px",
+  },
+);
+
+globalStyle(".follow-up-composer .composer-popover > button.is-selected", {
+  color: "var(--ink)",
+  background: "transparent !important",
+});
+
+globalStyle(".follow-up-composer .composer-popover > button:hover", {
+  color: "var(--ink)",
+  borderColor: "transparent !important",
+  background: "color-mix(in srgb, var(--ink) 7%, transparent) !important",
+});
+
+globalStyle(".composer-popover button > span", {
+  minWidth: "0",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(".composer-popover button > small", {
+  color: "var(--subtle)",
+  fontSize: "10px",
+  lineHeight: "1.35",
+});
+
+globalStyle(".composer-option-copy", {
+  display: "grid",
+  minWidth: "0",
+  gap: "2px",
+  overflow: "visible !important",
+  whiteSpace: "normal !important",
+});
+
+globalStyle(".composer-option-copy strong", {
+  color: "var(--ink)",
+  fontSize: "12px",
+  fontWeight: "560",
+  lineHeight: "1.25",
+});
+
+globalStyle(".composer-option-copy small", {
+  color: "var(--subtle)",
+  fontSize: "10px",
+  lineHeight: "1.35",
+});
+
+globalStyle(".composer-option-check", {
+  justifySelf: "end",
+  color: "var(--ink)",
+});
+
+globalStyle(".model-picker-popover", {
+  width: "260px",
+  maxHeight: "280px",
+  overflowY: "auto",
+});
+
+globalStyle(".follow-up-composer .model-picker-popover > button", {
+  minHeight: "34px",
+});
+
+globalStyle(".reasoning-popover", {
+  width: "180px",
+});
+
+globalStyle(".context-picker-popover", {
+  right: "0",
+  left: "0",
+  width: "100%",
+  maxHeight: "390px",
+  gap: "3px",
+  padding: "8px",
+  overflowY: "auto",
+  borderRadius: "18px",
+});
+
+globalStyle(".follow-up-composer .context-picker-popover > button", {
+  minHeight: "48px",
+  gridTemplateColumns: "22px minmax(0, 1fr)",
+  padding: "7px 11px",
+});
+
+globalStyle(".context-picker-popover button > span", {
+  display: "grid",
+  gap: "2px",
+  overflow: "visible",
+  whiteSpace: "normal",
+});
+
+globalStyle(".context-picker-popover button strong", {
+  color: "var(--ink)",
+  fontSize: "12.5px",
+  fontWeight: "560",
+  lineHeight: "1.25",
+});
+
+globalStyle(".context-picker-popover button small", {
+  color: "var(--subtle)",
+  fontSize: "10.5px",
+});
+
+globalStyle(".context-picker-section", {
+  margin: "4px -8px 0",
+  padding: "9px 18px 5px",
+  color: "var(--subtle)",
+  borderTop: "1px solid var(--line)",
+  fontSize: "10.5px",
+  fontWeight: "560",
+});
+
+globalStyle(".permission-popover", {
+  width: "330px",
+  padding: "8px",
+});
+
+globalStyle(".permission-popover-header", {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  padding: "2px 8px 7px",
+  color: "var(--subtle)",
+  fontSize: "10.5px",
+});
+
+globalStyle(".follow-up-composer .permission-popover-header > button", {
+  minHeight: "auto",
+  padding: "0",
+  color: "var(--subtle)",
+  border: "0",
+  background: "transparent !important",
+  textDecoration: "underline",
+  textUnderlineOffset: "2px",
+  fontSize: "10.5px",
+});
+
+globalStyle(".follow-up-composer .permission-popover > button", {
+  minHeight: "56px",
+  gridTemplateColumns: "24px minmax(0, 1fr) 18px",
+  gap: "8px",
+  padding: "8px 9px",
+});
+
+globalStyle(".permission-option-icon", {
+  display: "grid",
+  width: "24px",
+  placeItems: "center",
+  color: "var(--muted)",
+});
+
+globalStyle(".permission-option-icon > svg", {
+  overflow: "visible",
+});
+
+globalStyle(
+  ".permission-popover > button.is-selected:not(.is-dangerous) .permission-option-icon",
+  {
+    color: "var(--ink)",
+  },
+);
+
+globalStyle(".permission-option-copy", {
+  display: "grid",
+  minWidth: "0",
+  gap: "3px",
+  overflow: "visible !important",
+  whiteSpace: "normal !important",
+});
+
+globalStyle(".permission-option-copy strong", {
+  color: "var(--ink)",
+  fontSize: "12.5px",
+  fontWeight: "580",
+});
+
+globalStyle(".permission-option-check", {
+  color: "var(--ink)",
+});
+
+globalStyle(
+  ".permission-popover > button.is-dangerous .permission-option-icon, .permission-popover > button.is-dangerous .permission-option-copy strong, .permission-popover > button.is-dangerous .permission-option-copy small, .permission-popover > button.is-dangerous .permission-option-check",
+  {
+    color: "#ff7a2f",
+  },
+);
+
+globalStyle(".permission-popover > button.is-dangerous:hover", {
+  background: "rgb(255 122 47 / 8%) !important",
+});
+
+globalStyle(".composer-permission-button > span", {
+  "@media": {
+    "(max-width: 720px)": {
+      display: "none",
+    },
+  },
+});
+
+globalStyle(".follow-up-composer .model-choice-button", {
+  "@media": {
+    "(max-width: 620px)": {
+      maxWidth: "92px",
+    },
+  },
+});
+
+globalStyle(".follow-up-composer .composer-mic-button", {
+  "@media": {
+    "(max-width: 520px)": {
+      display: "none",
+    },
+  },
 });
 
 globalStyle(".context-usage-control", {
@@ -1475,8 +2005,8 @@ globalStyle(".model-select", {
 });
 
 globalStyle(".follow-up-composer .send-follow-up", {
-  width: "32px",
-  height: "32px",
+  width: "36px",
+  height: "36px",
   padding: "0",
   color: "var(--surface)",
   border: "0",
@@ -1576,6 +2106,124 @@ globalStyle(".review-pane", {
   borderLeft: "1px solid var(--line)",
   background: "var(--surface)",
 });
+
+globalStyle(".tool-approval-backdrop", {
+  position: "fixed",
+  inset: "0",
+  zIndex: "80",
+  display: "grid",
+  placeItems: "center",
+  padding: "24px",
+  background: "rgb(0 0 0 / 42%)",
+  backdropFilter: "blur(2px)",
+  animation: `${toolApprovalFadeIn} 140ms ease-out`,
+});
+
+globalStyle(".tool-approval-dialog", {
+  width: "min(468px, calc(100vw - 48px))",
+  padding: "20px",
+  color: "var(--ink)",
+  border: "1px solid var(--line-strong)",
+  borderRadius: "14px",
+  background: "var(--surface)",
+  boxShadow: "0 24px 70px rgb(0 0 0 / 32%)",
+  animation: `${toolApprovalRiseIn} 160ms cubic-bezier(.2,.8,.2,1)`,
+});
+
+globalStyle(".tool-approval-heading", {
+  display: "flex",
+  alignItems: "flex-start",
+  gap: "12px",
+});
+
+globalStyle(".tool-approval-icon", {
+  display: "grid",
+  width: "34px",
+  height: "34px",
+  flex: "0 0 auto",
+  placeItems: "center",
+  color: "#d28a22",
+  borderRadius: "9px",
+  background: "rgb(210 138 34 / 12%)",
+});
+
+globalStyle(".tool-approval-heading h2", {
+  margin: "0",
+  fontSize: "15px",
+  fontWeight: "600",
+  lineHeight: "1.4",
+});
+
+globalStyle(".tool-approval-heading p", {
+  margin: "3px 0 0",
+  color: "var(--muted)",
+  fontSize: "13px",
+});
+
+globalStyle(".tool-approval-command", {
+  maxHeight: "180px",
+  margin: "16px 0 0",
+  padding: "11px 12px",
+  overflow: "auto",
+  color: "var(--ink)",
+  border: "1px solid var(--line)",
+  borderRadius: "9px",
+  background: "var(--message-bubble)",
+  fontFamily: "var(--font-code)",
+  fontSize: "12px",
+  lineHeight: "1.55",
+  whiteSpace: "pre-wrap",
+  overflowWrap: "anywhere",
+});
+
+globalStyle(".tool-approval-reason", {
+  margin: "13px 0 0",
+  color: "var(--muted)",
+  fontSize: "12px",
+  lineHeight: "1.55",
+});
+
+globalStyle(".tool-approval-risk", {
+  display: "flex",
+  gap: "8px",
+  marginTop: "9px",
+  color: "var(--muted)",
+  fontSize: "11px",
+});
+
+globalStyle(".tool-approval-risk span + span::before", {
+  marginRight: "8px",
+  content: "·",
+});
+
+globalStyle(".tool-approval-actions", {
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: "8px",
+  marginTop: "18px",
+});
+
+globalStyle(".tool-approval-actions button", {
+  minHeight: "34px",
+  padding: "0 13px",
+  color: "var(--ink)",
+  border: "1px solid var(--line-strong)",
+  borderRadius: "8px",
+  background: "transparent",
+  cursor: "pointer",
+});
+
+globalStyle(".tool-approval-actions button.primary", {
+  color: "var(--surface)",
+  borderColor: "var(--ink)",
+  background: "var(--ink)",
+});
+
+globalStyle(".tool-approval-actions button:disabled", {
+  cursor: "wait",
+  opacity: "0.52",
+});
+
 
 globalStyle(".review-resize-handle", {
   position: "absolute",

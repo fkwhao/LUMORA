@@ -4,6 +4,8 @@ import type {
   ChatMessage,
   ChatRequestOptions,
   LumoraModelApi,
+  ToolApprovalDecision,
+  ToolApprovalRequest,
 } from "../../../shared/model-contract";
 import type {
   ApprovalDecision,
@@ -41,6 +43,8 @@ export interface TaskState {
   messages: ChatMessage[];
   taskEvents: TaskEvent[];
   taskProjectPaths: Record<string, string>;
+  pendingToolApproval?: ToolApprovalRequest;
+  isDecidingToolApproval: boolean;
   loadRecentTasks(): Promise<void>;
   openTask(taskId: string): Promise<void>;
   createTask(goal: string, projectPath?: string): Promise<TaskSnapshot>;
@@ -52,6 +56,7 @@ export interface TaskState {
     options?: ChatRequestOptions,
   ): Promise<void>;
   decideApproval(decision: ApprovalDecision): Promise<TaskSnapshot>;
+  decideToolApproval(decision: ToolApprovalDecision): Promise<void>;
   archiveTask(taskId: string): void;
   restoreTask(taskId: string): void;
   deleteArchivedTask(taskId: string): void;
@@ -86,6 +91,8 @@ export function createTaskStore(
     messages: [],
     taskEvents: [],
     taskProjectPaths: loadTaskProjectPaths(),
+    pendingToolApproval: undefined,
+    isDecidingToolApproval: false,
 
     async loadRecentTasks() {
       set({ isLoadingHistory: true });
@@ -130,6 +137,8 @@ export function createTaskStore(
           chatWasStopped: false,
           chatStartedAt: undefined,
           lastChatDurationMs: undefined,
+          pendingToolApproval: undefined,
+          isDecidingToolApproval: false,
         });
       } catch (error) {
         set({
@@ -406,6 +415,28 @@ export function createTaskStore(
       return merged;
     },
 
+    async decideToolApproval(decision) {
+      const taskId = get().activeTask?.taskId;
+      const approval = get().pendingToolApproval;
+      if (!taskId || !approval || !modelApi) {
+        throw new Error("当前没有待处理的工具审批");
+      }
+      set({ isDecidingToolApproval: true, chatError: undefined });
+      try {
+        await modelApi.decideToolApproval(
+          taskId,
+          approval.approvalId,
+          decision,
+        );
+      } catch (error) {
+        set({
+          isDecidingToolApproval: false,
+          chatError: toErrorMessage(error),
+        });
+        throw error;
+      }
+    },
+
     archiveTask(taskId) {
       const archivedTaskIds = [
         taskId,
@@ -512,6 +543,8 @@ export function createTaskStore(
         chatWasStopped: false,
         chatStartedAt: undefined,
         lastChatDurationMs: undefined,
+        pendingToolApproval: undefined,
+        isDecidingToolApproval: false,
       });
     },
 

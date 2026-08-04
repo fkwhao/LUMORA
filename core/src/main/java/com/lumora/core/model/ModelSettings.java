@@ -1,5 +1,7 @@
 package com.lumora.core.model;
 
+import java.util.List;
+
 public class ModelSettings {
 
     private final String providerName;
@@ -7,6 +9,7 @@ public class ModelSettings {
     private final String model;
     private final int contextWindow;
     private final boolean apiKeyConfigured;
+    private final List<ProviderModel> models;
 
     public ModelSettings(
             String providerName,
@@ -15,11 +18,24 @@ public class ModelSettings {
             int contextWindow,
             boolean apiKeyConfigured
     ) {
+        this(providerName, baseUrl, model, contextWindow,
+                apiKeyConfigured, List.of());
+    }
+
+    public ModelSettings(
+            String providerName,
+            String baseUrl,
+            String model,
+            int contextWindow,
+            boolean apiKeyConfigured,
+            List<ProviderModel> models
+    ) {
         this.providerName = providerName;
         this.baseUrl = baseUrl;
         this.model = model;
         this.contextWindow = contextWindow;
         this.apiKeyConfigured = apiKeyConfigured;
+        this.models = List.copyOf(models);
     }
 
     public String getProviderName() {
@@ -40,5 +56,9 @@ public class ModelSettings {
 
     public boolean isApiKeyConfigured() {
         return apiKeyConfigured;
+    }
+
+    public List<ProviderModel> getModels() {
+        return models;
     }
 }

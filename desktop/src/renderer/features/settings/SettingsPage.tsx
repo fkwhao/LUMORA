@@ -2,22 +2,31 @@ import {
   Archive,
   ArrowLeft,
   Bot,
+  Box,
+  Cable,
   Check,
-  KeyRound,
+  ChevronDown,
+  CircleCheck,
+  Eye,
+  EyeOff,
   LockKeyhole,
   Palette,
+  Pencil,
+  Plus,
   RefreshCw,
   RotateCcw,
   Search,
-  Server,
-  Sparkles,
   Trash2,
+  X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type {
+  ApiFormat,
   LumoraModelApi,
-  ModelSettings,
+  ModelProvider,
+  ProviderModel,
+  SaveProviderModelInput,
 } from "../../../shared/model-contract";
 import type { TaskSummary } from "../../../shared/task-contract";
 import { AppearancePage } from "./AppearancePage";
@@ -32,26 +41,13 @@ interface SettingsPageProps {
   notify(message: string, tone?: "info" | "success"): void;
 }
 
-interface ProviderPreset {
-  name: string;
-  baseUrl: string;
-  defaultModel?: string;
-}
-
-const providerPresets: ProviderPreset[] = [
-  {
-    name: "OpenAI Compatible",
-    baseUrl: "https://api.openai.com/v1",
-  },
-  {
-    name: "DeepSeek",
-    baseUrl: "https://api.deepseek.com",
-    defaultModel: "deepseek-v4-pro",
-  },
-  {
-    name: "Qwen",
-    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-  },
+const apiFormatOptions: Array<{
+  value: ApiFormat;
+  label: string;
+}> = [
+  { value: "anthropic", label: "Anthropic Messages (/v1/messages)" },
+  { value: "chat-completions", label: "Chat Completions (/chat/completions)" },
+  { value: "responses", label: "Responses (/responses)" },
 ];
 
 type SettingsSection = "model" | "appearance" | "archived";
@@ -339,28 +335,60 @@ function ArchivedTasksPanel({
 }
 
 function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
-  const [settings, setSettings] = useState<ModelSettings>();
-  const [providerName, setProviderName] = useState("OpenAI Compatible");
-  const [baseUrl, setBaseUrl] = useState("https://api.openai.com/v1");
+  const [providers, setProviders] = useState<ModelProvider[]>([]);
+  const [selectedId, setSelectedId] = useState<string>();
+  const [providerName, setProviderName] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
   const [model, setModel] = useState("");
   const [contextWindow, setContextWindow] = useState(128_000);
   const [apiKey, setApiKey] = useState("");
+  const [apiFormat, setApiFormat] =
+    useState<ApiFormat>("chat-completions");
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [renamingProvider, setRenamingProvider] = useState(false);
+  const [addingProvider, setAddingProvider] = useState(false);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [editingModel, setEditingModel] = useState<ProviderModel | "new">();
+  const [testingModelId, setTestingModelId] = useState<string>();
+  const [connectedModelId, setConnectedModelId] = useState<string>();
   const [isListingModels, setIsListingModels] = useState(false);
   const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [error, setError] = useState<string>();
 
+  const selectedProvider = providers.find(
+    (provider) => provider.providerId === selectedId,
+  );
+
+  function editProvider(provider: ModelProvider) {
+    setSelectedId(provider.providerId);
+    setProviderName(provider.providerName);
+    setBaseUrl(provider.baseUrl);
+    setModel(provider.model);
+    setContextWindow(provider.contextWindow);
+    setApiFormat(provider.apiFormat);
+    setApiKey("");
+    setAvailableModels([]);
+    setAddingProvider(false);
+    setRenamingProvider(false);
+    setError(undefined);
+  }
+
+  async function reloadProviders(preferredId?: string) {
+    const loaded = await api.listProviders();
+    setProviders(loaded);
+    const next = loaded.find((provider) => provider.providerId === preferredId)
+      ?? loaded.find((provider) => provider.active)
+      ?? loaded[0];
+    if (next) {
+      editProvider(next);
+    } else {
+      beginAddingProvider();
+    }
+    return loaded;
+  }
+
   useEffect(() => {
-    void api
-      .getSettings()
-      .then((loaded) => {
-        const normalized = normalizeLegacyDeepSeekSettings(loaded);
-        setSettings(loaded);
-        setProviderName(normalized.providerName);
-        setBaseUrl(normalized.baseUrl);
-        setModel(normalized.model);
-        setContextWindow(normalized.contextWindow);
-      })
+    void reloadProviders()
       .catch((loadError: unknown) => setError(toMessage(loadError)));
   }, [api]);
 
@@ -369,14 +397,18 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
     setStatus("saving");
     setError(undefined);
     try {
-      const updated = await api.updateSettings({
+      const input = {
         providerName,
         baseUrl,
         model,
         contextWindow,
+        apiFormat,
         apiKey: apiKey.trim() || undefined,
-      });
-      setSettings(updated);
+      };
+      const updated = addingProvider
+        ? await api.createProvider(input)
+        : await api.updateProvider(selectedId!, input);
+      await reloadProviders(updated.providerId);
       setApiKey("");
       setStatus("saved");
       window.setTimeout(() => setStatus("idle"), 1800);
@@ -390,15 +422,15 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
     setIsListingModels(true);
     setError(undefined);
     try {
-      const models = await api.listModels({
-        providerName,
-        baseUrl,
-        apiKey: apiKey.trim() || undefined,
-      });
-      setAvailableModels(models);
-      if (!model.trim() && models[0]) {
-        setModel(models[0]);
+      if (!selectedId || addingProvider) {
+        throw new Error("请先保存供应商，再获取模型列表");
       }
+      const models = await api.listProviderModels(
+        selectedId,
+        apiKey.trim() || undefined,
+      );
+      setAvailableModels(models);
+      await reloadProviders(selectedId);
     } catch (listError) {
       setError(toMessage(listError));
     } finally {
@@ -406,119 +438,214 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
     }
   }
 
-  function applyPreset(name: string) {
-    const preset = providerPresets.find((item) => item.name === name);
-    setProviderName(name);
-    if (preset) {
-      setBaseUrl(preset.baseUrl);
-      if (preset.defaultModel) {
-        setModel(preset.defaultModel);
+  function beginAddingProvider() {
+    setSelectedId(undefined);
+    setProviderName("");
+    setBaseUrl("");
+    setModel("");
+    setApiKey("");
+    setAvailableModels([]);
+    setAddingProvider(true);
+    setRenamingProvider(true);
+    setApiFormat("chat-completions");
+    setContextWindow(128_000);
+    setError(undefined);
+  }
+  async function toggleProviderEnabled() {
+    if (!selectedId) return;
+    try {
+      if (selectedProvider?.active) {
+        await api.disableProvider(selectedId);
+      } else {
+        await api.activateProvider(selectedId);
       }
+      await reloadProviders(selectedId);
+    } catch (toggleError) {
+      setError(toMessage(toggleError));
+    }
+  }
+
+  async function saveProviderModel(input: SaveProviderModelInput) {
+    if (!selectedId) return;
+    if (editingModel === "new") {
+      await api.createProviderModel(selectedId, input);
+    } else if (editingModel) {
+      await api.updateProviderModel(
+        selectedId,
+        editingModel.modelConfigurationId,
+        input,
+      );
+    }
+    setEditingModel(undefined);
+    await reloadProviders(selectedId);
+  }
+
+  async function deleteModel(providerModel: ProviderModel) {
+    if (!selectedId || !window.confirm(`确定删除模型“${providerModel.modelId}”吗？`)) return;
+    try {
+      await api.deleteProviderModel(
+        selectedId,
+        providerModel.modelConfigurationId,
+      );
+      await reloadProviders(selectedId);
+    } catch (deleteError) {
+      setError(toMessage(deleteError));
+    }
+  }
+
+  async function testModel(providerModel: ProviderModel) {
+    if (!selectedId) return;
+    setTestingModelId(providerModel.modelConfigurationId);
+    setConnectedModelId(undefined);
+    setError(undefined);
+    try {
+      await api.testProviderModel(
+        selectedId,
+        providerModel.modelConfigurationId,
+      );
+      setConnectedModelId(providerModel.modelConfigurationId);
+    } catch (testError) {
+      setError(`模型 ${providerModel.modelId} 连接失败：${toMessage(testError)}`);
+    } finally {
+      setTestingModelId(undefined);
+    }
+  }
+
+  async function deleteSelected() {
+    if (!selectedId || !window.confirm(`确定删除供应商“${providerName}”吗？`)) {
+      return;
+    }
+    try {
+      await api.deleteProvider(selectedId);
+      const remaining = await reloadProviders();
+      if (remaining.length === 0) beginAddingProvider();
+    } catch (deleteError) {
+      setError(toMessage(deleteError));
     }
   }
 
   return (
-    <main className="settings-layout">
-      <header className="page-toolbar settings-toolbar">
+    <main className="settings-layout model-settings-layout">
+      <header className="model-settings-page-header">
         <div>
-          <span className="eyebrow">设置</span>
-          <h1>模型连接</h1>
-          <p>配置 LUMORA 对话和后续 Agent 执行使用的模型接口。</p>
+          <h1>模型设置</h1>
+          <p>管理自定义模型供应商，配置后可在聊天时选择使用。</p>
         </div>
-        <div className="settings-security-note">
-          <LockKeyhole size={16} />
-          <span>仅保存在本机</span>
-        </div>
+        <button
+          className="model-settings-refresh"
+          type="button"
+          aria-label="获取模型列表"
+          title="获取模型列表"
+          disabled={
+            isListingModels || addingProvider || !selectedId ||
+            (!apiKey.trim() && !selectedProvider?.apiKeyConfigured)
+          }
+          onClick={() => void listModels()}
+        >
+          <RefreshCw
+            size={16}
+            className={isListingModels ? "is-spinning" : undefined}
+          />
+        </button>
       </header>
 
-      <div className="settings-content">
-        <section className="settings-intro">
-          <span><Sparkles size={18} /></span>
-          <div>
-            <strong>OpenAI 兼容接口</strong>
-            <p>
-              第一版支持 Chat Completions 契约，可连接 OpenAI、DeepSeek、
-              通义千问兼容模式及其他兼容供应商。
-            </p>
-          </div>
-        </section>
+      <section className="model-provider-workspace">
+        <aside className="model-provider-sidebar" aria-label="模型供应商">
+          <span className="model-provider-section-label">套餐</span>
+          <button
+            className="model-provider-item builtin"
+            type="button"
+            disabled
+            aria-label="BigModel 套餐暂未开放"
+          >
+            <span className="provider-logo bigmodel">◆</span>
+            <strong>BigModel</strong>
+            <i />
+          </button>
 
-        <form className="model-settings-card" onSubmit={save}>
-          <div className="settings-card-heading">
-            <div>
-              <span className="settings-icon"><Server size={17} /></span>
-              <div>
-                <strong>连接参数</strong>
-                <p>远程接口必须使用 HTTPS，本机模型允许 127.0.0.1。</p>
-              </div>
-            </div>
-            <span className={settings?.apiKeyConfigured ? "key-state ready" : "key-state"}>
-              {settings?.apiKeyConfigured ? <Check size={12} /> : <KeyRound size={12} />}
-              {settings?.apiKeyConfigured ? "Key 已配置" : "等待配置"}
-            </span>
-          </div>
-
-          <div className="settings-form-grid">
-            <label>
-              <span>供应商</span>
-              <select
-                value={providerName}
-                onChange={(event) => applyPreset(event.target.value)}
+          <span className="model-provider-section-label custom">
+            自定义供应商
+          </span>
+          {providers.map((provider) => {
+            const selected = provider.providerId === selectedId;
+            return (
+              <button
+                className={`model-provider-item${selected ? " active" : ""}`}
+                type="button"
+                key={provider.providerId}
+                onClick={() => editProvider(provider)}
               >
-                {providerPresets.map((provider) => (
-                  <option value={provider.name} key={provider.name}>
-                    {provider.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>上下文长度（Token）</span>
-              <input
-                type="number"
-                min={1}
-                max={10_000_000}
-                step={1}
-                value={contextWindow}
-                onChange={(event) =>
-                  setContextWindow(Number(event.target.value))
-                }
-                required
-              />
-            </label>
-            <label className="field-wide">
-              <span>模型名称</span>
-              <div className="model-discovery-control">
+                <Box size={16} strokeWidth={1.7} />
+                <strong>{provider.providerName}</strong>
+                <i className={provider.active ? "ready" : ""} />
+              </button>
+            );
+          })}
+          <button
+            className={`model-provider-add${addingProvider ? " active" : ""}`}
+            type="button"
+            onClick={beginAddingProvider}
+          >
+            <Plus size={17} />
+            添加供应商
+          </button>
+        </aside>
+
+        <form className="model-provider-detail" onSubmit={save}>
+          <header className="model-provider-detail-header">
+            <div className="model-provider-title">
+              <Box size={18} strokeWidth={1.7} />
+              {renamingProvider ? (
                 <input
-                  list="available-models"
-                  value={model}
-                  onChange={(event) => setModel(event.target.value)}
-                  placeholder="先获取列表，或手动输入模型 ID"
-                  required
+                  aria-label="供应商名称"
+                  autoFocus
+                  value={providerName}
+                  onBlur={() => setRenamingProvider(false)}
+                  onChange={(event) => setProviderName(event.target.value)}
                 />
-                <button
-                  type="button"
-                  onClick={() => void listModels()}
-                  disabled={isListingModels || (!apiKey.trim() && !settings?.apiKeyConfigured)}
-                >
-                  <RefreshCw
-                    size={14}
-                    className={isListingModels ? "is-spinning" : undefined}
-                  />
-                  {isListingModels ? "获取中" : "获取模型"}
-                </button>
-              </div>
-              <datalist id="available-models">
-                {availableModels.map((availableModel) => (
-                  <option value={availableModel} key={availableModel} />
-                ))}
-              </datalist>
-              {availableModels.length > 0 && (
-                <small>已获取 {availableModels.length} 个可用模型</small>
+              ) : (
+                <strong>{providerName || "添加模型供应商"}</strong>
               )}
-            </label>
-            <label className="field-wide">
-              <span>API Base URL</span>
+              <button
+                type="button"
+                aria-label="修改供应商名称"
+                title="修改供应商名称"
+                onClick={() => setRenamingProvider(true)}
+              >
+                <Pencil size={15} />
+              </button>
+              <span
+                className={
+                  selectedProvider?.active
+                    ? "provider-enabled-state ready"
+                    : "provider-enabled-state"
+                }
+              >
+                {selectedProvider?.active ? "已启用" : "未启用"}
+              </span>
+            </div>
+            <div className="provider-header-actions">
+              {!addingProvider && (
+                <button type="button" onClick={() => void toggleProviderEnabled()}>
+                  {selectedProvider?.active ? "禁用" : "启用"}
+                </button>
+              )}
+              {!addingProvider && (
+                <button
+                  className="danger"
+                  type="button"
+                  aria-label="删除供应商"
+                  onClick={() => void deleteSelected()}
+                >
+                  <Trash2 size={15} />
+                </button>
+              )}
+            </div>
+          </header>
+
+          <div className="model-provider-fields">
+            <label className="provider-field">
+              <span>Base URL</span>
               <input
                 value={baseUrl}
                 onChange={(event) => setBaseUrl(event.target.value)}
@@ -526,39 +653,414 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
                 required
               />
             </label>
-            <label className="field-wide">
-              <span>API Key</span>
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(event) => setApiKey(event.target.value)}
-                placeholder={
-                  settings?.apiKeyConfigured
-                    ? "已配置；留空表示保持现有 Key"
-                    : "输入供应商 API Key"
-                }
-                required={!settings?.apiKeyConfigured}
-                autoComplete="off"
-              />
+
+            <label className="provider-field">
+              <span>API 格式</span>
+              <ApiFormatSelect value={apiFormat} onChange={setApiFormat} />
+              <small>当前仅保存界面选择，调用仍沿用现有兼容接口。</small>
             </label>
+
+            <label className="provider-field">
+              <span>API Key</span>
+              <span className="provider-secret-input">
+                <input
+                  type={showApiKey ? "text" : "password"}
+                  value={apiKey}
+                  onChange={(event) => setApiKey(event.target.value)}
+                  placeholder={
+                    selectedProvider?.apiKeyConfigured
+                      ? "已配置；留空表示保持现有 Key"
+                      : "输入供应商 API Key"
+                  }
+                  required={addingProvider || !selectedProvider?.apiKeyConfigured}
+                  autoComplete="off"
+                />
+                <button
+                  type="button"
+                  aria-label={showApiKey ? "隐藏 API Key" : "显示 API Key"}
+                  onClick={() => setShowApiKey((visible) => !visible)}
+                >
+                  {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </span>
+            </label>
+
+            <section className="provider-models-section">
+              <header>
+                <div>
+                  <span>模型列表</span>
+                  {(selectedProvider?.models.length ?? 0) > 0 && (
+                    <small>{selectedProvider?.models.length} 个已配置模型</small>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  disabled={
+                    isListingModels || addingProvider || !selectedId ||
+                    (!apiKey.trim() && !selectedProvider?.apiKeyConfigured)
+                  }
+                  onClick={() => void listModels()}
+                >
+                  <RefreshCw
+                    size={14}
+                    className={isListingModels ? "is-spinning" : undefined}
+                  />
+                  {isListingModels ? "获取中" : "获取模型"}
+                </button>
+              </header>
+
+              <div className="provider-model-list">
+                {addingProvider ? (
+                  <div className="provider-model-row selected">
+                    <input
+                      list="available-models"
+                      value={model}
+                      onChange={(event) => setModel(event.target.value)}
+                      placeholder="输入初始模型 ID"
+                      required
+                    />
+                    <span>保存后可配置 Token</span>
+                  </div>
+                ) : selectedProvider?.models.length ? (
+                  selectedProvider.models.map((providerModel) => (
+                    <div
+                      className={`provider-model-row${providerModel.modelId === selectedProvider.model ? " selected" : ""}`}
+                      key={providerModel.modelConfigurationId}
+                    >
+                      <div className="provider-model-identity">
+                        <strong>{providerModel.modelId}</strong>
+                        <small>
+                          {formatContextWindow(providerModel.contextWindow)} 上下文
+                          · {formatContextWindow(providerModel.maxOutputTokens)} 输出
+                        </small>
+                      </div>
+                      <div className="provider-model-actions">
+                        <button
+                          type="button"
+                          aria-label={`测试 ${providerModel.modelId} 连接`}
+                          title={connectedModelId === providerModel.modelConfigurationId ? "连接成功" : "测试连接"}
+                          onClick={() => void testModel(providerModel)}
+                        >
+                          {connectedModelId === providerModel.modelConfigurationId ? (
+                            <CircleCheck size={15} />
+                          ) : (
+                            <Cable
+                              size={15}
+                              className={testingModelId === providerModel.modelConfigurationId ? "is-pulsing" : undefined}
+                            />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`编辑 ${providerModel.modelId}`}
+                          title="编辑模型配置"
+                          onClick={() => setEditingModel(providerModel)}
+                        >
+                          <Pencil size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`删除 ${providerModel.modelId}`}
+                          title="删除模型"
+                          onClick={() => void deleteModel(providerModel)}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="provider-model-empty">尚未配置模型</div>
+                )}
+              </div>
+              <datalist id="available-models">
+                {availableModels.map((availableModel) => (
+                  <option value={availableModel} key={availableModel} />
+                ))}
+              </datalist>
+
+              <div className="provider-model-controls">
+                <button
+                  type="button"
+                  disabled={addingProvider}
+                  onClick={() => setEditingModel("new")}
+                >
+                  <Plus size={15} />
+                  添加模型
+                </button>
+              </div>
+            </section>
+
+            {error && <p className="settings-error provider-error">{error}</p>}
           </div>
 
-          {error && <p className="settings-error">{error}</p>}
-
-          <div className="settings-actions">
-            <p>Key 经 Windows DPAPI 加密后保存，不会回显或写入 Git。</p>
+          <footer className="model-provider-actions">
+            <p>
+              <LockKeyhole size={14} />
+              API Key 经 Windows DPAPI 加密，仅保存在本机。
+            </p>
             <button type="submit" disabled={status === "saving"}>
               {status === "saving"
                 ? "保存中…"
                 : status === "saved"
                   ? "已保存"
-                  : "保存模型配置"}
+                  : "保存配置"}
             </button>
-          </div>
+          </footer>
         </form>
-      </div>
+      </section>
+      {editingModel && (
+        <ModelConfigurationDialog
+          model={editingModel === "new" ? undefined : editingModel}
+          suggestions={availableModels}
+          onClose={() => setEditingModel(undefined)}
+          onSave={saveProviderModel}
+        />
+      )}
     </main>
   );
+}
+
+function ModelConfigurationDialog({
+  model,
+  suggestions,
+  onClose,
+  onSave,
+}: {
+  model?: ProviderModel;
+  suggestions: string[];
+  onClose(): void;
+  onSave(input: SaveProviderModelInput): Promise<void>;
+}) {
+  const [modelId, setModelId] = useState(model?.modelId ?? "");
+  const [contextWindow, setContextWindow] = useState(
+    String(model?.contextWindow ?? 128_000),
+  );
+  const [maxOutputTokens, setMaxOutputTokens] = useState(
+    String(model?.maxOutputTokens ?? 8192),
+  );
+  const [advancedOpen, setAdvancedOpen] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [dialogError, setDialogError] = useState<string>();
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    const parsedContextWindow = parseTokenLimit(contextWindow, "上下文窗口");
+    const parsedMaxOutputTokens = parseTokenLimit(
+      maxOutputTokens,
+      "最大输出 Token",
+    );
+    if (typeof parsedContextWindow === "string") {
+      setDialogError(parsedContextWindow);
+      return;
+    }
+    if (typeof parsedMaxOutputTokens === "string") {
+      setDialogError(parsedMaxOutputTokens);
+      return;
+    }
+    setSaving(true);
+    setDialogError(undefined);
+    try {
+      await onSave({
+        modelId,
+        contextWindow: parsedContextWindow,
+        maxOutputTokens: parsedMaxOutputTokens,
+      });
+    } catch (saveError) {
+      setDialogError(toMessage(saveError));
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className="model-config-dialog-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <form
+        className="model-config-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="model-config-dialog-title"
+        onSubmit={submit}
+      >
+        <header>
+          <h2 id="model-config-dialog-title">
+            {model ? "编辑模型配置" : "添加模型配置"}
+          </h2>
+          <button type="button" aria-label="关闭" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </header>
+
+        <label>
+          <span>模型 ID</span>
+          <input
+            autoFocus
+            list="model-config-suggestions"
+            value={modelId}
+            onChange={(event) => setModelId(event.target.value)}
+            placeholder="例如 deepseek-chat"
+            required
+          />
+        </label>
+        <datalist id="model-config-suggestions">
+          {suggestions.map((suggestion) => (
+            <option value={suggestion} key={suggestion} />
+          ))}
+        </datalist>
+
+        <label>
+          <span>上下文窗口</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={contextWindow}
+            onChange={(event) =>
+              setContextWindow(onlyDigits(event.target.value))
+            }
+            required
+          />
+        </label>
+
+        <button
+          className={`model-config-advanced-toggle${advancedOpen ? " open" : ""}`}
+          type="button"
+          onClick={() => setAdvancedOpen((open) => !open)}
+        >
+          <ChevronDown size={15} />
+          高级
+        </button>
+
+        {advancedOpen && (
+          <label>
+            <span>最大输出 Token</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={maxOutputTokens}
+              onChange={(event) =>
+                setMaxOutputTokens(onlyDigits(event.target.value))
+              }
+              required
+            />
+          </label>
+        )}
+
+        {dialogError && <p>{dialogError}</p>}
+        <footer>
+          <button type="button" onClick={onClose}>取消</button>
+          <button className="primary" type="submit" disabled={saving}>
+            {saving ? "保存中…" : "保存"}
+          </button>
+        </footer>
+      </form>
+    </div>
+  );
+}
+
+function onlyDigits(value: string): string {
+  return value.replace(/\D/g, "");
+}
+
+function parseTokenLimit(value: string, label: string): number | string {
+  if (!value) return `${label}不能为空`;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 10_000_000) {
+    return `${label}必须在 1 到 10000000 之间`;
+  }
+  return parsed;
+}
+
+function ApiFormatSelect({
+  value,
+  onChange,
+}: {
+  value: ApiFormat;
+  onChange(value: ApiFormat): void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const selected = apiFormatOptions.find((option) => option.value === value);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <div className="api-format-select" ref={rootRef}>
+      <button
+        className="api-format-trigger"
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span>{selected?.label}</span>
+        <ChevronDown size={16} />
+      </button>
+      {open && (
+        <div className="api-format-menu" role="menu">
+          {apiFormatOptions.map((option) => (
+            <button
+              className={option.value === value ? "selected" : undefined}
+              type="button"
+              role="menuitemradio"
+              aria-checked={option.value === value}
+              key={option.value}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              <span>{option.label}</span>
+              {option.value === value && <Check size={16} />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatContextWindow(tokens: number): string {
+  if (tokens >= 1_000_000) {
+    return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}M`;
+  }
+  if (tokens >= 1_000) {
+    return `${Math.round(tokens / 1_000)}k`;
+  }
+  return String(tokens);
 }
 
 function formatTaskTime(value?: string): string {
@@ -580,23 +1082,4 @@ function formatTaskTime(value?: string): string {
 
 function toMessage(error: unknown): string {
   return error instanceof Error ? error.message : "模型配置操作失败";
-}
-
-function normalizeLegacyDeepSeekSettings(
-  settings: ModelSettings,
-): ModelSettings {
-  if (settings.providerName !== "DeepSeek") {
-    return settings;
-  }
-  return {
-    ...settings,
-    baseUrl:
-      settings.baseUrl === "https://api.deepseek.com/v1"
-        ? "https://api.deepseek.com"
-        : settings.baseUrl,
-    model:
-      settings.model === "deepseek-v4"
-        ? "deepseek-v4-pro"
-        : settings.model,
-  };
 }

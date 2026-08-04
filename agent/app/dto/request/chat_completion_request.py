@@ -19,6 +19,18 @@ class ModelConnectionRequest(BaseModel):
     base_url: str = Field(alias="baseUrl", min_length=1, max_length=500)
     model: str = Field(min_length=1, max_length=160)
     api_key: str = Field(alias="apiKey", min_length=1, max_length=2048)
+    max_output_tokens: int | None = Field(
+        default=None,
+        alias="maxOutputTokens",
+        ge=1,
+        le=10_000_000,
+    )
+
+
+class PermissionRuleRequest(BaseModel):
+    tool: str = Field(min_length=1, max_length=100)
+    pattern: str = Field(default="*", min_length=1, max_length=20_000)
+    decision: Literal["allow", "deny", "ask"] = "ask"
 
 
 class PromptContextRequest(BaseModel):
@@ -44,6 +56,14 @@ class PromptContextRequest(BaseModel):
         alias="memorySummary",
         max_length=100_000,
     )
+    permission_mode: Literal[
+        "full_access", "auto_approve", "request_approval"
+    ] = Field(default="request_approval", alias="permissionMode")
+    permission_rules: list[PermissionRuleRequest] = Field(
+        default_factory=list,
+        alias="permissionRules",
+        max_length=200,
+    )
 
 
 class ChatCompletionRequest(BaseModel):
@@ -55,8 +75,6 @@ class ChatCompletionRequest(BaseModel):
         default_factory=PromptContextRequest,
         alias="promptContext",
     )
-    reasoning_effort: Literal[
-        "low", "medium", "high", "xhigh", "max"
-    ] | None = (
+    reasoning_effort: Literal["none", "low", "high", "max"] | None = (
         Field(default=None, alias="reasoningEffort")
     )

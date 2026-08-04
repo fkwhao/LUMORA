@@ -1,5 +1,5 @@
 import path from "node:path";
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, screen, shell } from "electron";
 
 import { registerTaskIpc } from "./ipc";
 import { registerAppearanceIpc } from "./appearance-ipc";
@@ -9,6 +9,10 @@ import { RestModelGateway } from "./rest-model-gateway";
 import { RestTaskGateway } from "./rest-task-gateway";
 import type { TaskGateway } from "./task-gateway";
 import { createMainWindowOptions } from "./window-options";
+import {
+  attachWindowStatePersistence,
+  loadWindowState,
+} from "./window-state";
 import { WindowReference } from "./window-reference";
 import {
   loadDevConfig,
@@ -40,7 +44,16 @@ let unregisterWorkspaceIpc: (() => void) | undefined;
 
 async function createWindow(): Promise<BrowserWindow> {
   const preloadPath = path.join(__dirname, "preload.js");
-  const window = new BrowserWindow(createMainWindowOptions(preloadPath));
+  const windowStatePath = path.join(app.getPath("userData"), "window-state.json");
+  const restoredState = loadWindowState(
+    windowStatePath,
+    screen.getAllDisplays().map((display) => display.workArea),
+  );
+  const window = new BrowserWindow(
+    createMainWindowOptions(preloadPath, restoredState),
+  );
+  attachWindowStatePersistence(window, windowStatePath);
+  if (restoredState?.maximized) window.maximize();
 
   // 必须在加载页面前监听；开发服务器响应很快时，ready-to-show 可能先于
   // loadURL Promise 完成，后注册监听会让 show: false 的窗口永久隐藏。

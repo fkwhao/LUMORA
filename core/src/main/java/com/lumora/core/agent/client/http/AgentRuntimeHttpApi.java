@@ -5,6 +5,7 @@ import com.lumora.core.agent.dto.request.AgentChatCompletionRequest;
 import com.lumora.core.agent.dto.request.AgentPlanTaskRequest;
 import com.lumora.core.agent.dto.request.AgentModelListRequest;
 import com.lumora.core.agent.dto.request.AgentMemoryExtractionRequest;
+import com.lumora.core.agent.dto.request.AgentToolApprovalDecisionRequest;
 import com.lumora.core.agent.dto.response.AgentChatCompletionResponse;
 import com.lumora.core.agent.dto.response.AgentPlanTaskResponse;
 import com.lumora.core.agent.dto.response.AgentModelListResponse;
@@ -13,6 +14,7 @@ import com.lumora.core.common.constant.HttpContractConstants;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.service.annotation.HttpExchange;
 import org.springframework.web.service.annotation.PostExchange;
 
@@ -27,6 +29,14 @@ import org.springframework.web.service.annotation.PostExchange;
         contentType = MediaType.APPLICATION_JSON_VALUE
 )
 public interface AgentRuntimeHttpApi {
+
+    @PostExchange(AgentClientConstants.TOOL_APPROVAL_PATH)
+    void decideToolApproval(
+            @RequestHeader(HttpContractConstants.CORRELATION_ID_HEADER)
+            String correlationId,
+            @PathVariable String approvalId,
+            @RequestBody AgentToolApprovalDecisionRequest request
+    );
 
     @PostExchange(AgentClientConstants.MODELS_PATH)
     AgentModelListResponse listModels(

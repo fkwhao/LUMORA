@@ -53,18 +53,27 @@ class ToolRegistry:
     def display_title(self, name: str, input_data: ToolInput) -> str:
         return self.get(name).display_title(input_data)
 
-    async def execute(
+    def validate(
         self,
         name: str,
-        context: ToolContext,
         input_data: Mapping[str, Any],
-    ) -> ToolResult:
+    ) -> tuple[Tool, dict[str, Any]]:
+        """Validate once before permission evaluation and return normalized input."""
         tool = self.get(name)
         normalized_input = dict(input_data)
         _validate_schema(tool.input_schema, normalized_input)
         semantic_error = tool.validate_input(normalized_input)
         if semantic_error:
             raise ToolInputError(semantic_error)
+        return tool, normalized_input
+
+    async def execute(
+        self,
+        name: str,
+        context: ToolContext,
+        input_data: Mapping[str, Any],
+    ) -> ToolResult:
+        tool, normalized_input = self.validate(name, input_data)
         if context.cancelled():
             raise asyncio.CancelledError
 

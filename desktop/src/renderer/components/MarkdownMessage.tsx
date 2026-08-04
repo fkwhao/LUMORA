@@ -1,4 +1,6 @@
 import hljs from "highlight.js";
+import { Check, Copy } from "lucide-react";
+import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -6,10 +8,89 @@ interface MarkdownMessageProps {
   content: string;
 }
 
-/**
- * 渲染模型返回的 Markdown。默认禁用原始 HTML，避免模型内容直接注入 DOM。
- */
-export function MarkdownMessage({ content }: MarkdownMessageProps) {
+interface MarkdownCodeBlockProps {
+  children: ReactNode;
+  language?: string;
+  source: string;
+}
+
+const LANGUAGE_LABELS: Record<string, string> = {
+  bash: "Shell",
+  css: "CSS",
+  html: "HTML",
+  java: "Java",
+  javascript: "JavaScript",
+  js: "JavaScript",
+  json: "JSON",
+  jsx: "JSX",
+  markdown: "Markdown",
+  md: "Markdown",
+  powershell: "PowerShell",
+  python: "Python",
+  py: "Python",
+  shell: "Shell",
+  sql: "SQL",
+  ts: "TypeScript",
+  tsx: "TSX",
+  typescript: "TypeScript",
+  yaml: "YAML",
+  yml: "YAML",
+};
+
+function MarkdownCodeBlock({
+  children,
+  language,
+  source,
+}: MarkdownCodeBlockProps) {
+  const [copied, setCopied] = useState(false);
+  const resetTimer = useRef<number | undefined>(undefined);
+
+  useEffect(
+    () => () => {
+      if (resetTimer.current !== undefined) {
+        window.clearTimeout(resetTimer.current);
+      }
+    },
+    [],
+  );
+
+  const copyCode = async () => {
+    if (!navigator.clipboard?.writeText) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(source);
+    } catch {
+      return;
+    }
+    setCopied(true);
+    window.clearTimeout(resetTimer.current);
+    resetTimer.current = window.setTimeout(() => setCopied(false), 1600);
+  };
+
+  return (
+    <div className="markdown-code-block">
+      <div className="markdown-code-toolbar">
+        <span>{language ? (LANGUAGE_LABELS[language] ?? language) : "Text"}</span>
+        <button
+          type="button"
+          className={copied ? "is-copied" : undefined}
+          aria-label={copied ? "已复制代码" : "复制代码"}
+          onClick={() => void copyCode()}
+        >
+          {copied ? <Check size={13} /> : <Copy size={13} />}
+          <span>{copied ? "已复制" : "复制"}</span>
+        </button>
+      </div>
+      <pre>{children}</pre>
+    </div>
+  );
+}
+
+/** 渲染模型返回的 Markdown；禁用原始 HTML，避免模型内容直接注入 DOM。 */
+export const MarkdownMessage = memo(function MarkdownMessage({
+  content,
+}: MarkdownMessageProps) {
   return (
     <div className="markdown-body">
       <ReactMarkdown
@@ -32,6 +113,16 @@ export function MarkdownMessage({ content }: MarkdownMessageProps) {
           input({ node: _node, ...props }) {
             return <input {...props} disabled />;
           },
+          table({ node: _node, children, ...props }) {
+            return (
+              <div className="markdown-table-scroll">
+                <table {...props}>{children}</table>
+              </div>
+            );
+          },
+          pre({ node: _node, children }) {
+            return <>{children}</>;
+          },
           code({ node: _node, className, children, ...props }) {
             const source = String(children).replace(/\n$/, "");
             const language = /language-([\w-]+)/.exec(className ?? "")?.[1];
@@ -43,17 +134,20 @@ export function MarkdownMessage({ content }: MarkdownMessageProps) {
                 </code>
               );
             }
-            // highlight.js 会先转义源码，再输出仅包含高亮 span 的安全 HTML。
+
+            // highlight.js 会转义源代码，只输出包含高亮 span 的安全 HTML。
             const highlighted =
               language && hljs.getLanguage(language)
                 ? hljs.highlight(source, { language }).value
                 : hljs.highlightAuto(source).value;
             return (
-              <code
-                {...props}
-                className={`hljs${language ? ` language-${language}` : ""}`}
-                dangerouslySetInnerHTML={{ __html: highlighted }}
-              />
+              <MarkdownCodeBlock language={language} source={source}>
+                <code
+                  {...props}
+                  className={`hljs${language ? ` language-${language}` : ""}`}
+                  dangerouslySetInnerHTML={{ __html: highlighted }}
+                />
+              </MarkdownCodeBlock>
             );
           },
         }}
@@ -62,4 +156,4 @@ export function MarkdownMessage({ content }: MarkdownMessageProps) {
       </ReactMarkdown>
     </div>
   );
-}
+});

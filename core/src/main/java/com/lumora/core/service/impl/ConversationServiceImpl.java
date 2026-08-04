@@ -41,6 +41,11 @@ public class ConversationServiceImpl implements ConversationService {
     private final MemoryExtractionCoordinator memoryExtractionCoordinator;
     private final ConcurrentHashMap<String, FutureTask<Void>> activeRuns =
             new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, PendingToolApproval>
+            pendingToolApprovals = new ConcurrentHashMap<>();
+
+    private record PendingToolApproval(String taskId, String correlationId) {
+    }
 
     @Override
     public List<ConversationMessage> listMessages(String taskId) {
@@ -54,6 +59,7 @@ public class ConversationServiceImpl implements ConversationService {
             String model,
             String reasoningEffort,
             String workspacePath,
+            String permissionMode,
             String correlationId,
             Consumer<ChatStreamEvent> eventConsumer,
             Runnable completionCallback,
@@ -66,6 +72,7 @@ public class ConversationServiceImpl implements ConversationService {
                 model,
                 reasoningEffort,
                 workspacePath,
+                permissionMode,
                 () -> persistenceService.prepareNewMessage(
                         taskId,
                         normalizedContent
@@ -84,6 +91,7 @@ public class ConversationServiceImpl implements ConversationService {
             String model,
             String reasoningEffort,
             String workspacePath,
+            String permissionMode,
             String correlationId,
             Consumer<ChatStreamEvent> eventConsumer,
             Runnable completionCallback,
@@ -97,6 +105,7 @@ public class ConversationServiceImpl implements ConversationService {
                 model,
                 reasoningEffort,
                 workspacePath,
+                permissionMode,
                 () -> persistenceService.prepareRegeneration(
                         taskId,
                         normalizedMessageId,
@@ -114,6 +123,7 @@ public class ConversationServiceImpl implements ConversationService {
             String model,
             String reasoningEffort,
             String workspacePath,
+            String permissionMode,
             Supplier<ConversationRunContext> contextSupplier,
             Consumer<ChatStreamEvent> eventConsumer,
             Runnable completionCallback,
@@ -132,6 +142,7 @@ public class ConversationServiceImpl implements ConversationService {
                         model,
                         reasoningEffort,
                         workspacePath,
+                        permissionMode,
                         eventConsumer,
                         completionCallback,
                         errorCallback
@@ -154,7 +165,44 @@ public class ConversationServiceImpl implements ConversationService {
     @Override
     public boolean cancelGeneration(String taskId) {
         FutureTask<Void> run = activeRuns.remove(taskId);
+        pendingToolApprovals.entrySet().removeIf(
+                entry -> entry.getValue().taskId().equals(taskId)
+        );
         return run != null && run.cancel(true);
+    }
+
+    @Override
+    public void decideToolApproval(
+            String taskId,
+            String approvalId,
+            String decision
+    ) {
+        String normalizedTaskId = requireText(taskId, "任务 ID");
+        String normalizedApprovalId = requireText(approvalId, "审批 ID");
+        String normalizedDecision = requireText(decision, "审批决定");
+        if (!List.of("allow_once", "allow_always", "deny")
+                .contains(normalizedDecision)) {
+            throw new IllegalArgumentException("审批决定无效");
+        }
+        PendingToolApproval pending = pendingToolApprovals.get(
+                normalizedApprovalId
+        );
+        if (pending == null || !pending.taskId().equals(normalizedTaskId)) {
+            throw new IllegalArgumentException("审批不存在或不属于当前任务");
+        }
+        if (!pendingToolApprovals.remove(normalizedApprovalId, pending)) {
+            throw new IllegalStateException("审批正在由其他请求处理");
+        }
+        try {
+            modelService.decideToolApproval(
+                    normalizedApprovalId,
+                    normalizedDecision,
+                    pending.correlationId()
+            );
+        } catch (RuntimeException error) {
+            pendingToolApprovals.putIfAbsent(normalizedApprovalId, pending);
+            throw error;
+        }
     }
 
     private void executeStream(
@@ -163,6 +211,7 @@ public class ConversationServiceImpl implements ConversationService {
             String model,
             String reasoningEffort,
             String workspacePath,
+            String permissionMode,
             Consumer<ChatStreamEvent> eventConsumer,
             Runnable completionCallback,
             Consumer<Throwable> errorCallback
@@ -177,10 +226,12 @@ public class ConversationServiceImpl implements ConversationService {
                     reasoningEffort,
                     context.getMemorySummary(),
                     workspacePath,
+                    permissionMode,
                     event -> handleStreamEvent(
                             context,
                             accumulator,
                             event,
+                            correlationId,
                             eventConsumer
                     )
             );
@@ -193,6 +244,12 @@ public class ConversationServiceImpl implements ConversationService {
             if (!Thread.currentThread().isInterrupted()) {
                 errorCallback.accept(error);
             }
+        } finally {
+            pendingToolApprovals.entrySet().removeIf(
+                    entry -> entry.getValue().taskId().equals(
+                            context.getTaskId()
+                    )
+            );
         }
     }
 
@@ -226,8 +283,26 @@ public class ConversationServiceImpl implements ConversationService {
             ConversationRunContext context,
             ConversationStreamAccumulator accumulator,
             ChatStreamEvent event,
+            String correlationId,
             Consumer<ChatStreamEvent> eventConsumer
     ) {
+        if (event.getType() == ChatStreamEventType.TOOL_APPROVAL_REQUESTED) {
+            String approvalId = requireText(
+                    event.getApprovalId(),
+                    "工具审批 ID"
+            );
+            PendingToolApproval previous = pendingToolApprovals.putIfAbsent(
+                    approvalId,
+                    new PendingToolApproval(context.getTaskId(), correlationId)
+            );
+            if (previous != null) {
+                throw new IllegalStateException("工具审批 ID 重复");
+            }
+        } else if (
+                event.getType() == ChatStreamEventType.TOOL_APPROVAL_RESOLVED
+        ) {
+            pendingToolApprovals.remove(event.getApprovalId());
+        }
         accumulator.accept(event);
         if (event.getType() == ChatStreamEventType.COMPLETED) {
             persistenceService.persistAssistant(context, accumulator);

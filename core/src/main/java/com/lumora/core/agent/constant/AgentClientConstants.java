@@ -15,6 +15,8 @@ public final class  AgentClientConstants {
     public static final String MODELS_PATH = "/api/v1/models";
     public static final String MEMORY_EXTRACTIONS_PATH =
             "/api/v1/memory/extractions";
+    public static final String TOOL_APPROVAL_PATH =
+            "/api/v1/tool-approvals/{approvalId}";
     public static final String SSE_DATA_PREFIX = "data:";
     public static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(90);
 

@@ -14,6 +14,7 @@ from app.constants.api_paths import (
     MEMORY_EXTRACTIONS_ROUTE,
     MODELS_ROUTE,
     PLAN_TASK_ROUTE,
+    TOOL_APPROVAL_DECISION_ROUTE,
 )
 from app.constants.error_codes import (
     AUTHENTICATION_FAILED,
@@ -31,6 +32,9 @@ from app.dto.request.chat_completion_request import ChatCompletionRequest
 from app.dto.request.memory_extraction_request import MemoryExtractionRequest
 from app.dto.request.model_list_request import ModelListRequest
 from app.dto.request.plan_task_request import PlanTaskRequest
+from app.dto.request.tool_approval_decision_request import (
+    ToolApprovalDecisionRequest,
+)
 from app.dto.response.chat_completion_response import ChatCompletionResponse
 from app.dto.response.health_response import HealthResponse
 from app.dto.response.memory_extraction_response import MemoryExtractionResponse
@@ -42,6 +46,7 @@ from app.exception.runtime_errors import (
     InvalidRequestError,
     ProtocolMismatchError,
 )
+from app.permission.model import ApprovalDecision
 from app.security.request_authenticator import RequestAuthenticator
 from app.service.chat_service import ChatService, ModelProviderError
 from app.service.memory_extraction_service import MemoryExtractionService
@@ -115,6 +120,50 @@ class AgentHttpController:
             methods=[HTTPMethod.POST],
             response_model=MemoryExtractionResponse,
         )
+        self.router.add_api_route(
+            TOOL_APPROVAL_DECISION_ROUTE,
+            self.decide_tool_approval,
+            methods=[HTTPMethod.POST],
+            status_code=status.HTTP_204_NO_CONTENT,
+        )
+
+    async def decide_tool_approval(
+        self,
+        approval_id: str,
+        request: ToolApprovalDecisionRequest,
+        authorization: str | None = Header(
+            default=None,
+            alias=AUTHORIZATION_HEADER,
+        ),
+        protocol_version: str | None = Header(
+            default=None,
+            alias=PROTOCOL_VERSION_HEADER,
+        ),
+        correlation_id: str | None = Header(
+            default=None,
+            alias=CORRELATION_ID_HEADER,
+        ),
+    ) -> None:
+        authenticated_correlation_id = self._authenticate(
+            authorization,
+            protocol_version,
+            correlation_id,
+        )
+        decided = self._chat_service.decide_tool_approval(
+            approval_id,
+            ApprovalDecision(
+                "allow_once" if request.decision == "allow" else request.decision
+            ),
+            authenticated_correlation_id,
+        )
+        if not decided:
+            raise AgentHttpError(
+                status.HTTP_404_NOT_FOUND,
+                INVALID_REQUEST,
+                "审批请求不存在、已处理或不属于当前会话",
+                False,
+                authenticated_correlation_id,
+            )
 
     async def extract_memories(
         self,
@@ -305,13 +354,13 @@ class AgentHttpController:
             alias=CORRELATION_ID_HEADER,
         ),
     ) -> StreamingResponse:
-        self._authenticate(
+        authenticated_correlation_id = self._authenticate(
             authorization,
             protocol_version,
             correlation_id,
         )
         return StreamingResponse(
-            self._stream_events(request),
+            self._stream_events(request, authenticated_correlation_id),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache"},
         )
@@ -319,9 +368,10 @@ class AgentHttpController:
     async def _stream_events(
         self,
         request: ChatCompletionRequest,
+        correlation_id: str,
     ) -> AsyncIterator[str]:
         try:
-            async for event in self._chat_service.stream(request):
+            async for event in self._chat_service.stream(request, correlation_id):
                 data = event.model_dump_json(by_alias=True)
                 yield f"event: {event.type}\ndata: {data}\n\n"
         except ModelProviderError:

@@ -135,7 +135,21 @@ globalStyle(".sidebar-scroll", {
   marginTop: "10px",
   overflowX: "hidden",
   overflowY: "auto",
-  scrollbarGutter: "stable",
+  overscrollBehavior: "contain",
+  scrollbarGutter: "auto",
+});
+
+globalStyle(".sidebar-scroll::-webkit-scrollbar", {
+  width: "6px",
+});
+
+globalStyle(".sidebar-scroll::-webkit-scrollbar-track", {
+  background: "transparent",
+});
+
+globalStyle(".sidebar-scroll::-webkit-scrollbar-thumb", {
+  borderRadius: "999px",
+  background: "color-mix(in srgb, var(--muted) 30%, transparent)",
 });
 
 globalStyle(".new-task-sticky", {
@@ -144,6 +158,7 @@ globalStyle(".new-task-sticky", {
   zIndex: "4",
   paddingBottom: "6px",
   background: "var(--canvas)",
+  transform: "translateZ(0)",
 });
 
 globalStyle(".new-task-sticky::after", {
@@ -318,12 +333,17 @@ globalStyle(".task-history > .history-item", {
 globalStyle(".history-row", {
   position: "relative",
   flex: "0 0 auto",
-  margin: "2px 0",
+  margin: "2px 1px",
   borderRadius: "8px",
+  contain: "layout paint",
 });
 
 globalStyle(".project-task-group .history-row", {
-  marginLeft: "22px",
+  marginLeft: "1px",
+});
+
+globalStyle(".project-task-group .history-row .history-item", {
+  paddingLeft: "33px",
 });
 
 globalStyle(".recent-task-group", {
@@ -342,8 +362,15 @@ globalStyle(".history-row.current .history-item", {
 globalStyle(".history-row .history-item", {
   gap: "0",
   paddingLeft: "11px",
-  paddingRight: "34px",
+  paddingRight: "11px",
 });
+
+globalStyle(
+  ".history-row.processing .history-item",
+  {
+    paddingRight: "34px",
+  },
+);
 
 globalStyle(".history-archive-action", {
   position: "absolute",
@@ -357,12 +384,24 @@ globalStyle(".history-archive-action", {
   color: "#7b838e",
   border: "0",
   borderRadius: "6px",
-  background: "transparent",
+  background: "var(--history-row-action-bg, #e2e4e7)",
   cursor: "pointer",
   opacity: "0",
   pointerEvents: "none",
   transform: "translateY(-50%)",
   transition: "opacity 120ms ease, background 120ms ease, color 120ms ease",
+});
+
+globalStyle(".history-archive-action::before", {
+  position: "absolute",
+  top: "0",
+  right: "calc(100% - 1px)",
+  width: "18px",
+  height: "100%",
+  background:
+    "linear-gradient(90deg, transparent, var(--history-row-action-bg, #e2e4e7) 78%)",
+  content: '""',
+  pointerEvents: "none",
 });
 
 globalStyle(".history-row:hover .history-archive-action,\n.history-row:focus-within .history-archive-action", {
@@ -403,6 +442,12 @@ globalStyle(
   },
 );
 
+globalStyle(".history-title-text", {
+  display: "inline-block",
+  minWidth: "max-content",
+  whiteSpace: "nowrap",
+});
+
 globalStyle(".history-row:hover .history-title-viewport.is-overflowing", {
   WebkitMaskImage:
     "linear-gradient(90deg, transparent 0, #000 9px, #000 calc(100% - 9px), transparent 100%)",
@@ -410,16 +455,11 @@ globalStyle(".history-row:hover .history-title-viewport.is-overflowing", {
     "linear-gradient(90deg, transparent 0, #000 9px, #000 calc(100% - 9px), transparent 100%)",
 });
 
-globalStyle(".history-title-text", {
-  display: "inline-block",
-  minWidth: "max-content",
-  willChange: "transform",
-});
-
 globalStyle(
   ".history-row:hover .history-title-viewport.is-overflowing .history-title-text",
   {
     animation: `${historyTitleMarquee} 18s 700ms linear infinite alternate`,
+    willChange: "transform",
   },
 );
 

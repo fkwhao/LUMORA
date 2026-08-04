@@ -10,7 +10,10 @@ import type {
   ChatRequestOptions,
   ChatStreamEvent,
   ListModelsInput,
+  SaveModelProviderInput,
+  SaveProviderModelInput,
   UpdateModelSettingsInput,
+  ToolApprovalDecision,
 } from "../shared/model-contract";
 import {
   validateApprovalDecisionInput,
@@ -51,6 +54,27 @@ const api: LumoraApi = {
       ),
   },
   model: {
+    listProviders: () => ipcRenderer.invoke("model:list-providers"),
+    createProvider: (input: SaveModelProviderInput) =>
+      ipcRenderer.invoke("model:create-provider", input),
+    updateProvider: (providerId: string, input: SaveModelProviderInput) =>
+      ipcRenderer.invoke("model:update-provider", providerId, input),
+    activateProvider: (providerId: string) =>
+      ipcRenderer.invoke("model:activate-provider", providerId),
+    disableProvider: (providerId: string) =>
+      ipcRenderer.invoke("model:disable-provider", providerId),
+    deleteProvider: (providerId: string) =>
+      ipcRenderer.invoke("model:delete-provider", providerId),
+    listProviderModels: (providerId: string, apiKey?: string) =>
+      ipcRenderer.invoke("model:list-provider-models", providerId, apiKey),
+    createProviderModel: (providerId: string, input: SaveProviderModelInput) =>
+      ipcRenderer.invoke("model:create-provider-model", providerId, input),
+    updateProviderModel: (providerId: string, modelConfigurationId: string, input: SaveProviderModelInput) =>
+      ipcRenderer.invoke("model:update-provider-model", providerId, modelConfigurationId, input),
+    deleteProviderModel: (providerId: string, modelConfigurationId: string) =>
+      ipcRenderer.invoke("model:delete-provider-model", providerId, modelConfigurationId),
+    testProviderModel: (providerId: string, modelConfigurationId: string) =>
+      ipcRenderer.invoke("model:test-provider-model", providerId, modelConfigurationId),
     getSettings: () => ipcRenderer.invoke("model:get-settings"),
     updateSettings: (input: UpdateModelSettingsInput) =>
       ipcRenderer.invoke("model:update-settings", input),
@@ -60,6 +84,16 @@ const api: LumoraApi = {
       ipcRenderer.invoke("model:complete", messages),
     listMessages: (taskId) =>
       ipcRenderer.invoke("model:list-messages", validateTaskId(taskId)),
+    decideToolApproval: (
+      taskId,
+      approvalId,
+      decision: ToolApprovalDecision,
+    ) =>
+      ipcRenderer.invoke("model:decide-tool-approval", {
+        taskId: validateTaskId(taskId),
+        approvalId: validateMessageId(approvalId),
+        decision,
+      }),
     streamMessage: (
       untrustedTaskId,
       untrustedContent,

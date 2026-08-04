@@ -1,11 +1,20 @@
 import type { BrowserWindowConstructorOptions } from "electron";
 
+export interface MainWindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export function createMainWindowOptions(
   preloadPath: string,
+  bounds?: MainWindowBounds,
 ): BrowserWindowConstructorOptions {
   return {
-    width: 1580,
-    height: 960,
+    width: bounds?.width ?? 1580,
+    height: bounds?.height ?? 960,
+    ...(bounds ? { x: bounds.x, y: bounds.y } : {}),
     minWidth: 1100,
     minHeight: 720,
     show: false,

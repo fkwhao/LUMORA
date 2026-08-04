@@ -10,6 +10,8 @@ public enum ChatStreamEventType {
     TOOL_STARTED("tool_started"),
     TOOL_COMPLETED("tool_completed"),
     TOOL_FAILED("tool_failed"),
+    TOOL_APPROVAL_REQUESTED("tool_approval_requested"),
+    TOOL_APPROVAL_RESOLVED("tool_approval_resolved"),
     USAGE("usage"),
     COMPLETED("completed"),
     FAILED("failed");

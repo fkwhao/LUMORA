@@ -14,6 +14,7 @@ public class AgentPromptContextRequest {
     private final List<String> projectInstructions;
     private final List<String> availableTools;
     private final String memorySummary;
+    private final String permissionMode;
 
     public AgentPromptContextRequest(
             String workspacePath,
@@ -21,10 +22,27 @@ public class AgentPromptContextRequest {
             List<String> availableTools,
             String memorySummary
     ) {
+        this(
+                workspacePath,
+                projectInstructions,
+                availableTools,
+                memorySummary,
+                "request_approval"
+        );
+    }
+
+    public AgentPromptContextRequest(
+            String workspacePath,
+            List<String> projectInstructions,
+            List<String> availableTools,
+            String memorySummary,
+            String permissionMode
+    ) {
         this.workspacePath = workspacePath;
         this.projectInstructions = List.copyOf(projectInstructions);
         this.availableTools = List.copyOf(availableTools);
         this.memorySummary = memorySummary;
+        this.permissionMode = normalizePermissionMode(permissionMode);
     }
 
     public static AgentPromptContextRequest defaultContext() {
@@ -46,8 +64,26 @@ public class AgentPromptContextRequest {
             String memorySummary,
             String workspacePath
     ) {
+        return forWorkspace(
+                memorySummary,
+                workspacePath,
+                "request_approval"
+        );
+    }
+
+    public static AgentPromptContextRequest forWorkspace(
+            String memorySummary,
+            String workspacePath,
+            String permissionMode
+    ) {
         if (workspacePath == null || workspacePath.isBlank()) {
-            return withMemorySummary(memorySummary);
+            return new AgentPromptContextRequest(
+                    null,
+                    List.of(),
+                    List.of(),
+                    memorySummary,
+                    permissionMode
+            );
         }
         return new AgentPromptContextRequest(
                 workspacePath.trim(),
@@ -60,7 +96,8 @@ public class AgentPromptContextRequest {
                         "write_file",
                         "shell_command"
                 ),
-                memorySummary
+                memorySummary,
+                permissionMode
         );
     }
 
@@ -78,6 +115,21 @@ public class AgentPromptContextRequest {
 
     public String getMemorySummary() {
         return memorySummary;
+    }
+
+    public String getPermissionMode() {
+        return permissionMode;
+    }
+
+    private static String normalizePermissionMode(String value) {
+        String normalized = value == null || value.isBlank()
+                ? "request_approval"
+                : value.trim();
+        if (!List.of("full_access", "auto_approve", "request_approval")
+                .contains(normalized)) {
+            throw new IllegalArgumentException("权限模式无效");
+        }
+        return normalized;
     }
 
 }

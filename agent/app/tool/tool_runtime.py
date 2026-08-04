@@ -26,20 +26,6 @@ MAX_SEARCH_RESULTS = 100
 MAX_SEARCH_QUERY_CHARS = 500
 MAX_PATCH_TEXT_CHARS = 100_000
 
-_BLOCKED_SHELL_PATTERNS = tuple(
-    re.compile(pattern, re.IGNORECASE)
-    for pattern in (
-        r"\bRemove-Item\b",
-        r"\brm\s+-[^\r\n]*r",
-        r"\b(del|erase|rmdir|rd)\b",
-        r"\bgit\s+(reset|clean)\b",
-        r"\b(format|shutdown|reboot)\b",
-        r"\b(Start-Process|Stop-Process)\b",
-        r"\b(Invoke-WebRequest|Invoke-RestMethod|curl|wget)\b",
-    )
-)
-
-
 def create_default_tool_registry() -> ToolRegistry:
     return ToolRegistry(
         (
@@ -197,8 +183,8 @@ def create_default_tool_registry() -> ToolRegistry:
 
 def _validate_pattern(data: ToolInput) -> str | None:
     pattern = str(data.get("pattern") or "**/*").strip()
-    if Path(pattern).is_absolute() or ".." in Path(pattern).parts:
-        return "文件匹配模式必须位于工作区内"
+    if not pattern:
+        return "文件匹配模式不能为空"
     return None
 
 
@@ -235,10 +221,6 @@ def _validate_shell(data: ToolInput) -> str | None:
     command = str(data.get("command") or "").strip()
     if not command or len(command) > 20_000:
         return "命令为空或长度超过限制"
-    if ".." in command or re.search(r"\b[A-Za-z]:[\\/]", command):
-        return "命令只能使用工作区相对路径"
-    if any(pattern.search(command) for pattern in _BLOCKED_SHELL_PATTERNS):
-        return "该命令可能产生破坏性或外部副作用，当前未获授权"
     return None
 
 
@@ -246,7 +228,9 @@ def _shell_is_destructive(data: ToolInput) -> bool:
     command = str(data.get("command") or "")
     return bool(
         re.search(
-            r"\b(Set-Content|Move-Item|git\s+commit)\b",
+            r"\b(Remove-Item|Set-Content|Add-Content|Out-File|"
+            r"Move-Item|Copy-Item|New-Item|del|erase|rmdir|rd|"
+            r"rm|mv|cp|touch|mkdir|git\s+(?:commit|reset|clean|checkout|restore))\b",
             command,
             re.IGNORECASE,
         )
@@ -259,9 +243,10 @@ def _file_concurrency_key(context: ToolContext, data: ToolInput) -> str:
 
 def _list_files(context: ToolContext, data: ToolInput) -> ToolResult:
     pattern = str(data.get("pattern") or "**/*").strip()
+    search_root, relative_pattern = _resolve_glob(context, pattern)
     files = sorted(
-        path.relative_to(context.workspace_path).as_posix()
-        for path in context.workspace_path.glob(pattern)
+        _display_path(context, path)
+        for path in search_root.glob(relative_pattern)
         if path.is_file()
     )
     visible = files[:MAX_LIST_RESULTS]
@@ -284,7 +269,7 @@ def _read_file(context: ToolContext, data: ToolInput) -> ToolResult:
         return ToolResult(
             content="",
             metadata={
-                "path": path.relative_to(context.workspace_path).as_posix(),
+                "path": _display_path(context, path),
                 "lineCount": 0,
                 "totalLineCount": 0,
                 "startLine": 1,
@@ -318,7 +303,7 @@ def _read_file(context: ToolContext, data: ToolInput) -> ToolResult:
     has_more = actual_end < len(lines)
     range_limited = end < min(len(lines), requested_end)
     metadata: dict[str, Any] = {
-        "path": path.relative_to(context.workspace_path).as_posix(),
+        "path": _display_path(context, path),
         "lineCount": len(rendered),
         "totalLineCount": len(lines),
         "startLine": start,
@@ -371,7 +356,7 @@ def _search_in_file(context: ToolContext, data: ToolInput) -> ToolResult:
         else ""
     )
     metadata = {
-        "path": path.relative_to(context.workspace_path).as_posix(),
+        "path": _display_path(context, path),
         "query": query,
         "matchCount": match_count,
         "resultCount": len(matches),
@@ -400,7 +385,7 @@ def _apply_patch(context: ToolContext, data: ToolInput) -> ToolResult:
     replacements = occurrences if replace_all else 1
     _atomic_write_text(path, updated)
     metadata = {
-        "path": path.relative_to(context.workspace_path).as_posix(),
+        "path": _display_path(context, path),
         "replacements": replacements,
         "previousLines": len(content.splitlines()),
         "currentLines": len(updated.splitlines()),
@@ -419,7 +404,7 @@ def _write_file(context: ToolContext, data: ToolInput) -> ToolResult:
     previous = path.read_text(encoding="utf-8") if existed else ""
     _atomic_write_text(path, content)
     metadata = {
-        "path": path.relative_to(context.workspace_path).as_posix(),
+        "path": _display_path(context, path),
         "previousLines": len(previous.splitlines()),
         "currentLines": len(content.splitlines()),
         "created": not existed,
@@ -504,11 +489,44 @@ def _resolve_path(context: ToolContext, value: Any) -> Path:
     if not isinstance(value, str) or not value.strip():
         raise ValueError("文件路径不能为空")
     candidate = Path(value.strip())
-    if candidate.is_absolute():
-        raise ValueError("文件路径必须相对当前工作区")
-    resolved = (context.workspace_path / candidate).resolve()
+    resolved = (
+        candidate.expanduser().resolve()
+        if candidate.is_absolute()
+        else (context.workspace_path / candidate).resolve()
+    )
     try:
         resolved.relative_to(context.workspace_path)
     except ValueError as error:
+        if context.allow_external_paths:
+            return resolved
         raise ValueError("文件路径超出当前工作区") from error
     return resolved
+
+
+def _display_path(context: ToolContext, path: Path) -> str:
+    try:
+        return path.relative_to(context.workspace_path).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _resolve_glob(context: ToolContext, pattern: str) -> tuple[Path, str]:
+    """Split a glob into its fixed root and wildcard suffix for external paths."""
+    candidate = Path(pattern).expanduser()
+    parts = candidate.parts
+    wildcard_index = next(
+        (index for index, part in enumerate(parts) if any(c in part for c in "*?[")),
+        len(parts),
+    )
+    fixed_parts = parts[:wildcard_index]
+    wildcard_parts = parts[wildcard_index:]
+    if wildcard_index == len(parts) and fixed_parts:
+        wildcard_parts = fixed_parts[-1:]
+        fixed_parts = fixed_parts[:-1]
+    if candidate.is_absolute():
+        fixed = Path(*fixed_parts).resolve()
+    else:
+        fixed = (context.workspace_path / Path(*fixed_parts)).resolve()
+    _resolve_path(context, str(fixed))
+    relative_pattern = str(Path(*wildcard_parts)) if wildcard_parts else "*"
+    return fixed, relative_pattern

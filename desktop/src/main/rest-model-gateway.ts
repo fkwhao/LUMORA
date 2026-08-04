@@ -7,6 +7,11 @@ import type {
   ChatStreamEvent,
   ListModelsInput,
   ModelSettings,
+  ModelProvider,
+  SaveModelProviderInput,
+  SaveProviderModelInput,
+  ProviderModel,
+  ToolApprovalDecision,
   UpdateModelSettingsInput,
 } from "../shared/model-contract";
 import { workLogFromEvents } from "../shared/work-log";
@@ -31,6 +36,80 @@ export class RestModelGateway implements ModelGateway {
 
   getSettings(): Promise<ModelSettings> {
     return this.request("/api/v1/model/settings");
+  }
+
+  listProviders(): Promise<ModelProvider[]> {
+    return this.request("/api/v1/model/settings/providers");
+  }
+
+  createProvider(input: SaveModelProviderInput): Promise<ModelProvider> {
+    return this.request("/api/v1/model/settings/providers", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  updateProvider(providerId: string, input: SaveModelProviderInput): Promise<ModelProvider> {
+    return this.request(`/api/v1/model/settings/providers/${encodeURIComponent(providerId)}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  }
+
+  activateProvider(providerId: string): Promise<ModelProvider> {
+    return this.request(`/api/v1/model/settings/providers/${encodeURIComponent(providerId)}/activate`, {
+      method: "POST",
+    });
+  }
+
+  disableProvider(providerId: string): Promise<ModelProvider> {
+    return this.request(`/api/v1/model/settings/providers/${encodeURIComponent(providerId)}/disable`, {
+      method: "POST",
+    });
+  }
+
+  async deleteProvider(providerId: string): Promise<void> {
+    await this.request(`/api/v1/model/settings/providers/${encodeURIComponent(providerId)}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listProviderModels(providerId: string, apiKey?: string): Promise<string[]> {
+    const response = await this.request<{ models: string[] }>(
+      `/api/v1/model/settings/providers/${encodeURIComponent(providerId)}/models`,
+      { method: "POST", body: JSON.stringify({ apiKey }) },
+      30_000,
+    );
+    return response.models;
+  }
+
+  createProviderModel(providerId: string, input: SaveProviderModelInput): Promise<ProviderModel> {
+    return this.request(`/api/v1/model/settings/providers/${encodeURIComponent(providerId)}/model-configurations`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  updateProviderModel(providerId: string, modelConfigurationId: string, input: SaveProviderModelInput): Promise<ProviderModel> {
+    return this.request(`/api/v1/model/settings/providers/${encodeURIComponent(providerId)}/model-configurations/${encodeURIComponent(modelConfigurationId)}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async deleteProviderModel(providerId: string, modelConfigurationId: string): Promise<void> {
+    await this.request(`/api/v1/model/settings/providers/${encodeURIComponent(providerId)}/model-configurations/${encodeURIComponent(modelConfigurationId)}`, {
+      method: "DELETE",
+    });
+  }
+
+  async testProviderModel(providerId: string, modelConfigurationId: string): Promise<boolean> {
+    const response = await this.request<{ connected: boolean }>(
+      `/api/v1/model/settings/providers/${encodeURIComponent(providerId)}/model-configurations/${encodeURIComponent(modelConfigurationId)}/test`,
+      { method: "POST" },
+      90_000,
+    );
+    return response.connected;
   }
 
   updateSettings(input: UpdateModelSettingsInput): Promise<ModelSettings> {
@@ -68,6 +147,17 @@ export class RestModelGateway implements ModelGateway {
       `/api/v1/tasks/${encodeURIComponent(taskId)}/messages`,
     );
     return messages.map(hydrateWorkLog);
+  }
+
+  async decideToolApproval(
+    taskId: string,
+    approvalId: string,
+    decision: ToolApprovalDecision,
+  ): Promise<void> {
+    await this.request<{ accepted: boolean }>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/tool-approvals/${encodeURIComponent(approvalId)}`,
+      { method: "POST", body: JSON.stringify({ decision }) },
+    );
   }
 
   streamMessage(

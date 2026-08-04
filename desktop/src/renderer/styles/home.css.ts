@@ -224,16 +224,17 @@ globalStyle(".submit-task,\n.send-follow-up", {
   flex: "0 0 auto",
   padding: "0",
   placeItems: "center",
-  color: "#fff",
+  color: "var(--surface)",
   border: "0",
   borderRadius: "50%",
-  background: "var(--blue)",
-  boxShadow: "0 5px 14px rgb(23 104 239 / 22%)",
+  background: "var(--ink)",
+  boxShadow: "none",
   cursor: "pointer",
 });
 
-globalStyle(".submit-task:hover", {
-  background: "#075bd9",
+globalStyle(".submit-task:hover:not(:disabled)", {
+  color: "var(--surface)",
+  background: "var(--ink)",
   transform: "translateY(-1px)",
 });
 

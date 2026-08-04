@@ -8,6 +8,7 @@ class ModelConnectionSettings:
     base_url: str
     api_key: str
     model: str
+    max_output_tokens: int | None = None
 
     def validate(self) -> None:
         provider_name = self.provider_name.strip()
@@ -16,6 +17,8 @@ class ModelConnectionSettings:
         model = self.model.strip()
         if not provider_name or not base_url or not api_key or not model:
             raise ValueError("模型供应商、API 地址、API Key 和模型名称均不能为空")
+        if self.max_output_tokens is not None and self.max_output_tokens < 1:
+            raise ValueError("最大输出 Token 必须大于 0")
 
         parsed = urlparse(base_url)
         is_loopback_http = (

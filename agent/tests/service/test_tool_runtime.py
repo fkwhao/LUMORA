@@ -2,8 +2,8 @@ import asyncio
 from pathlib import Path
 
 import pytest
+
 from app.tool.base import ToolContext
-from app.tool.registry import ToolInputError
 from app.tool.tool_runtime import create_default_tool_registry
 
 
@@ -38,18 +38,15 @@ def test_file_tools_are_confined_to_workspace(tmp_path: Path) -> None:
         )
 
 
-def test_shell_rejects_destructive_command(tmp_path: Path) -> None:
+def test_shell_validation_does_not_embed_permission_blacklist(tmp_path: Path) -> None:
     registry = create_default_tool_registry()
-    context = ToolContext(workspace_path=tmp_path.resolve())
+    tool, normalized = registry.validate(
+        "shell_command",
+        {"command": "Remove-Item -Recurse build"},
+    )
 
-    with pytest.raises(ToolInputError, match="未获授权"):
-        asyncio.run(
-            registry.execute(
-                "shell_command",
-                context,
-                {"command": "Remove-Item -Recurse build"},
-            )
-        )
+    assert normalized["command"] == "Remove-Item -Recurse build"
+    assert tool.is_destructive(normalized) is True
 
 
 def test_read_file_is_chunked_and_exposes_next_start_line(tmp_path: Path) -> None:

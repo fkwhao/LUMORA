@@ -1,12 +1,13 @@
 import unittest
 
+from fastapi.testclient import TestClient
+
 from app.config.settings import AgentSettings
 from app.dto.response.chat_stream_event_response import (
     ChatStreamEventResponse,
 )
 from app.main import create_app
 from app.service.planner_service import PlannerService
-from fastapi.testclient import TestClient
 
 STARTUP_TOKEN = "a" * 64
 
@@ -221,6 +222,28 @@ class AgentControllerTest(unittest.TestCase):
             ["deepseek-v4-flash", "deepseek-v4-pro"],
         )
 
+    def test_tool_approval_decision_is_bound_to_correlation_id(self) -> None:
+        chat_service = ApprovalDecisionChatService()
+        client = TestClient(
+            create_app(
+                self.settings,
+                PlannerService(),
+                chat_service,
+            )
+        )
+
+        response = client.post(
+            "/api/v1/tool-approvals/approval-1",
+            headers=self.authenticated_headers(),
+            json={"decision": "allow_always"},
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(
+            chat_service.decision,
+            ("approval-1", "allow_always", "correlation-123"),
+        )
+
 
 class StreamingChatService:
     def __init__(self) -> None:
@@ -230,7 +253,8 @@ class StreamingChatService:
         del request
         return ["deepseek-v4-flash", "deepseek-v4-pro"]
 
-    async def stream(self, request: object):
+    async def stream(self, request: object, correlation_id: str = ""):
+        assert correlation_id == "correlation-123"
         self.last_reasoning_effort = getattr(
             request,
             "reasoning_effort",
@@ -250,6 +274,15 @@ class StreamingChatService:
             type="completed",
             model="test-model",
         )
+
+
+class ApprovalDecisionChatService:
+    def __init__(self) -> None:
+        self.decision: tuple[str, str, str] | None = None
+
+    def decide_tool_approval(self, approval_id, decision, correlation_id):
+        self.decision = (approval_id, decision.value, correlation_id)
+        return True
 
 
 if __name__ == "__main__":

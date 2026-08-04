@@ -51,6 +51,7 @@ class DatabaseMigrationTest {
                       'conversation',
                       'conversation_message',
                       'model_configuration',
+                      'model_configuration_model',
                       'memory_item'
                   )
                 """,
@@ -61,16 +62,20 @@ class DatabaseMigrationTest {
                 Integer.class
         );
 
-        assertThat(businessTableCount).isEqualTo(7);
+        assertThat(businessTableCount).isEqualTo(8);
         assertThat(foreignKeysEnabled).isEqualTo(1);
-        assertThat(applicationChangeSetCount()).isEqualTo(11);
+        assertThat(applicationChangeSetCount()).isEqualTo(13);
         assertThat(taskPlanStepPrimaryKeyColumns())
                 .containsExactly("plan_step_id");
+        assertThat(modelConfigurationColumns())
+                .contains("api_format", "is_active");
+        assertThat(providerModelColumns())
+                .contains("model_id", "context_window", "max_output_tokens");
 
         // 对同一数据库重复执行迁移，必须只校验历史而不能再次建表。
         liquibase.afterPropertiesSet();
 
-        assertThat(applicationChangeSetCount()).isEqualTo(11);
+        assertThat(applicationChangeSetCount()).isEqualTo(13);
     }
 
     private Integer applicationChangeSetCount() {
@@ -89,11 +94,27 @@ class DatabaseMigrationTest {
                     '008-model-context-window',
                     '009-memory-item',
                     '010-memory-semantic-slot',
-                    '011-conversation-work-log'
+                    '011-conversation-work-log',
+                    '012-model-provider',
+                    '013-provider-model'
                 )
                 AND AUTHOR = 'lumora'
                 """,
                 Integer.class
+        );
+    }
+
+    private java.util.List<String> modelConfigurationColumns() {
+        return jdbcTemplate.query(
+                "PRAGMA table_info(model_configuration)",
+                (resultSet, rowNumber) -> resultSet.getString("name")
+        );
+    }
+
+    private java.util.List<String> providerModelColumns() {
+        return jdbcTemplate.query(
+                "PRAGMA table_info(model_configuration_model)",
+                (resultSet, rowNumber) -> resultSet.getString("name")
         );
     }
 

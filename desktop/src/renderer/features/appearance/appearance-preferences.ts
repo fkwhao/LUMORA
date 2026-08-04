@@ -15,7 +15,7 @@ export interface AppearancePreferences {
 
 export const DEFAULT_APPEARANCE_PREFERENCES: AppearancePreferences = {
   theme: "system",
-  accentColor: "#1768ef",
+  accentColor: "#339cff",
   uiFont: "system",
   codeFont: "cascadia",
   translucentSidebar: false,
@@ -24,19 +24,22 @@ export const DEFAULT_APPEARANCE_PREFERENCES: AppearancePreferences = {
 
 const UI_FONT_STACKS: Record<UiFontPreference, string> = {
   system:
-    '-apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif',
-  segoe: '"Segoe UI Variable", "Segoe UI", sans-serif',
-  yahei: '"Microsoft YaHei UI", "Microsoft YaHei", sans-serif',
+    '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  segoe:
+    '"Segoe UI Variable Text", "Segoe UI", sans-serif',
+  yahei:
+    '"Microsoft YaHei", "Microsoft YaHei UI", "Segoe UI", sans-serif',
 };
 
 const CODE_FONT_STACKS: Record<CodeFontPreference, string> = {
   cascadia:
-    'ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, monospace',
+    'ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
   consolas: 'Consolas, "SFMono-Regular", monospace',
   jetbrains: '"JetBrains Mono", "Cascadia Code", Consolas, monospace',
 };
 
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
+const LEGACY_DEFAULT_ACCENT_COLOR = "#1768ef";
 
 export function loadAppearancePreferences(): AppearancePreferences {
   try {
@@ -67,7 +70,9 @@ export function applyAppearancePreferences(
   const normalized = normalizeAppearancePreferences(preferences);
   const root = document.documentElement;
   const resolvedTheme = resolveTheme(normalized.theme);
-  const lineOpacity = 0.1 + normalized.contrast * 0.0016;
+  const variantContrast =
+    (resolvedTheme === "dark" ? 60 : 45) + (normalized.contrast - 50);
+  const lineOpacity = 0.1 + variantContrast * 0.0016;
 
   root.dataset.theme = resolvedTheme;
   root.dataset.themePreference = normalized.theme;
@@ -123,15 +128,19 @@ function normalizeAppearancePreferences(
     return DEFAULT_APPEARANCE_PREFERENCES;
   }
   const candidate = value as Partial<AppearancePreferences>;
+  const candidateAccent =
+    typeof candidate.accentColor === "string" &&
+    HEX_COLOR_PATTERN.test(candidate.accentColor)
+      ? candidate.accentColor
+      : DEFAULT_APPEARANCE_PREFERENCES.accentColor;
   return {
     theme: isTheme(candidate.theme)
       ? candidate.theme
       : DEFAULT_APPEARANCE_PREFERENCES.theme,
     accentColor:
-      typeof candidate.accentColor === "string" &&
-      HEX_COLOR_PATTERN.test(candidate.accentColor)
-        ? candidate.accentColor
-        : DEFAULT_APPEARANCE_PREFERENCES.accentColor,
+      candidateAccent.toLowerCase() === LEGACY_DEFAULT_ACCENT_COLOR
+        ? DEFAULT_APPEARANCE_PREFERENCES.accentColor
+        : candidateAccent,
     uiFont:
       candidate.uiFont && candidate.uiFont in UI_FONT_STACKS
         ? candidate.uiFont

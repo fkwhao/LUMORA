@@ -111,6 +111,28 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "412":
           $ref: "#/components/responses/ProtocolMismatch"
+  /api/v1/tool-approvals/{approvalId}:
+    post:
+      operationId: decideToolApproval
+      description: 恢复一个由权限系统暂停的 Agent Loop。
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/CorrelationId"
+        - name: approvalId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ToolApprovalDecision"
+      responses:
+        "204": { description: 审批决定已接收 }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: 审批不存在、已处理或不属于当前会话 }
 components:
   securitySchemes:
     bearerAuth:
@@ -221,7 +243,7 @@ components:
           $ref: "#/components/schemas/PromptContext"
         reasoningEffort:
           type: string
-          enum: [low, medium, high, xhigh, max]
+          enum: [none, low, high, max]
     PromptContext:
       type: object
       additionalProperties: false
@@ -237,6 +259,34 @@ components:
           items: { type: string }
         memorySummary:
           type: string
+        permissionMode:
+          type: string
+          enum: [full_access, auto_approve, request_approval]
+          default: request_approval
+        permissionRules:
+          type: array
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/PermissionRule"
+    PermissionRule:
+      type: object
+      additionalProperties: false
+      required: [tool]
+      properties:
+        tool: { type: string, minLength: 1, maxLength: 100 }
+        pattern: { type: string, minLength: 1, maxLength: 20000, default: "*" }
+        decision:
+          type: string
+          enum: [allow, deny, ask]
+          default: ask
+    ToolApprovalDecision:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [allow, allow_once, allow_always, deny]
     ModelConnection:
       type: object
       additionalProperties: false
@@ -260,6 +310,11 @@ components:
           maxLength: 2048
           writeOnly: true
           description: 仅在本机 Java 到 Python 的当前请求内使用，不落盘。
+        maxOutputTokens:
+          type: integer
+          minimum: 1
+          maximum: 10000000
+          description: 当前模型配置的最大输出 Token；未配置时省略。
     ChatMessage:
       type: object
       additionalProperties: false
@@ -296,6 +351,8 @@ components:
             - tool_started
             - tool_completed
             - tool_failed
+            - tool_approval_requested
+            - tool_approval_resolved
             - usage
             - completed
             - failed
@@ -328,6 +385,19 @@ components:
         metadata:
           type: object
           additionalProperties: true
+        approvalId:
+          type: string
+        permissionLayer:
+          type: string
+        reason:
+          type: string
+        riskLevel:
+          type: string
+        reversible:
+          type: boolean
+        decision:
+          type: string
+          enum: [allow, deny, ""]
     TokenUsage:
       type: object
       additionalProperties: false

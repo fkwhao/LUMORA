@@ -156,7 +156,7 @@ describe("task store", () => {
       .getState()
       .regenerateMessage("message-1", "只整理图片", {
         model: "gpt-5.6-sol",
-        reasoningEffort: "medium",
+        reasoningEffort: "high",
       });
 
     expect(modelApi.regenerateMessage).toHaveBeenCalledWith(
@@ -166,7 +166,7 @@ describe("task store", () => {
       expect.any(Function),
       {
         model: "gpt-5.6-sol",
-        reasoningEffort: "medium",
+        reasoningEffort: "high",
       },
     );
     expect(store.getState().messages).toEqual([
@@ -210,6 +210,69 @@ describe("task store", () => {
     expect(store.getState().chatWasStopped).toBe(true);
   });
 
+  it("pauses on a tool approval event and forwards the human decision", async () => {
+    const api = createApi();
+    const modelApi = createModelApi();
+    let onEvent: Parameters<LumoraModelApi["streamMessage"]>[2] | undefined;
+    vi.mocked(modelApi.streamMessage).mockImplementation(
+      (_taskId, _content, eventHandler) => {
+        onEvent = eventHandler;
+        queueMicrotask(() =>
+          eventHandler({
+            type: "tool_approval_requested",
+            delta: "",
+            model: "demo",
+            errorMessage: "",
+            approvalId: "approval-1",
+            itemId: "item-1",
+            toolCallId: "call-1",
+            toolName: "shell_command",
+            title: "git status",
+            arguments: { command: "git status" },
+            permissionLayer: "mode",
+            reason: "当前权限模式要求用户确认",
+            riskLevel: "MEDIUM",
+            reversible: true,
+          }),
+        );
+        return () => undefined;
+      },
+    );
+    const store = createTaskStore(api, modelApi);
+    await store.getState().openTask(createdTask.taskId);
+
+    const pendingSend = store.getState().sendMessage("检查仓库");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(store.getState().pendingToolApproval).toMatchObject({
+      approvalId: "approval-1",
+      toolName: "shell_command",
+    });
+    await store.getState().decideToolApproval("allow_once");
+    expect(modelApi.decideToolApproval).toHaveBeenCalledWith(
+      createdTask.taskId,
+      "approval-1",
+      "allow_once",
+    );
+
+    onEvent?.({
+      type: "tool_approval_resolved",
+      delta: "",
+      model: "demo",
+      errorMessage: "",
+      approvalId: "approval-1",
+      decision: "allow",
+    });
+    expect(store.getState().pendingToolApproval).toBeUndefined();
+    onEvent?.({
+      type: "completed",
+      delta: "",
+      model: "demo",
+      errorMessage: "",
+    });
+    await pendingSend;
+  });
+
   it("persists archived tasks locally and allows restoring them", async () => {
     localStorage.clear();
     const api = createApi();
@@ -244,6 +307,17 @@ function createApi(): LumoraTaskApi {
 
 function createModelApi(): LumoraModelApi {
   return {
+    listProviders: vi.fn(async () => []),
+    createProvider: vi.fn(),
+    updateProvider: vi.fn(),
+    activateProvider: vi.fn(),
+    disableProvider: vi.fn(),
+    deleteProvider: vi.fn(async () => undefined),
+    listProviderModels: vi.fn(async () => []),
+    createProviderModel: vi.fn(),
+    updateProviderModel: vi.fn(),
+    deleteProviderModel: vi.fn(async () => undefined),
+    testProviderModel: vi.fn(async () => true),
     getSettings: vi.fn(),
     updateSettings: vi.fn(),
     listModels: vi.fn(async () => []),
@@ -256,6 +330,7 @@ function createModelApi(): LumoraModelApi {
         durationMs: 2_100,
       },
     ]),
+    decideToolApproval: vi.fn(async () => undefined),
     streamMessage: vi.fn(() => () => undefined),
     regenerateMessage: vi.fn(() => () => undefined),
   };

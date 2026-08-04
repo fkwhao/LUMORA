@@ -8,12 +8,14 @@ public class AgentModelConnectionRequest {
     private final String baseUrl;
     private final String model;
     private final String apiKey;
+    private final Integer maxOutputTokens;
 
     public AgentModelConnectionRequest(ModelConnection connection) {
         this.providerName = connection.getProviderName();
         this.baseUrl = connection.getBaseUrl();
         this.model = connection.getModel();
         this.apiKey = connection.getApiKey();
+        this.maxOutputTokens = connection.getMaxOutputTokens();
     }
 
     public String getProviderName() {
@@ -30,5 +32,9 @@ public class AgentModelConnectionRequest {
 
     public String getApiKey() {
         return apiKey;
+    }
+
+    public Integer getMaxOutputTokens() {
+        return maxOutputTokens;
     }
 }

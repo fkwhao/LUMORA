@@ -18,13 +18,19 @@ public class SendMessageRequest {
     private String model;
 
     @Pattern(
-            regexp = "low|medium|high|xhigh|max",
+            regexp = "none|low|high|max",
             message = "推理强度无效"
     )
     private String reasoningEffort;
 
     @Size(max = 1000, message = "工作区路径过长")
     private String workspacePath;
+
+    @Pattern(
+            regexp = "full_access|auto_approve|request_approval",
+            message = "权限模式无效"
+    )
+    private String permissionMode = "request_approval";
 
     public SendMessageRequest() {
     }
@@ -63,5 +69,15 @@ public class SendMessageRequest {
 
     public void setWorkspacePath(String workspacePath) {
         this.workspacePath = workspacePath;
+    }
+
+    public String getPermissionMode() {
+        return permissionMode == null || permissionMode.isBlank()
+                ? "request_approval"
+                : permissionMode;
+    }
+
+    public void setPermissionMode(String permissionMode) {
+        this.permissionMode = permissionMode;
     }
 }

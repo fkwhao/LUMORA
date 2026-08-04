@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -28,7 +28,7 @@ interface WorkPhase {
 }
 
 /** 展示公开的进度说明和真实工具事件，不渲染模型隐藏推理。 */
-export function AgentRunSummary({
+export const AgentRunSummary = memo(function AgentRunSummary({
   startedAt,
   durationMs,
   events = [],
@@ -98,7 +98,7 @@ export function AgentRunSummary({
       </div>
     </section>
   );
-}
+});
 
 function WorkPhaseEntry({
   phase,

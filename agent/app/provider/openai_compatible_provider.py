@@ -14,6 +14,10 @@ from app.dto.response.chat_stream_event_response import (
     ChatStreamEventResponse,
 )
 from app.model.model_connection_settings import ModelConnectionSettings
+from app.permission.broker import ApprovalBroker
+from app.permission.config_store import PermissionConfigStore
+from app.permission.engine import PermissionEngine
+from app.permission.model import PermissionPolicy
 from app.prompt.prompt_assembly import PromptAssembly
 from app.provider.agent_loop import (
     AgentLoopRunner,
@@ -156,6 +160,10 @@ class OpenAICompatibleProvider:
         reasoning_effort: str | None,
         registry: ToolRegistry,
         tool_context: ToolContext,
+        permission_policy: PermissionPolicy,
+        permission_engine: PermissionEngine,
+        approval_broker: ApprovalBroker,
+        permission_config_store: PermissionConfigStore,
     ) -> AsyncIterator[ChatStreamEventResponse]:
         """执行最多二十轮的模型工具循环，并输出可验证的工作过程事件。"""
         async for event in AgentLoopRunner(self._complete_agent_turn).stream(
@@ -165,6 +173,10 @@ class OpenAICompatibleProvider:
             reasoning_effort,
             registry,
             tool_context,
+            permission_policy,
+            permission_engine,
+            approval_broker,
+            permission_config_store,
         ):
             yield event
 
@@ -183,10 +195,7 @@ class OpenAICompatibleProvider:
             "stream": False,
         }
         if reasoning_effort:
-            request_body["reasoning_effort"] = reasoning_effort
-        if self._is_deepseek(settings):
-            request_body["reasoning_effort"] = reasoning_effort or "high"
-            request_body["thinking"] = {"type": "enabled"}
+            request_body["reasoning"] = {"effort": reasoning_effort}
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
                 f"{settings.base_url}/chat/completions",
@@ -249,24 +258,13 @@ class OpenAICompatibleProvider:
         }
         if prompt.tools:
             request_body["tools"] = list(prompt.tools)
+        if settings.max_output_tokens is not None:
+            request_body["max_tokens"] = settings.max_output_tokens
         if stream:
             request_body["stream_options"] = {"include_usage": True}
         if reasoning_effort:
-            request_body["reasoning_effort"] = reasoning_effort
-        if self._is_deepseek(settings):
-            # DeepSeek 的思考模型需要显式开启，返回内容位于 reasoning_content。
-            request_body["reasoning_effort"] = reasoning_effort or "high"
-            request_body["thinking"] = {"type": "enabled"}
+            request_body["reasoning"] = {"effort": reasoning_effort}
         return request_body
-
-    @staticmethod
-    def _is_deepseek(settings: ModelConnectionSettings) -> bool:
-        identity = (
-            f"{settings.provider_name} "
-            f"{settings.base_url} "
-            f"{settings.model}"
-        ).lower()
-        return "deepseek" in identity
 
     @staticmethod
     def _parse_response(

@@ -15,6 +15,12 @@ import java.util.function.Consumer;
  */
 public interface AgentRuntimeClient {
 
+    void decideToolApproval(
+            String approvalId,
+            String decision,
+            String correlationId
+    );
+
     List<String> listModels(
             String providerName,
             String baseUrl,
@@ -87,4 +93,25 @@ public interface AgentRuntimeClient {
             String workspacePath,
             Consumer<ChatStreamEvent> eventConsumer
     );
+
+    default void streamChat(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String correlationId,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            Consumer<ChatStreamEvent> eventConsumer
+    ) {
+        streamChat(
+                messages,
+                connection,
+                correlationId,
+                reasoningEffort,
+                memorySummary,
+                workspacePath,
+                eventConsumer
+        );
+    }
 }

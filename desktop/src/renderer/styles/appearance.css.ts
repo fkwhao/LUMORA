@@ -39,6 +39,12 @@ globalStyle(
   },
 );
 
+globalStyle('[data-theme="dark"] .history-row', {
+  vars: {
+    "--history-row-action-bg": "#242528",
+  },
+});
+
 globalStyle(
   '[data-theme="dark"] .nav-item.active,\n[data-theme="dark"] .settings-link.active,\n[data-theme="dark"] .history-row.current',
   {
@@ -46,6 +52,12 @@ globalStyle(
     background: "#2a2b2e",
   },
 );
+
+globalStyle('[data-theme="dark"] .history-row.current', {
+  vars: {
+    "--history-row-action-bg": "#2a2b2e",
+  },
+});
 
 globalStyle(
   '[data-theme="dark"] .history-row:hover .history-item,\n[data-theme="dark"] .history-row.current .history-item',
@@ -166,22 +178,28 @@ globalStyle(
   {
     color: "var(--ink)",
     borderColor: "transparent",
-    background: "#2b2c2f",
+    background: "var(--message-bubble)",
   },
 );
 
 globalStyle(
-  '[data-theme="dark"] .markdown-body code,\n[data-theme="dark"] .markdown-body pre',
+  '[data-theme="dark"] .markdown-body pre',
   {
-    color: "#e7e9ed",
-    background: "#1b1d21",
+    color: "#e6edf3",
+    background: "var(--message-bubble)",
   },
 );
 
-globalStyle(".markdown-body code,\n.markdown-body pre", {
+globalStyle(
+  ".markdown-body code,\n.markdown-body pre,\n.tool-call-detail code,\n.review-diff-line code",
+  {
   fontFamily:
     'var(--code-font, "Cascadia Code", "SFMono-Regular", Consolas, monospace)',
-});
+    fontWeight: "400",
+    fontVariantLigatures: "none",
+    fontFeatureSettings: '"liga" 0, "calt" 0',
+  },
+);
 
 globalStyle('[data-theme="dark"] .desktop-bridge-error', {
   color: "var(--ink)",
@@ -331,9 +349,9 @@ globalStyle('[data-theme="dark"] .markdown-body a:hover', {
 });
 
 globalStyle('[data-theme="dark"] .markdown-body code', {
-  color: "#f4f5f6",
-  borderColor: "#3b4047",
-  background: "#30343a",
+  color: "#e6edf3",
+  borderColor: "#30363d",
+  background: "rgb(110 118 129 / 20%)",
 });
 
 globalStyle('[data-theme="dark"] .markdown-body pre code', {
@@ -342,19 +360,95 @@ globalStyle('[data-theme="dark"] .markdown-body pre code', {
   background: "transparent",
 });
 
+globalStyle('[data-theme="dark"] .markdown-code-block', {
+  borderColor: "#30363d",
+  background: "var(--message-bubble)",
+  boxShadow:
+    "0 1px 2px rgb(0 0 0 / 22%), inset 0 1px 0 rgb(255 255 255 / 3%)",
+});
+
+globalStyle('[data-theme="dark"] .markdown-code-toolbar', {
+  color: "#8b949e",
+  borderColor: "#30363d",
+  background: "var(--message-bubble)",
+});
+
+globalStyle('[data-theme="dark"] .markdown-code-toolbar button', {
+  color: "#8b949e",
+});
+
+globalStyle('[data-theme="dark"] .markdown-code-toolbar button:hover', {
+  color: "#e6edf3",
+  background: "rgb(177 186 196 / 12%)",
+});
+
+globalStyle('[data-theme="dark"] .markdown-code-toolbar button.is-copied', {
+  color: "#3fb950",
+});
+
 globalStyle(
-  '[data-theme="dark"] .markdown-body th,\n[data-theme="dark"] .markdown-body td',
+  '[data-theme="dark"] .markdown-body .hljs-comment,\n[data-theme="dark"] .markdown-body .hljs-quote',
+  { color: "#8b949e" },
+);
+
+globalStyle(
+  '[data-theme="dark"] .markdown-body .hljs-keyword,\n[data-theme="dark"] .markdown-body .hljs-selector-tag,\n[data-theme="dark"] .markdown-body .hljs-literal,\n[data-theme="dark"] .markdown-body .hljs-type',
+  { color: "#ff7b72" },
+);
+
+globalStyle(
+  '[data-theme="dark"] .markdown-body .hljs-string,\n[data-theme="dark"] .markdown-body .hljs-regexp,\n[data-theme="dark"] .markdown-body .hljs-addition,\n[data-theme="dark"] .markdown-body .hljs-attribute',
+  { color: "#a5d6ff" },
+);
+
+globalStyle(
+  '[data-theme="dark"] .markdown-body .hljs-number,\n[data-theme="dark"] .markdown-body .hljs-symbol,\n[data-theme="dark"] .markdown-body .hljs-bullet',
+  { color: "#79c0ff" },
+);
+
+globalStyle(
+  '[data-theme="dark"] .markdown-body .hljs-title,\n[data-theme="dark"] .markdown-body .hljs-section,\n[data-theme="dark"] .markdown-body .hljs-function',
+  { color: "#d2a8ff" },
+);
+
+globalStyle(
+  '[data-theme="dark"] .markdown-body .hljs-variable,\n[data-theme="dark"] .markdown-body .hljs-template-variable,\n[data-theme="dark"] .markdown-body .hljs-params',
+  { color: "#ffa657" },
+);
+
+globalStyle('[data-theme="dark"] .markdown-body .hljs-deletion', {
+  color: "#ffdcd7",
+  background: "#67060c",
+});
+
+globalStyle('[data-theme="dark"] .markdown-body pre code.language-diff', {
+  color: "#e6edf3",
+});
+
+globalStyle('[data-theme="dark"] .markdown-table-scroll', {
+  borderColor: "#35383d",
+  background: "#202225",
+  boxShadow: "0 1px 2px rgb(0 0 0 / 16%)",
+});
+
+globalStyle(
+  '[data-theme="dark"] .markdown-body th,\n[data-theme="dark"] .markdown-body td,\n[data-theme="dark"] .markdown-body th:not(:last-child),\n[data-theme="dark"] .markdown-body td:not(:last-child)',
   {
-    borderColor: "var(--appearance-line, var(--line-strong))",
+    borderColor: "#34373c",
   },
 );
 
 globalStyle('[data-theme="dark"] .markdown-body th', {
-  background: "#30343a",
+  color: "#c7cad0",
+  background: "#292c30",
 });
 
 globalStyle('[data-theme="dark"] .markdown-body tr:nth-child(even) td', {
-  background: "#292c31",
+  background: "#24262a",
+});
+
+globalStyle('[data-theme="dark"] .markdown-body tbody tr:hover td', {
+  background: "#2b2e33",
 });
 
 globalStyle('[data-theme="dark"] .markdown-body hr', {
@@ -377,10 +471,36 @@ globalStyle('[data-theme="dark"] .follow-up-composer', {
   boxShadow: "0 1px 5px rgb(0 0 0 / 22%)",
 });
 
-globalStyle('[data-theme="dark"] .follow-up-composer .send-follow-up', {
-  color: "#1b1d21",
-  background: "#f2f3f5",
+globalStyle(
+  '[data-theme="dark"] .follow-up-composer .model-choice-button',
+  {
+    color: "#f4f4f5 !important",
+  },
+);
+
+globalStyle('[data-theme="dark"] .composer-popover', {
+  color: "#f1f1f1",
+  borderColor: "#414141",
+  background: "#2b2b2b",
+  boxShadow: "0 18px 48px rgb(0 0 0 / 34%)",
 });
+
+globalStyle('[data-theme="dark"] .composer-popover > button.is-selected', {
+  background: "transparent !important",
+});
+
+globalStyle('[data-theme="dark"] .composer-popover > button:hover', {
+  background: "rgb(255 255 255 / 7%) !important",
+});
+
+globalStyle(
+  '[data-theme="dark"] .submit-task,\n[data-theme="dark"] .follow-up-composer .send-follow-up',
+  {
+    color: "#1b1d21",
+    borderColor: "transparent",
+    background: "#f2f3f5",
+  },
+);
 
 globalStyle(
   '[data-theme="dark"] .user-message-edit-actions button.confirm',
@@ -401,7 +521,7 @@ globalStyle(
 );
 
 globalStyle(
-  '[data-theme="dark"] .follow-up-composer .send-follow-up:hover:not(:disabled)',
+  '[data-theme="dark"] .submit-task:hover:not(:disabled),\n[data-theme="dark"] .follow-up-composer .send-follow-up:hover:not(:disabled)',
   {
     color: "#111318",
     borderColor: "#fff",

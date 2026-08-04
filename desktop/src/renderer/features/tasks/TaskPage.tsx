@@ -1,16 +1,27 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowLeft,
   ArrowUp,
+  Check,
   ChevronDown,
   Copy,
   Download,
+  File,
   FileDiff,
+  Folder,
+  Globe2,
+  Hand,
+  Lightbulb,
+  Mic,
   MoreHorizontal,
-  Paperclip,
   Pencil,
+  Plus,
+  ShieldAlert,
   Square,
+  Target,
+  ThumbsDown,
+  ThumbsUp,
   X,
 } from "lucide-react";
 import { useStore } from "zustand";
@@ -19,14 +30,16 @@ import type {
   ChatMessage,
   LumoraModelApi,
   ModelSettings,
+  PermissionMode,
   ReasoningEffort,
   WorkLogItem,
 } from "../../../shared/model-contract";
-import type { TaskStatus } from "../../../shared/task-contract";
+import type { TaskEvent, TaskStatus } from "../../../shared/task-contract";
 import { MarkdownMessage } from "../../components/MarkdownMessage";
 import { resizeTextarea } from "../../utils/auto-resize-textarea";
 import { submitFormOnEnter } from "../../utils/submit-on-enter";
 import { ApprovalDock } from "./ApprovalDock";
+import { ToolApprovalDialog } from "./ToolApprovalDialog";
 import { AgentRunSummary } from "./AgentRunSummary";
 import { DiffReviewPane, type FileChange } from "./DiffReviewPane";
 import type { TaskStore } from "./task-store";
@@ -36,6 +49,9 @@ interface TaskPageProps {
   modelApi?: LumoraModelApi;
   notify(message: string, tone?: "info" | "success"): void;
 }
+
+type ComposerReasoningEffort = ReasoningEffort;
+const EMPTY_TASK_EVENTS: TaskEvent[] = [];
 
 export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
   const task = useStore(store, (state) => state.activeTask);
@@ -60,18 +76,39 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
   const [selectedModel, setSelectedModel] = useState("");
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [reasoningEffort, setReasoningEffort] =
-    useState<ReasoningEffort>("high");
+    useState<ComposerReasoningEffort>("high");
+  const [messageReactions, setMessageReactions] = useState<
+    Record<string, "like" | "dislike">
+  >({});
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>(
+    loadPermissionMode,
+  );
+  const [composerMenu, setComposerMenu] = useState<
+    "context" | "permission" | "model" | "reasoning" | null
+  >(null);
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const conversationScrollRef = useRef<HTMLDivElement>(null);
+  const conversationContentRef = useRef<HTMLDivElement>(null);
   const followUpInputRef = useRef<HTMLTextAreaElement>(null);
   const editInputRef = useRef<HTMLTextAreaElement>(null);
   const conversationFooterRef = useRef<HTMLDivElement>(null);
+  const composerMenuRef = useRef<HTMLFormElement>(null);
+  const contextFileInputRef = useRef<HTMLInputElement>(null);
+  const taskActionsRef = useRef<HTMLDivElement>(null);
   const scrollStateFrameRef = useRef<number | null>(null);
+  const questionLayoutFrameRef = useRef<number | null>(null);
+  const questionPositionsRef = useRef<Array<{ index: number; top: number }>>(
+    [],
+  );
   const railPointerStartRef = useRef<{ x: number; y: number } | null>(null);
   const railWasDraggedRef = useRef(false);
   const lastAutoScrolledQuestionRef = useRef<string | undefined>(undefined);
   const lastOpenedTaskRef = useRef<string | undefined>(undefined);
+  const openChangeReview = useCallback((item: WorkLogItem) => {
+    setSelectedChangeId(item.itemId);
+    setReviewOpen(true);
+  }, []);
 
   useEffect(
     () => resizeTextarea(followUpInputRef.current, 180),
@@ -105,6 +142,46 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
   );
 
   useEffect(() => {
+    if (!composerMenu) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target as Element;
+      if (
+        !target.closest(".composer-menu-anchor") &&
+        !target.closest(".composer-popover")
+      ) {
+        setComposerMenu(null);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setComposerMenu(null);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [composerMenu]);
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!taskActionsRef.current?.contains(event.target as Node)) {
+        setMoreOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMoreOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [moreOpen]);
+
+  useEffect(() => {
     const scroll = conversationScrollRef.current;
     const footer = conversationFooterRef.current;
     if (!scroll || !footer) {
@@ -123,6 +200,50 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
     const observer = new ResizeObserver(syncFooterHeight);
     observer.observe(footer);
     return () => observer.disconnect();
+  }, [task?.taskId]);
+
+  useEffect(() => {
+    const scroll = conversationScrollRef.current;
+    const content = conversationContentRef.current;
+    if (!scroll || !content) {
+      return;
+    }
+    const refreshQuestionPositions = () => {
+      if (questionLayoutFrameRef.current !== null) {
+        cancelAnimationFrame(questionLayoutFrameRef.current);
+      }
+      questionLayoutFrameRef.current = requestAnimationFrame(() => {
+        questionLayoutFrameRef.current = null;
+        const scrollTop = scroll.getBoundingClientRect().top;
+        questionPositionsRef.current = Array.from(
+          content.querySelectorAll<HTMLElement>("[data-question-index]"),
+        ).map((question) => ({
+          index: Number(question.dataset.questionIndex),
+          top:
+            scroll.scrollTop +
+            question.getBoundingClientRect().top -
+            scrollTop,
+        }));
+      });
+    };
+    refreshQuestionPositions();
+    if (typeof ResizeObserver === "undefined") {
+      return () => {
+        if (questionLayoutFrameRef.current !== null) {
+          cancelAnimationFrame(questionLayoutFrameRef.current);
+          questionLayoutFrameRef.current = null;
+        }
+      };
+    }
+    const observer = new ResizeObserver(refreshQuestionPositions);
+    observer.observe(content);
+    return () => {
+      observer.disconnect();
+      if (questionLayoutFrameRef.current !== null) {
+        cancelAnimationFrame(questionLayoutFrameRef.current);
+        questionLayoutFrameRef.current = null;
+      }
+    };
   }, [task?.taskId]);
 
   useEffect(() => {
@@ -293,29 +414,34 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
       setShowScrollToBottom(
         scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight > 56,
       );
-      const questions = Array.from(
-        scroll.querySelectorAll<HTMLElement>("[data-question-index]"),
-      );
-      if (questions.length === 0) {
+      const positions = questionPositionsRef.current;
+      if (positions.length === 0) {
         return;
       }
-      const firstQuestion = questions[0];
-      if (!firstQuestion) {
-        return;
-      }
-      const scrollTop = scroll.getBoundingClientRect().top + 34;
-      let nearest = firstQuestion;
-      let nearestDistance = Number.POSITIVE_INFINITY;
-      for (const question of questions) {
-        const distance = Math.abs(
-          question.getBoundingClientRect().top - scrollTop,
-        );
-        if (distance < nearestDistance) {
-          nearest = question;
-          nearestDistance = distance;
+      const targetTop = scroll.scrollTop + 34;
+      let low = 0;
+      let high = positions.length;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        const position = positions[middle];
+        if (position && position.top < targetTop) {
+          low = middle + 1;
+        } else {
+          high = middle;
         }
       }
-      setActiveQuestionIndex(Number(nearest.dataset.questionIndex));
+      const after = positions[Math.min(low, positions.length - 1)];
+      const before = positions[Math.max(0, low - 1)];
+      if (!after || !before) {
+        return;
+      }
+      const nearest =
+        Math.abs(after.top - targetTop) < Math.abs(before.top - targetTop)
+          ? after
+          : before;
+      setActiveQuestionIndex((current) =>
+        current === nearest.index ? current : nearest.index,
+      );
     });
   }
 
@@ -357,7 +483,33 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
     setFollowUp("");
     await store.getState().sendMessage(content, {
       model: selectedModel || undefined,
-      reasoningEffort: isDeepSeek ? reasoningEffort : undefined,
+      reasoningEffort,
+      permissionMode,
+    });
+  }
+
+  function openLocalContext(folder: boolean) {
+    const input = contextFileInputRef.current;
+    if (!input) return;
+    folder
+      ? input.setAttribute("webkitdirectory", "")
+      : input.removeAttribute("webkitdirectory");
+    setComposerMenu(null);
+    input.click();
+  }
+
+  function toggleMessageReaction(
+    messageKey: string,
+    reaction: "like" | "dislike",
+  ) {
+    setMessageReactions((current) => {
+      const next = { ...current };
+      if (next[messageKey] === reaction) {
+        delete next[messageKey];
+      } else {
+        next[messageKey] = reaction;
+      }
+      return next;
     });
   }
 
@@ -373,7 +525,8 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
     try {
       await store.getState().regenerateMessage(messageId, content, {
         model: selectedModel || undefined,
-        reasoningEffort: isDeepSeek ? reasoningEffort : undefined,
+        reasoningEffort,
+        permissionMode,
       });
     } catch (error) {
       notify(toErrorMessage(error));
@@ -402,11 +555,6 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
   }
 
   const configuredModel = modelSettings?.model || selectedModel;
-  const isDeepSeek = [
-    modelSettings?.providerName,
-    modelSettings?.baseUrl,
-    selectedModel,
-  ].some((value) => value?.toLowerCase().includes("deepseek"));
   const modelOptions = [
     ...new Set(
       [
@@ -416,7 +564,9 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
       ].filter(Boolean),
     ),
   ];
-  const contextLimit = modelSettings?.contextWindow ?? 128_000;
+  const contextLimit = modelSettings?.models.find(
+    (model) => model.modelId === selectedModel,
+  )?.contextWindow ?? modelSettings?.contextWindow ?? 128_000;
   const reportedTotalTokens = [...messages]
     .reverse()
     .find(
@@ -451,7 +601,7 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
           </span>
         </div>
 
-        <div className="task-actions">
+        <div className="task-actions" ref={taskActionsRef}>
           <button
             className={`review-toggle${reviewOpen ? " active" : ""}`}
             type="button"
@@ -576,12 +726,14 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
             onWheelCapture={cancelConversationScrollAnimation}
             onPointerDownCapture={cancelConversationScrollAnimation}
           >
-            <div className="conversation-content">
+            <div className="conversation-content" ref={conversationContentRef}>
               {task.errorMessage && (
                 <div className="task-error-banner">{task.errorMessage}</div>
               )}
 
               {displayMessages.map((message, index) => {
+                const messageKey =
+                  message.messageId ?? `${message.role}-${index}`;
                 const questionIndex =
                   message.role === "user"
                     ? questionEntries.findIndex(
@@ -599,7 +751,7 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
                   taskEvents.length === 0;
                 return (
                 <Fragment
-                  key={message.messageId ?? `${message.role}-${index}`}
+                  key={messageKey}
                 >
                   {message.role === "assistant" && !isThinkingStage && (
                       <AgentRunSummary
@@ -613,7 +765,7 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
                         events={
                           index === displayMessages.length - 1
                             ? taskEvents
-                            : []
+                            : EMPTY_TASK_EVENTS
                         }
                         workLog={message.workLog}
                         running={
@@ -624,10 +776,7 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
                           chatWasStopped &&
                           index === displayMessages.length - 1
                         }
-                        onReviewChange={(item) => {
-                          setSelectedChangeId(item.itemId);
-                          setReviewOpen(true);
-                        }}
+                        onReviewChange={openChangeReview}
                       />
                     )}
                   {message.role === "user" ? (
@@ -693,7 +842,7 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
                               notify("消息已复制", "success");
                             }}
                           >
-                            <Copy size={16} />
+                            <Copy size={14} />
                           </button>
                           {message.messageId &&
                             message.messageId ===
@@ -708,7 +857,7 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
                                   setEditingContent(message.content);
                                 }}
                               >
-                                <Pencil size={16} />
+                                <Pencil size={14} />
                               </button>
                             )}
                         </span>
@@ -721,10 +870,76 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
                           <span>正在思考</span>
                         </div>
                       ) : message.content ? (
-                        <article className="assistant-message">
-                          <MarkdownMessage content={message.content} />
-                          {isCurrentAssistant && (
-                            <span className="stream-cursor" aria-hidden="true" />
+                        <article className="assistant-message-group">
+                          <div className="assistant-message">
+                            <MarkdownMessage content={message.content} />
+                            {isCurrentAssistant && (
+                              <span
+                                className="stream-cursor"
+                                aria-hidden="true"
+                              />
+                            )}
+                          </div>
+                          {!isCurrentAssistant && (
+                            <div className="assistant-message-meta">
+                              <span className="assistant-message-actions">
+                                <button
+                                  type="button"
+                                  aria-label="复制回复"
+                                  title="复制"
+                                  onClick={() => {
+                                    void navigator.clipboard.writeText(
+                                      message.content,
+                                    );
+                                    notify("回复已复制", "success");
+                                  }}
+                                >
+                                  <Copy size={14} />
+                                </button>
+                                <button
+                                  className={
+                                    messageReactions[messageKey] === "like"
+                                      ? "active"
+                                      : undefined
+                                  }
+                                  type="button"
+                                  aria-label="喜欢这条回复"
+                                  aria-pressed={
+                                    messageReactions[messageKey] === "like"
+                                  }
+                                  title="喜欢"
+                                  onClick={() =>
+                                    toggleMessageReaction(messageKey, "like")
+                                  }
+                                >
+                                  <ThumbsUp size={14} />
+                                </button>
+                                <button
+                                  className={
+                                    messageReactions[messageKey] === "dislike"
+                                      ? "active"
+                                      : undefined
+                                  }
+                                  type="button"
+                                  aria-label="不喜欢这条回复"
+                                  aria-pressed={
+                                    messageReactions[messageKey] === "dislike"
+                                  }
+                                  title="不喜欢"
+                                  onClick={() =>
+                                    toggleMessageReaction(
+                                      messageKey,
+                                      "dislike",
+                                    )
+                                  }
+                                >
+                                  <ThumbsDown size={14} />
+                                </button>
+                              </span>
+                              <time dateTime={message.createdAt}>
+                                {formatMessageDateTime(message.createdAt)}
+                              </time>
+                            </div>
                           )}
                         </article>
                       ) : null}
@@ -770,28 +985,132 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
                     )}
                   </button>
                 )}
-                <form className="follow-up-composer" onSubmit={submitFollowUp}>
+                <form
+                  className="follow-up-composer"
+                  onSubmit={submitFollowUp}
+                  ref={composerMenuRef}
+                >
+                  <input
+                    ref={contextFileInputRef}
+                    className="visually-hidden"
+                    type="file"
+                    multiple
+                    onChange={(event) => {
+                      const count = event.target.files?.length ?? 0;
+                      if (count > 0) {
+                        notify(`已选择 ${count} 个本地资源`, "success");
+                      }
+                      event.target.value = "";
+                    }}
+                  />
                   <textarea
                     ref={followUpInputRef}
                     aria-label="继续任务"
-                    placeholder="补充目标、附加上下文或纠正当前任务…"
+                    placeholder="随心输入"
                     rows={2}
                     value={followUp}
                     onChange={(event) => setFollowUp(event.target.value)}
                     onKeyDown={submitFormOnEnter}
                   />
                   <div className="composer-toolbar">
-                    <button
-                      className="composer-attach"
-                      type="button"
-                      aria-label="添加上下文"
-                      onClick={() =>
-                        notify("上下文选择器已响应，任务附件接口待接入")
-                      }
-                    >
-                      <Paperclip size={17} />
-                      <span>添加上下文</span>
-                    </button>
+                    <div className="composer-toolbar-left">
+                      <span className="composer-menu-anchor">
+                        <button
+                          className="composer-icon-button"
+                          type="button"
+                          aria-label="添加上下文"
+                          aria-expanded={composerMenu === "context"}
+                          onClick={() =>
+                            setComposerMenu((open) =>
+                              open === "context" ? null : "context",
+                            )
+                          }
+                        >
+                          <Plus size={20} strokeWidth={1.7} />
+                        </button>
+                      </span>
+
+                      <span className="composer-menu-anchor permission-anchor">
+                        <button
+                          className={`composer-permission-button${
+                            permissionMode === "full_access"
+                              ? " is-dangerous"
+                              : ""
+                          }`}
+                          type="button"
+                          aria-label="选择权限模式"
+                          aria-expanded={composerMenu === "permission"}
+                          data-permission-mode={permissionMode}
+                          onClick={() =>
+                            setComposerMenu((open) =>
+                              open === "permission" ? null : "permission",
+                            )
+                          }
+                        >
+                          <PermissionModeIcon mode={permissionMode} size={17} />
+                          <span>{permissionModeLabel(permissionMode)}</span>
+                        </button>
+                        {composerMenu === "permission" && (
+                          <span
+                            className="composer-popover permission-popover"
+                            role="menu"
+                          >
+                            <span className="permission-popover-header">
+                              <span>应如何批准 LUMORA 操作？</span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  notify("权限模式说明已在设计文档中同步")
+                                }
+                              >
+                                了解更多
+                              </button>
+                            </span>
+                            {permissionModeOptions.map((option) => (
+                              <button
+                                className={[
+                                  option.value === permissionMode
+                                    ? "is-selected"
+                                    : "",
+                                  option.value === "full_access"
+                                    ? "is-dangerous"
+                                    : "",
+                                ]
+                                  .filter(Boolean)
+                                  .join(" ")}
+                                type="button"
+                                role="menuitemradio"
+                                aria-checked={option.value === permissionMode}
+                                key={option.value}
+                                onClick={() => {
+                                  setPermissionMode(option.value);
+                                  savePermissionMode(option.value);
+                                  setComposerMenu(null);
+                                }}
+                              >
+                                <span className="permission-option-icon">
+                                  <PermissionModeIcon
+                                    mode={option.value}
+                                    size={18}
+                                  />
+                                </span>
+                                <span className="permission-option-copy">
+                                  <strong>{option.label}</strong>
+                                  <small>{option.description}</small>
+                                </span>
+                                {option.value === permissionMode && (
+                                  <Check
+                                    className="permission-option-check"
+                                    size={17}
+                                    strokeWidth={1.8}
+                                  />
+                                )}
+                              </button>
+                            ))}
+                          </span>
+                        )}
+                      </span>
+                    </div>
                     <div className="composer-controls">
                       <span className="context-usage-control">
                         <span
@@ -842,43 +1161,122 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
                           </b>
                         </span>
                       </span>
-                      <label className="composer-select model-select">
-                        <span className="visually-hidden">选择模型</span>
-                        <select
+                      <span className="composer-menu-anchor model-anchor">
+                        <button
+                          className="composer-choice-button model-choice-button"
+                          type="button"
                           aria-label="选择模型"
-                          value={selectedModel}
-                          onChange={(event) =>
-                            setSelectedModel(event.target.value)
+                          aria-expanded={composerMenu === "model"}
+                          onClick={() =>
+                            setComposerMenu((open) =>
+                              open === "model" ? null : "model",
+                            )
                           }
                         >
-                          {!selectedModel && <option value="">模型</option>}
-                          {modelOptions.map((model) => (
-                            <option value={model} key={model}>
-                              {modelDisplayName(model)}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown size={13} />
-                      </label>
-                      {isDeepSeek && (
-                        <label className="composer-select reasoning-select">
-                          <span className="visually-hidden">选择思考强度</span>
-                          <select
-                            aria-label="选择思考强度"
-                            value={reasoningEffort}
-                            onChange={(event) =>
-                              setReasoningEffort(
-                                event.target.value as ReasoningEffort,
+                          <span>
+                            {selectedModel
+                              ? modelDisplayName(selectedModel)
+                              : "模型"}
+                          </span>
+                        </button>
+                        {composerMenu === "model" && (
+                          <span
+                            className="composer-popover model-picker-popover align-right"
+                            role="menu"
+                          >
+                            <b>选择模型</b>
+                            {modelOptions.map((model) => (
+                              <button
+                                className={
+                                  model === selectedModel
+                                    ? "is-selected"
+                                    : undefined
+                                }
+                                type="button"
+                                role="menuitemradio"
+                                aria-checked={model === selectedModel}
+                                key={model}
+                                onClick={() => {
+                                  setSelectedModel(model);
+                                  setComposerMenu(null);
+                                }}
+                              >
+                                <span>{modelDisplayName(model)}</span>
+                                {model === selectedModel && (
+                                  <Check
+                                    className="composer-option-check"
+                                    size={16}
+                                    strokeWidth={1.8}
+                                  />
+                                )}
+                              </button>
+                            ))}
+                          </span>
+                        )}
+                      </span>
+                      <span className="composer-menu-anchor reasoning-anchor">
+                          <button
+                            className="composer-choice-button reasoning-choice-button"
+                            type="button"
+                            aria-label="选择推理强度"
+                            aria-expanded={composerMenu === "reasoning"}
+                            onClick={() =>
+                              setComposerMenu((open) =>
+                                open === "reasoning" ? null : "reasoning",
                               )
                             }
                           >
-                            <option value="low">低</option>
-                            <option value="high">高</option>
-                            <option value="max">Max</option>
-                          </select>
-                          <ChevronDown size={13} />
-                        </label>
-                      )}
+                            <span>{reasoningEffortLabel(reasoningEffort)}</span>
+                            <ChevronDown size={14} strokeWidth={1.7} />
+                          </button>
+                          {composerMenu === "reasoning" && (
+                            <span
+                              className="composer-popover reasoning-popover align-right"
+                              role="menu"
+                            >
+                              <b>推理强度</b>
+                              {reasoningEffortOptions.map((option) => (
+                                <button
+                                  className={
+                                    option.value === reasoningEffort
+                                      ? "is-selected"
+                                      : undefined
+                                  }
+                                  type="button"
+                                  role="menuitemradio"
+                                  aria-checked={
+                                    option.value === reasoningEffort
+                                  }
+                                  key={option.value}
+                                  onClick={() => {
+                                    setReasoningEffort(option.value);
+                                    setComposerMenu(null);
+                                  }}
+                                >
+                                  <span className="composer-option-copy">
+                                    <strong>{option.label}</strong>
+                                    <small>{option.description}</small>
+                                  </span>
+                                  {option.value === reasoningEffort && (
+                                    <Check
+                                      className="composer-option-check"
+                                      size={16}
+                                      strokeWidth={1.8}
+                                    />
+                                  )}
+                                </button>
+                              ))}
+                            </span>
+                          )}
+                      </span>
+                      <button
+                        className="composer-icon-button composer-mic-button"
+                        type="button"
+                        aria-label="语音输入"
+                        onClick={() => notify("语音输入接口待接入")}
+                      >
+                        <Mic size={18} strokeWidth={1.8} />
+                      </button>
                       <button
                         className={`send-follow-up${
                           isChatting ? " is-stopping" : ""
@@ -904,11 +1302,86 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
                       </button>
                     </div>
                   </div>
+                  {composerMenu === "context" && (
+                    <span
+                      className="composer-popover context-picker-popover"
+                      role="menu"
+                    >
+                      <b>添加</b>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => openLocalContext(false)}
+                      >
+                        <File size={17} />
+                        <span>
+                          <strong>文件</strong>
+                          <small>选择本地文件作为上下文</small>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => openLocalContext(true)}
+                      >
+                        <Folder size={17} />
+                        <span>
+                          <strong>文件夹</strong>
+                          <small>选择一个本地目录</small>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setComposerMenu(null);
+                          notify("持续目标接口待接入");
+                        }}
+                      >
+                        <Target size={17} />
+                        <span>
+                          <strong>目标</strong>
+                          <small>设置要持续追求的目标</small>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setComposerMenu(null);
+                          notify("已保持当前工作模式");
+                        }}
+                      >
+                        <Lightbulb size={17} />
+                        <span>
+                          <strong>计划模式</strong>
+                          <small>先规划，再开始执行</small>
+                        </span>
+                      </button>
+                      <span className="context-picker-section">其他上下文</span>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setComposerMenu(null);
+                          notify("网页上下文接口待接入");
+                        }}
+                      >
+                        <Globe2 size={17} />
+                        <span>
+                          <strong>网页链接</strong>
+                          <small>添加网页内容作为参考</small>
+                        </span>
+                      </button>
+                    </span>
+                  )}
                 </form>
               </div>
             </div>
           </div>
         </section>
+
+        <ToolApprovalDialog store={store} />
 
         {reviewOpen && (
           <DiffReviewPane
@@ -973,6 +1446,86 @@ function modelDisplayName(model: string): string {
   return model;
 }
 
+const permissionModeOptions: Array<{
+  value: PermissionMode;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "request_approval",
+    label: "请求批准",
+    description: "编辑外部文件和使用互联网时始终询问",
+  },
+  {
+    value: "auto_approve",
+    label: "替我审批",
+    description: "仅对检测到的风险操作请求批准",
+  },
+  {
+    value: "full_access",
+    label: "完全访问权限",
+    description: "允许工作区内操作；外部路径与危险命令仍受保护",
+  },
+];
+
+const reasoningEffortOptions: Array<{
+  value: ComposerReasoningEffort;
+  label: string;
+  description: string;
+}> = [
+  { value: "none", label: "关闭", description: "不启用思考模式" },
+  { value: "low", label: "低", description: "响应更快" },
+  { value: "high", label: "高", description: "更深入地分析" },
+  { value: "max", label: "Max", description: "使用最大推理强度" },
+];
+
+function permissionModeLabel(mode: PermissionMode): string {
+  return (
+    permissionModeOptions.find((option) => option.value === mode)?.label ??
+    "请求批准"
+  );
+}
+
+function PermissionModeIcon({
+  mode,
+  size,
+}: {
+  mode: PermissionMode;
+  size: number;
+}) {
+  if (mode === "request_approval") {
+    return <Hand aria-hidden="true" size={size} strokeWidth={1.65} />;
+  }
+  if (mode === "full_access") {
+    return <ShieldAlert aria-hidden="true" size={size} strokeWidth={1.65} />;
+  }
+  return (
+    <svg
+      aria-hidden="true"
+      className="permission-auto-icon"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.65"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 2.7 20 6v5.3c0 5.2-3.25 8.45-8 10-4.75-1.55-8-4.8-8-10V6l8-3.3Z" />
+      <path d="m8.5 10.1 2 1.9-2 1.9" />
+      <path d="M13 14h2.7" />
+    </svg>
+  );
+}
+
+function reasoningEffortLabel(effort: ComposerReasoningEffort): string {
+  return (
+    reasoningEffortOptions.find((option) => option.value === effort)?.label ??
+    "高"
+  );
+}
+
 function formatTokenCount(tokens: number): string {
   if (tokens < 1_000) {
     return tokens.toLocaleString();
@@ -1028,6 +1581,37 @@ function formatMessageTime(createdAt?: string): string {
     minute: "2-digit",
     hour12: false,
   }).format(date);
+}
+
+function formatMessageDateTime(createdAt?: string): string {
+  if (!createdAt) return "";
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+const PERMISSION_MODE_STORAGE_KEY = "lumora.permission-mode";
+
+function loadPermissionMode(): PermissionMode {
+  const value = window.localStorage.getItem(PERMISSION_MODE_STORAGE_KEY);
+  if (
+    value === "full_access" ||
+    value === "auto_approve" ||
+    value === "request_approval"
+  ) {
+    return value;
+  }
+  return "request_approval";
+}
+
+function savePermissionMode(mode: PermissionMode): void {
+  window.localStorage.setItem(PERMISSION_MODE_STORAGE_KEY, mode);
 }
 
 function toErrorMessage(error: unknown): string {

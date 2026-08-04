@@ -1,13 +1,21 @@
 import json
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 from app.dto.request.chat_completion_request import ChatMessageRequest
 from app.dto.response.chat_completion_response import TokenUsageResponse
 from app.dto.response.chat_stream_event_response import ChatStreamEventResponse
 from app.model.model_connection_settings import ModelConnectionSettings
+from app.permission.broker import ApprovalBroker
+from app.permission.config_store import PermissionConfigStore
+from app.permission.engine import PermissionEngine
+from app.permission.model import (
+    ApprovalDecision,
+    PermissionDecision,
+    PermissionPolicy,
+)
 from app.prompt.prompt_assembly import PromptAssembly
 from app.tool.base import ToolContext
 from app.tool.registry import ToolRegistry
@@ -49,7 +57,17 @@ class AgentLoopRunner:
         reasoning_effort: str | None,
         registry: ToolRegistry,
         tool_context: ToolContext,
+        permission_policy: PermissionPolicy | None = None,
+        permission_engine: PermissionEngine | None = None,
+        approval_broker: ApprovalBroker | None = None,
+        permission_config_store: PermissionConfigStore | None = None,
     ) -> AsyncIterator[ChatStreamEventResponse]:
+        permission_policy = permission_policy or PermissionPolicy()
+        permission_engine = permission_engine or PermissionEngine()
+        approval_broker = approval_broker or ApprovalBroker()
+        permission_config_store = (
+            permission_config_store or PermissionConfigStore()
+        )
         request_messages: list[dict[str, Any]] = [
             *prompt.system_messages,
             *prompt.context_messages,
@@ -121,7 +139,14 @@ class AgentLoopRunner:
             for call in turn.tool_calls:
                 result_text = "工具调用未返回结果"
                 async for event, result_text in self._execute_tool_call(
-                    call, registry, tool_context, resolved_model
+                    call,
+                    registry,
+                    tool_context,
+                    resolved_model,
+                    permission_policy,
+                    permission_engine,
+                    approval_broker,
+                    permission_config_store,
                 ):
                     yield event
                 request_messages.append({
@@ -137,8 +162,13 @@ class AgentLoopRunner:
         registry: ToolRegistry,
         tool_context: ToolContext,
         model: str,
+        permission_policy: PermissionPolicy,
+        permission_engine: PermissionEngine,
+        approval_broker: ApprovalBroker,
+        permission_config_store: PermissionConfigStore,
     ) -> AsyncIterator[tuple[ChatStreamEventResponse, str]]:
         item_id = str(uuid.uuid4())
+        title = call.name
         try:
             arguments = json.loads(call.arguments_json or "{}")
             if not isinstance(arguments, dict):
@@ -159,20 +189,130 @@ class AgentLoopRunner:
             return
 
         try:
-            title = registry.display_title(call.name, arguments)
-        except ValueError:
-            title = call.name
-        yield ChatStreamEventResponse(
-            type="tool_started",
-            itemId=item_id,
-            toolCallId=call.call_id,
-            toolName=call.name,
-            title=title,
-            arguments=arguments,
-            model=model,
-        ), ""
-        try:
-            result = await registry.execute(call.name, tool_context, arguments)
+            tool, arguments = registry.validate(call.name, arguments)
+            title = tool.display_title(arguments)
+            evaluation = permission_engine.evaluate(
+                tool,
+                tool_context,
+                arguments,
+                permission_policy,
+            )
+            permission_metadata = {
+                "permissionLayer": evaluation.layer,
+                "permissionReason": evaluation.reason,
+                "riskLevel": evaluation.risk_level,
+                "reversible": evaluation.reversible,
+            }
+            if evaluation.decision is PermissionDecision.DENY:
+                result_text = json.dumps(
+                    {
+                        "ok": False,
+                        "content": f"权限系统已拒绝：{evaluation.reason}",
+                    },
+                    ensure_ascii=False,
+                )
+                yield ChatStreamEventResponse(
+                    type="tool_failed",
+                    itemId=item_id,
+                    toolCallId=call.call_id,
+                    toolName=call.name,
+                    title=title,
+                    arguments=arguments,
+                    output=evaluation.reason,
+                    errorMessage=evaluation.reason,
+                    metadata=permission_metadata,
+                    permissionLayer=evaluation.layer,
+                    reason=evaluation.reason,
+                    riskLevel=evaluation.risk_level,
+                    reversible=evaluation.reversible,
+                    model=model,
+                ), result_text
+                return
+
+            execution_context = tool_context
+            if evaluation.decision is PermissionDecision.ASK:
+                approval = approval_broker.create(tool_context.correlation_id)
+                yield ChatStreamEventResponse(
+                    type="tool_approval_requested",
+                    itemId=item_id,
+                    toolCallId=call.call_id,
+                    toolName=call.name,
+                    title=title,
+                    arguments=arguments,
+                    approvalId=approval.approval_id,
+                    permissionLayer=evaluation.layer,
+                    reason=evaluation.reason,
+                    riskLevel=evaluation.risk_level,
+                    reversible=evaluation.reversible,
+                    metadata=permission_metadata,
+                    model=model,
+                ), ""
+                approval_decision = await approval_broker.wait(approval.approval_id)
+                allowed = approval_decision is not ApprovalDecision.DENY
+                decision: Literal["allow", "deny"] = (
+                    "allow" if allowed else "deny"
+                )
+                yield ChatStreamEventResponse(
+                    type="tool_approval_resolved",
+                    itemId=item_id,
+                    toolCallId=call.call_id,
+                    toolName=call.name,
+                    title=title,
+                    arguments=arguments,
+                    approvalId=approval.approval_id,
+                    permissionLayer=evaluation.layer,
+                    reason=evaluation.reason,
+                    riskLevel=evaluation.risk_level,
+                    reversible=evaluation.reversible,
+                    decision=decision,
+                    metadata=permission_metadata,
+                    model=model,
+                ), ""
+                if not allowed:
+                    denied_message = "用户拒绝了本次工具调用"
+                    result_text = json.dumps(
+                        {"ok": False, "content": denied_message},
+                        ensure_ascii=False,
+                    )
+                    yield ChatStreamEventResponse(
+                        type="tool_failed",
+                        itemId=item_id,
+                        toolCallId=call.call_id,
+                        toolName=call.name,
+                        title=title,
+                        arguments=arguments,
+                        output=denied_message,
+                        errorMessage=denied_message,
+                        metadata=permission_metadata,
+                        model=model,
+                    ), result_text
+                    return
+                if (
+                    approval_decision is ApprovalDecision.ALLOW_ALWAYS
+                    and not evaluation.grants_external_path
+                ):
+                    permission_config_store.add_local_allow(
+                        tool_context.workspace_path,
+                        tool,
+                        arguments,
+                    )
+                if evaluation.grants_external_path:
+                    execution_context = replace(
+                        tool_context,
+                        allow_external_paths=True,
+                    )
+
+            yield ChatStreamEventResponse(
+                type="tool_started",
+                itemId=item_id,
+                toolCallId=call.call_id,
+                toolName=call.name,
+                title=title,
+                arguments=arguments,
+                metadata=permission_metadata,
+                model=model,
+            ), ""
+            result = await registry.execute(call.name, execution_context, arguments)
             event_type: Literal["tool_failed", "tool_completed"] = (
                 "tool_failed" if result.is_error else "tool_completed"
             )
@@ -196,7 +336,7 @@ class AgentLoopRunner:
                 output=result.content,
                 durationMs=duration_ms,
                 exitCode=exit_code,
-                metadata=dict(result.metadata),
+                metadata={**permission_metadata, **dict(result.metadata)},
                 errorMessage=result.content if result.is_error else "",
                 model=model,
             ), result_text

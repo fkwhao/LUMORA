@@ -391,4 +391,74 @@ class HttpAgentRuntimeClientTest {
         );
         server.verify();
     }
+
+    @Test
+    void forwardsPermissionModeAndMapsToolApprovalEvents() {
+        server.expect(requestTo(
+                        "http://127.0.0.1:45101/api/v1/chat/completions/stream"
+                ))
+                .andExpect(content().json("""
+                        {
+                          "promptContext": {
+                            "workspacePath": "F:/project/demo",
+                            "permissionMode": "request_approval"
+                          }
+                        }
+                        """, false))
+                .andRespond(withSuccess("""
+                        data: {"type":"tool_approval_requested","itemId":"item-1","toolCallId":"call-1","toolName":"shell_command","title":"git status","arguments":{"command":"git status"},"approvalId":"approval-1","permissionLayer":"mode","reason":"需要确认","riskLevel":"MEDIUM","reversible":true}
+
+                        data: {"type":"tool_approval_resolved","itemId":"item-1","toolCallId":"call-1","toolName":"shell_command","approvalId":"approval-1","decision":"allow"}
+
+                        data: {"type":"completed","model":"demo"}
+
+                        """, MediaType.TEXT_EVENT_STREAM));
+        List<ChatStreamEvent> events = new ArrayList<>();
+
+        client.streamChat(
+                List.of(new ChatMessage("user", "检查仓库")),
+                CONNECTION,
+                "correlation-123",
+                null,
+                null,
+                "F:/project/demo",
+                "request_approval",
+                events::add
+        );
+
+        assertEquals(
+                ChatStreamEventType.TOOL_APPROVAL_REQUESTED,
+                events.getFirst().getType()
+        );
+        assertEquals("approval-1", events.getFirst().getApprovalId());
+        assertEquals("mode", events.getFirst().getPermissionLayer());
+        assertEquals(Boolean.TRUE, events.getFirst().getReversible());
+        assertEquals(
+                ChatStreamEventType.TOOL_APPROVAL_RESOLVED,
+                events.get(1).getType()
+        );
+        assertEquals("allow", events.get(1).getDecision());
+        server.verify();
+    }
+
+    @Test
+    void forwardsToolApprovalWithOriginalCorrelationId() {
+        server.expect(requestTo(
+                        "http://127.0.0.1:45101/api/v1/tool-approvals/approval-1"
+                ))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header("X-Correlation-Id", "correlation-123"))
+                .andExpect(content().json("""
+                        {"decision":"allow_always"}
+                        """))
+                .andRespond(withSuccess());
+
+        client.decideToolApproval(
+                "approval-1",
+                "allow_always",
+                "correlation-123"
+        );
+
+        server.verify();
+    }
 }

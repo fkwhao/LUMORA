@@ -4,6 +4,8 @@ import com.lumora.core.model.ChatCompletion;
 import com.lumora.core.model.ChatMessage;
 import com.lumora.core.model.ChatStreamEvent;
 import com.lumora.core.model.ModelSettings;
+import com.lumora.core.model.ModelProvider;
+import com.lumora.core.model.ProviderModel;
 import com.lumora.core.agent.model.AgentMemoryCandidate;
 
 import java.util.List;
@@ -13,6 +15,44 @@ import java.util.function.Consumer;
  * 模型配置和模型调用的统一业务接口。
  */
 public interface ModelService {
+
+    List<ModelProvider> listProviders(String correlationId);
+
+    ModelProvider createProvider(String providerName, String baseUrl,
+            String model, int contextWindow, String apiFormat, String apiKey,
+            String correlationId);
+
+    ModelProvider updateProvider(String providerId, String providerName,
+            String baseUrl, String model, int contextWindow, String apiFormat,
+            String apiKey, String correlationId);
+
+    ModelProvider activateProvider(String providerId, String correlationId);
+
+    ModelProvider disableProvider(String providerId, String correlationId);
+
+    void deleteProvider(String providerId, String correlationId);
+
+    List<String> listProviderModels(String providerId, String apiKey,
+            String correlationId);
+
+    ProviderModel createProviderModel(String providerId, String modelId,
+            int contextWindow, int maxOutputTokens, String correlationId);
+
+    ProviderModel updateProviderModel(String providerId, String modelConfigurationId,
+            String modelId, int contextWindow, int maxOutputTokens,
+            String correlationId);
+
+    void deleteProviderModel(String providerId, String modelConfigurationId,
+            String correlationId);
+
+    boolean testProviderModel(String providerId, String modelConfigurationId,
+            String correlationId);
+
+    void decideToolApproval(
+            String approvalId,
+            String decision,
+            String correlationId
+    );
 
     List<String> listModels(
             String providerName,
@@ -92,4 +132,25 @@ public interface ModelService {
             String workspacePath,
             Consumer<ChatStreamEvent> eventConsumer
     );
+
+    default void streamChat(
+            List<ChatMessage> messages,
+            String correlationId,
+            String model,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            Consumer<ChatStreamEvent> eventConsumer
+    ) {
+        streamChat(
+                messages,
+                correlationId,
+                model,
+                reasoningEffort,
+                memorySummary,
+                workspacePath,
+                eventConsumer
+        );
+    }
 }

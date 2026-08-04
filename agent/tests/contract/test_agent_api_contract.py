@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import get_args
 
 import yaml
+
 from app.dto.response.chat_stream_event_response import ChatStreamEventResponse
 
 
@@ -25,4 +26,6 @@ def test_prompt_context_contract_contains_only_runtime_facts() -> None:
         "projectInstructions",
         "availableTools",
         "memorySummary",
+        "permissionMode",
+        "permissionRules",
     }

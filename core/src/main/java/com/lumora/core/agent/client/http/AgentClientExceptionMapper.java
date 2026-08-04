@@ -16,6 +16,16 @@ import java.util.function.Supplier;
 @Component
 public class AgentClientExceptionMapper {
 
+    public void executeVoid(Runnable request) {
+        try {
+            request.run();
+        } catch (AgentRuntimeException error) {
+            throw error;
+        } catch (RestClientException error) {
+            throw map(error);
+        }
+    }
+
     public <T> T execute(Supplier<T> request) {
         try {
             T response = request.get();

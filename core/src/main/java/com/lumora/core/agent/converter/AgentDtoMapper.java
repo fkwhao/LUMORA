@@ -74,6 +74,24 @@ public class AgentDtoMapper {
             String memorySummary,
             String workspacePath
     ) {
+        return toChatRequest(
+                messages,
+                connection,
+                reasoningEffort,
+                memorySummary,
+                workspacePath,
+                "request_approval"
+        );
+    }
+
+    public AgentChatCompletionRequest toChatRequest(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode
+    ) {
         List<AgentChatMessageRequest> requestMessages = messages.stream()
                 .map(message -> new AgentChatMessageRequest(
                         message.getRole(),
@@ -85,7 +103,8 @@ public class AgentDtoMapper {
                 new AgentModelConnectionRequest(connection),
                 AgentPromptContextRequest.forWorkspace(
                         memorySummary,
-                        workspacePath
+                        workspacePath,
+                        permissionMode
                 ),
                 reasoningEffort
         );
@@ -146,7 +165,13 @@ public class AgentDtoMapper {
                 response.getOutput(),
                 response.getDurationMs(),
                 response.getExitCode(),
-                response.getMetadata()
+                response.getMetadata(),
+                response.getApprovalId(),
+                response.getPermissionLayer(),
+                response.getReason(),
+                response.getRiskLevel(),
+                response.getReversible(),
+                response.getDecision()
         );
     }
 

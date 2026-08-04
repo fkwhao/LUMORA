@@ -10,6 +10,16 @@ from app.dto.response.chat_stream_event_response import (
     ChatStreamEventResponse,
 )
 from app.model.model_connection_settings import ModelConnectionSettings
+from app.permission.broker import ApprovalBroker
+from app.permission.config_store import PermissionConfigStore
+from app.permission.engine import PermissionEngine
+from app.permission.model import (
+    ApprovalDecision,
+    PermissionDecision,
+    PermissionMode,
+    PermissionPolicy,
+    PermissionRule,
+)
 from app.prompt.prompt_builder import PromptBuilder
 from app.prompt.prompt_context import PromptContext
 from app.provider.openai_compatible_provider import OpenAICompatibleProvider
@@ -28,10 +38,18 @@ class ChatService:
         provider: OpenAICompatibleProvider,
         prompt_builder: PromptBuilder,
         tool_registry: ToolRegistry | None = None,
+        permission_engine: PermissionEngine | None = None,
+        approval_broker: ApprovalBroker | None = None,
+        permission_config_store: PermissionConfigStore | None = None,
     ) -> None:
         self._provider = provider
         self._prompt_builder = prompt_builder
         self._tool_registry = tool_registry or create_default_tool_registry()
+        self._permission_engine = permission_engine or PermissionEngine()
+        self._approval_broker = approval_broker or ApprovalBroker()
+        self._permission_config_store = (
+            permission_config_store or PermissionConfigStore()
+        )
 
     async def list_models(self, request: ModelListRequest) -> list[str]:
         connection = request
@@ -71,6 +89,7 @@ class ChatService:
     async def stream(
         self,
         request: ChatCompletionRequest,
+        correlation_id: str = "",
     ) -> AsyncIterator[ChatStreamEventResponse]:
         try:
             settings = self._connection(request)
@@ -80,7 +99,8 @@ class ChatService:
                 ToolContext(
                     workspace_path=Path(workspace_path)
                     .expanduser()
-                    .resolve(strict=True)
+                    .resolve(strict=True),
+                    correlation_id=correlation_id,
                 )
                 if workspace_path and prompt.tools
                 else None
@@ -93,6 +113,13 @@ class ChatService:
                     request.reasoning_effort,
                     self._tool_registry,
                     tool_context,
+                    self._permission_config_store.load_policy(
+                        tool_context.workspace_path,
+                        self._permission_policy(request),
+                    ),
+                    self._permission_engine,
+                    self._approval_broker,
+                    self._permission_config_store,
                 )
                 if tool_context is not None
                 else self._provider.stream(
@@ -108,6 +135,33 @@ class ChatService:
             raise ModelProviderError(
                 "模型 API 流式调用失败，请检查地址、Key 和模型名称"
             ) from error
+
+    def decide_tool_approval(
+        self,
+        approval_id: str,
+        decision: ApprovalDecision,
+        correlation_id: str,
+    ) -> bool:
+        return self._approval_broker.decide(
+            approval_id,
+            decision,
+            correlation_id,
+        )
+
+    @staticmethod
+    def _permission_policy(request: ChatCompletionRequest) -> PermissionPolicy:
+        context = request.prompt_context
+        return PermissionPolicy(
+            mode=PermissionMode(context.permission_mode),
+            rules=tuple(
+                PermissionRule(
+                    tool=rule.tool,
+                    pattern=rule.pattern,
+                    decision=PermissionDecision(rule.decision),
+                )
+                for rule in context.permission_rules
+            ),
+        )
 
     def _prompt_context(self, request: ChatCompletionRequest) -> PromptContext:
         context = request.prompt_context

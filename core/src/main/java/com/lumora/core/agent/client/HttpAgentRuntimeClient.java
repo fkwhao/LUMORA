@@ -9,6 +9,7 @@ import com.lumora.core.agent.dto.request.AgentPlanTaskRequest;
 import com.lumora.core.agent.dto.request.AgentMemoryExtractionRequest;
 import com.lumora.core.agent.dto.request.AgentModelConnectionRequest;
 import com.lumora.core.agent.dto.request.AgentModelListRequest;
+import com.lumora.core.agent.dto.request.AgentToolApprovalDecisionRequest;
 import com.lumora.core.agent.dto.response.AgentChatCompletionResponse;
 import com.lumora.core.agent.dto.response.AgentPlanTaskResponse;
 import com.lumora.core.agent.dto.response.AgentModelListResponse;
@@ -38,6 +39,19 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
     private final AgentRuntimeSseClient sseClient;
     private final AgentDtoMapper dtoMapper;
     private final AgentClientExceptionMapper exceptionMapper;
+
+    @Override
+    public void decideToolApproval(
+            String approvalId,
+            String decision,
+            String correlationId
+    ) {
+        exceptionMapper.executeVoid(() -> httpApi.decideToolApproval(
+                correlationId,
+                approvalId,
+                new AgentToolApprovalDecisionRequest(decision)
+        ));
+    }
 
     @Override
     public List<AgentMemoryCandidate> extractMemories(
@@ -142,6 +156,29 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
             String workspacePath,
             Consumer<ChatStreamEvent> eventConsumer
     ) {
+        streamChat(
+                messages,
+                connection,
+                correlationId,
+                reasoningEffort,
+                memorySummary,
+                workspacePath,
+                "request_approval",
+                eventConsumer
+        );
+    }
+
+    @Override
+    public void streamChat(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String correlationId,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            Consumer<ChatStreamEvent> eventConsumer
+    ) {
         sseClient.streamChat(
                 correlationId,
                 dtoMapper.toChatRequest(
@@ -149,7 +186,8 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
                         connection,
                         reasoningEffort,
                         memorySummary,
-                        workspacePath
+                        workspacePath,
+                        permissionMode
                 ),
                 eventConsumer
         );

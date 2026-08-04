@@ -22,6 +22,12 @@ public class AgentChatStreamEventResponse {
     private final long durationMs;
     private final Integer exitCode;
     private final Map<String, Object> metadata;
+    private final String approvalId;
+    private final String permissionLayer;
+    private final String reason;
+    private final String riskLevel;
+    private final Boolean reversible;
+    private final String decision;
 
     @JsonCreator
     public AgentChatStreamEventResponse(
@@ -38,7 +44,13 @@ public class AgentChatStreamEventResponse {
             @JsonProperty("output") String output,
             @JsonProperty("durationMs") long durationMs,
             @JsonProperty("exitCode") Integer exitCode,
-            @JsonProperty("metadata") Map<String, Object> metadata
+            @JsonProperty("metadata") Map<String, Object> metadata,
+            @JsonProperty("approvalId") String approvalId,
+            @JsonProperty("permissionLayer") String permissionLayer,
+            @JsonProperty("reason") String reason,
+            @JsonProperty("riskLevel") String riskLevel,
+            @JsonProperty("reversible") Boolean reversible,
+            @JsonProperty("decision") String decision
     ) {
         this.type = type;
         this.delta = delta;
@@ -54,6 +66,12 @@ public class AgentChatStreamEventResponse {
         this.durationMs = durationMs;
         this.exitCode = exitCode;
         this.metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
+        this.approvalId = approvalId;
+        this.permissionLayer = permissionLayer;
+        this.reason = reason;
+        this.riskLevel = riskLevel;
+        this.reversible = reversible;
+        this.decision = decision;
     }
 
     public ChatStreamEventType getType() {
@@ -85,4 +103,10 @@ public class AgentChatStreamEventResponse {
     public long getDurationMs() { return durationMs; }
     public Integer getExitCode() { return exitCode; }
     public Map<String, Object> getMetadata() { return metadata; }
+    public String getApprovalId() { return approvalId; }
+    public String getPermissionLayer() { return permissionLayer; }
+    public String getReason() { return reason; }
+    public String getRiskLevel() { return riskLevel; }
+    public Boolean getReversible() { return reversible; }
+    public String getDecision() { return decision; }
 }
