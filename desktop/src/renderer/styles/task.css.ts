@@ -30,6 +30,10 @@ const composerMenuIn = keyframes({
   to: { opacity: 1, transform: "translateY(0) scale(1)" },
 });
 
+const artifactSpin = keyframes({
+  to: { transform: "rotate(360deg)" },
+});
+
 globalStyle(".task-layout", {
   display: "grid",
   gridTemplateRows: "auto minmax(0, 1fr)",
@@ -1064,17 +1068,6 @@ globalStyle(".work-phase-toggle > span", {
   whiteSpace: "nowrap",
 });
 
-globalStyle(".work-phase-chevron", {
-  flex: "0 0 auto",
-  color: "var(--subtle)",
-  transform: "rotate(-90deg)",
-  transition: "transform 160ms cubic-bezier(0.2, 0.75, 0.25, 1)",
-});
-
-globalStyle(".work-phase.expanded .work-phase-chevron", {
-  transform: "rotate(0deg)",
-});
-
 globalStyle(".work-phase-steps", {
   display: "grid",
   gridTemplateRows: "0fr",
@@ -1294,6 +1287,26 @@ globalStyle(".tool-call-detail footer", {
   marginTop: "-2px",
   color: "var(--subtle)",
   fontSize: "9.5px",
+});
+
+globalStyle(".artifact-open-button", {
+  display: "inline-flex",
+  width: "max-content",
+  minHeight: "32px",
+  alignItems: "center",
+  gap: "7px",
+  padding: "6px 10px",
+  color: "var(--muted)",
+  border: "1px solid var(--line)",
+  borderRadius: "8px",
+  background: "var(--surface-soft)",
+  cursor: "pointer",
+  font: "inherit",
+});
+
+globalStyle(".artifact-open-button:hover", {
+  color: "var(--ink)",
+  borderColor: "var(--line-strong)",
 });
 
 globalStyle(".agent-run-event", {
@@ -1696,6 +1709,137 @@ globalStyle(".context-picker-popover", {
   overflowY: "auto",
   borderRadius: "18px",
 });
+
+globalStyle(".context-picker-popover .context-compact-command", {
+  marginBottom: "2px",
+  border: "1px solid color-mix(in srgb, var(--line-strong) 72%, transparent)",
+  background: "color-mix(in srgb, var(--surface-soft) 86%, transparent)",
+});
+
+globalStyle(".command-picker-popover", {
+  right: "0",
+  left: "0",
+  width: "100%",
+  padding: "8px",
+  borderRadius: "18px",
+});
+
+globalStyle(".follow-up-composer .command-picker-popover > button", {
+  minHeight: "52px",
+  gridTemplateColumns: "22px minmax(0, 1fr)",
+  padding: "8px 11px",
+});
+
+globalStyle(".command-picker-popover button > span", {
+  display: "grid",
+  gap: "2px",
+  textAlign: "left",
+});
+
+globalStyle(".command-picker-popover button strong", {
+  color: "var(--ink)",
+  fontSize: "12.5px",
+  fontWeight: "600",
+});
+
+globalStyle(".command-picker-popover button small", {
+  color: "var(--subtle)",
+  fontSize: "10.5px",
+});
+
+globalStyle(".artifact-viewer-backdrop", {
+  position: "fixed",
+  inset: "0",
+  zIndex: "90",
+  display: "grid",
+  justifyItems: "end",
+  background: "rgba(8, 8, 9, .42)",
+  backdropFilter: "blur(3px)",
+  animation: `${toolApprovalFadeIn} 160ms ease both`,
+});
+
+globalStyle(".artifact-viewer", {
+  display: "grid",
+  width: "min(720px, 72vw)",
+  height: "100%",
+  gridTemplateRows: "auto minmax(0, 1fr) auto",
+  padding: "18px",
+  color: "var(--ink)",
+  borderLeft: "1px solid var(--line)",
+  background: "var(--surface)",
+  boxShadow: "-24px 0 64px rgba(0, 0, 0, .24)",
+  animation: `${toolApprovalRiseIn} 190ms cubic-bezier(.2,.75,.25,1) both`,
+});
+
+globalStyle(".artifact-viewer > header", {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "16px",
+  padding: "0 0 14px",
+  borderBottom: "1px solid var(--line)",
+});
+
+globalStyle(".artifact-viewer > header > div", {
+  display: "grid",
+  gap: "4px",
+});
+
+globalStyle(".artifact-viewer > header strong", { fontSize: "14px" });
+globalStyle(".artifact-viewer > header small", {
+  color: "var(--subtle)",
+  fontFamily: "var(--code-font, monospace)",
+  fontSize: "10px",
+});
+
+globalStyle(".artifact-viewer > pre", {
+  margin: "0",
+  padding: "18px 2px",
+  overflow: "auto",
+  whiteSpace: "pre-wrap",
+  overflowWrap: "anywhere",
+});
+
+globalStyle(".artifact-viewer > pre code", {
+  fontFamily: "var(--code-font, monospace)",
+  fontSize: "11px",
+  lineHeight: "1.65",
+});
+
+globalStyle(".artifact-viewer > footer", {
+  display: "flex",
+  minHeight: "44px",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "12px",
+  paddingTop: "12px",
+  color: "var(--subtle)",
+  borderTop: "1px solid var(--line)",
+  fontSize: "10.5px",
+});
+
+globalStyle(".artifact-viewer > footer button", {
+  display: "inline-flex",
+  minHeight: "34px",
+  alignItems: "center",
+  gap: "7px",
+  padding: "6px 11px",
+  color: "var(--ink)",
+  border: "1px solid var(--line)",
+  borderRadius: "8px",
+  background: "var(--surface-soft)",
+  cursor: "pointer",
+});
+
+globalStyle(".artifact-viewer-error", {
+  alignSelf: "start",
+  margin: "18px 0",
+  color: "var(--danger, #e16f6f)",
+  fontSize: "12px",
+});
+
+globalStyle(".spin", { animation: `${artifactSpin} 800ms linear infinite` });
+
 
 globalStyle(".follow-up-composer .context-picker-popover > button", {
   minHeight: "48px",

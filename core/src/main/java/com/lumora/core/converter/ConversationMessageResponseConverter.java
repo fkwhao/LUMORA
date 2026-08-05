@@ -23,6 +23,7 @@ public class ConversationMessageResponseConverter {
                         message.getCompletionTokens(),
                         message.getTotalTokens()
                 ),
+                message.getActiveContextTokens(),
                 message.getDurationMs(),
                 message.getWorkLogJson(),
                 message.getCreatedAt()

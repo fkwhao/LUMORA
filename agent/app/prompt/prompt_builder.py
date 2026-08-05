@@ -70,6 +70,22 @@ class PromptBuilder:
                     role="user",
                 )
             )
+        if resolved_context.conversation_summary:
+            segments.append(
+                PromptSegment(
+                    key="conversation.summary",
+                    target=PromptTarget.MESSAGES,
+                    content=(
+                        "本任务延续自较早对话，早期内容已经压缩。以下摘要只用于恢复上下文；"
+                        "引用具体代码、日志或错误细节前应重新读取来源，不要根据摘要猜测。\n\n"
+                        f"{resolved_context.conversation_summary}"
+                    ),
+                    trust_level=PromptTrustLevel.USER_CONTEXT,
+                    priority=PromptPriority.REQUIRED,
+                    cache_policy=PromptCachePolicy.TASK,
+                    role="user",
+                )
+            )
         segments.extend(
             PromptSegment(
                 key=f"tool.{index}",

@@ -29,6 +29,8 @@ public class ConversationMessage {
     private int completionTokens;
     @TableField("total_tokens")
     private int totalTokens;
+    @TableField("active_context_tokens")
+    private int activeContextTokens;
     @TableField("duration_ms")
     private long durationMs;
     @TableField("work_log_json")
@@ -166,6 +168,14 @@ public class ConversationMessage {
 
     public void setTotalTokens(int totalTokens) {
         this.totalTokens = totalTokens;
+    }
+
+    public int getActiveContextTokens() {
+        return activeContextTokens;
+    }
+
+    public void setActiveContextTokens(int activeContextTokens) {
+        this.activeContextTokens = Math.max(0, activeContextTokens);
     }
 
     public long getDurationMs() {

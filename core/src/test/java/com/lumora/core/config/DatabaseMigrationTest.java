@@ -52,7 +52,9 @@ class DatabaseMigrationTest {
                       'conversation_message',
                       'model_configuration',
                       'model_configuration_model',
-                      'memory_item'
+                      'memory_item',
+                      'conversation_context_summary',
+                      'artifact'
                   )
                 """,
                 Integer.class
@@ -62,9 +64,9 @@ class DatabaseMigrationTest {
                 Integer.class
         );
 
-        assertThat(businessTableCount).isEqualTo(8);
+        assertThat(businessTableCount).isEqualTo(10);
         assertThat(foreignKeysEnabled).isEqualTo(1);
-        assertThat(applicationChangeSetCount()).isEqualTo(13);
+        assertThat(applicationChangeSetCount()).isEqualTo(14);
         assertThat(taskPlanStepPrimaryKeyColumns())
                 .containsExactly("plan_step_id");
         assertThat(modelConfigurationColumns())
@@ -75,7 +77,7 @@ class DatabaseMigrationTest {
         // 对同一数据库重复执行迁移，必须只校验历史而不能再次建表。
         liquibase.afterPropertiesSet();
 
-        assertThat(applicationChangeSetCount()).isEqualTo(13);
+        assertThat(applicationChangeSetCount()).isEqualTo(14);
     }
 
     private Integer applicationChangeSetCount() {
@@ -96,7 +98,8 @@ class DatabaseMigrationTest {
                     '010-memory-semantic-slot',
                     '011-conversation-work-log',
                     '012-model-provider',
-                    '013-provider-model'
+                    '013-provider-model',
+                    '014-context-compaction-and-artifact'
                 )
                 AND AUTHOR = 'lumora'
                 """,

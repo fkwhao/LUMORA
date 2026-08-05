@@ -2,9 +2,11 @@ import asyncio
 from pathlib import Path
 
 import pytest
-
 from app.tool.base import ToolContext
-from app.tool.tool_runtime import create_default_tool_registry
+from app.tool.default_registry import create_default_tool_registry
+from app.tool.tool_runtime import (
+    create_default_tool_registry as create_compatible_registry,
+)
 
 
 def test_file_tools_are_confined_to_workspace(tmp_path: Path) -> None:
@@ -136,10 +138,31 @@ def test_apply_patch_requires_unique_match_and_writes_atomically(
 
 def test_default_registry_exposes_large_file_tools() -> None:
     assert create_default_tool_registry().names() == (
+        "artifact_read",
+        "artifact_search",
         "list_files",
         "search_in_file",
         "read_file",
         "apply_patch",
         "write_file",
         "shell_command",
+    )
+
+
+def test_legacy_tool_runtime_import_keeps_default_registry_compatible() -> None:
+    registry = create_default_tool_registry()
+    compatible = create_compatible_registry()
+    expected_names = (
+        "artifact_read",
+        "artifact_search",
+        "list_files",
+        "search_in_file",
+        "read_file",
+        "apply_patch",
+        "write_file",
+        "shell_command",
+    )
+    assert compatible.names() == expected_names
+    assert compatible.model_definitions(expected_names) == registry.model_definitions(
+        expected_names
     )

@@ -3,16 +3,22 @@ package com.lumora.core.service.impl;
 import com.lumora.core.entity.ConversationMessage;
 import com.lumora.core.model.ChatStreamEvent;
 import com.lumora.core.model.ChatStreamEventType;
+import com.lumora.core.model.ContextCompaction;
+import com.lumora.core.service.ArtifactService;
 import com.lumora.core.service.ConversationService;
 import com.lumora.core.service.ModelService;
+import com.lumora.core.service.support.conversation.ContextCompactionInput;
+import com.lumora.core.service.support.conversation.ConversationContextSummaryService;
 import com.lumora.core.service.support.conversation.ConversationPersistenceService;
 import com.lumora.core.service.support.conversation.ConversationRunContext;
 import com.lumora.core.service.support.conversation.ConversationStreamAccumulator;
+import com.lumora.core.service.support.conversation.WorkLogEventProjector;
 import com.lumora.core.service.support.memory.MemoryExtractionCoordinator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.FutureTask;
@@ -39,6 +45,8 @@ public class ConversationServiceImpl implements ConversationService {
     private final ModelService modelService;
     private final ExecutorService executorService;
     private final MemoryExtractionCoordinator memoryExtractionCoordinator;
+    private final ConversationContextSummaryService contextSummaryService;
+    private final ArtifactService artifactService;
     private final ConcurrentHashMap<String, FutureTask<Void>> activeRuns =
             new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, PendingToolApproval>
@@ -172,6 +180,51 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     @Override
+    public synchronized ContextCompaction compactContext(
+            String taskId, String model, String correlationId
+    ) {
+        if (activeRuns.containsKey(taskId)) {
+            throw new IllegalStateException("当前任务正在生成回复");
+        }
+        ContextCompactionInput input = persistenceService.prepareCompaction(
+                taskId
+        );
+        ContextCompaction result = modelService.compactContext(
+                input.messages(), input.memorySummary(), taskId,
+                input.existingSummary(), model, correlationId
+        );
+        int throughSequence = result.throughSequence() == null
+                ? input.messages().get(input.messages().size() - 1).getSequence()
+                : result.throughSequence();
+        contextSummaryService.persist(
+                input.conversationId(), result.summary(), throughSequence,
+                result.beforeTokens(), result.afterTokens()
+        );
+        Map<String, Object> metadata = Map.of(
+                "beforeTokens", result.beforeTokens(),
+                "afterTokens", result.afterTokens(),
+                "throughSequence", throughSequence,
+                "trigger", "manual"
+        );
+        persistenceService.appendWorkLogEvent(
+                taskId,
+                new ChatStreamEvent(
+                        ChatStreamEventType.CONTEXT_COMPACTED,
+                        "已手动压缩上下文",
+                        model == null ? "" : model,
+                        result.usage(),
+                        "",
+                        "manual-context-compact-" + correlationId,
+                        "", "", "已压缩上下文", Map.of(), "",
+                        0L, null, metadata,
+                        "", "", "", "", null, "",
+                        result.afterTokens()
+                )
+        );
+        return result;
+    }
+
+    @Override
     public void decideToolApproval(
             String taskId,
             String approvalId,
@@ -227,6 +280,8 @@ public class ConversationServiceImpl implements ConversationService {
                     context.getMemorySummary(),
                     workspacePath,
                     permissionMode,
+                    context.getTaskId(),
+                    context.getConversationSummary(),
                     event -> handleStreamEvent(
                             context,
                             accumulator,
@@ -286,6 +341,26 @@ public class ConversationServiceImpl implements ConversationService {
             String correlationId,
             Consumer<ChatStreamEvent> eventConsumer
     ) {
+        if (event.getType() == ChatStreamEventType.CONTEXT_COMPACTED) {
+            Map<String, Object> metadata = event.getMetadata();
+            Object summary = metadata.get("summary");
+            Object throughSequence = metadata.get("throughSequence");
+            if (summary instanceof String text
+                    && throughSequence instanceof Number boundary) {
+                contextSummaryService.persist(
+                        context.getConversationId(), text,
+                        boundary.intValue(),
+                        number(metadata.get("beforeTokens")),
+                        number(metadata.get("afterTokens"))
+                );
+            }
+        }
+        if (event.getType() == ChatStreamEventType.TOOL_COMPLETED
+                && event.getMetadata().containsKey("artifactId")) {
+            artifactService.register(
+                    context.getTaskId(), context.getConversationId(), event
+            );
+        }
         if (event.getType() == ChatStreamEventType.TOOL_APPROVAL_REQUESTED) {
             String approvalId = requireText(
                     event.getApprovalId(),
@@ -307,7 +382,15 @@ public class ConversationServiceImpl implements ConversationService {
         if (event.getType() == ChatStreamEventType.COMPLETED) {
             persistenceService.persistAssistant(context, accumulator);
         }
-        eventConsumer.accept(event);
+                    eventConsumer.accept(
+                            event.getType() == ChatStreamEventType.CONTEXT_COMPACTED
+                                    ? WorkLogEventProjector.project(event)
+                                    : event
+                    );
+    }
+
+    private static int number(Object value) {
+        return value instanceof Number number ? number.intValue() : 0;
     }
 
     private String requireText(String value, String label) {

@@ -2,6 +2,7 @@ package com.lumora.core.service;
 
 import com.lumora.core.entity.ConversationMessage;
 import com.lumora.core.model.ChatStreamEvent;
+import com.lumora.core.model.ContextCompaction;
 
 import java.util.List;
 import java.util.function.Consumer;
@@ -86,5 +87,11 @@ public interface ConversationService {
             String taskId,
             String approvalId,
             String decision
+    );
+
+    ContextCompaction compactContext(
+            String taskId,
+            String model,
+            String correlationId
     );
 }

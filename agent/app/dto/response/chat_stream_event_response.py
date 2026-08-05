@@ -17,6 +17,10 @@ class ChatStreamEventResponse(BaseModel):
         "tool_failed",
         "tool_approval_requested",
         "tool_approval_resolved",
+        "context_compaction_started",
+        "context_compaction_progress",
+        "context_compacted",
+        "context_compaction_failed",
         "usage",
         "completed",
         "failed",
@@ -24,6 +28,7 @@ class ChatStreamEventResponse(BaseModel):
     delta: str = ""
     model: str = ""
     usage: TokenUsageResponse | None = None
+    active_context_tokens: int = Field(default=0, alias="activeContextTokens")
     error_message: str = Field(default="", alias="errorMessage")
     item_id: str = Field(default="", alias="itemId")
     tool_call_id: str = Field(default="", alias="toolCallId")

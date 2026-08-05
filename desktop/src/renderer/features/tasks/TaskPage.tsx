@@ -13,7 +13,9 @@ import {
   Globe2,
   Hand,
   Lightbulb,
+  LoaderCircle,
   Mic,
+  Minimize2,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -33,6 +35,7 @@ import type {
   PermissionMode,
   ReasoningEffort,
   WorkLogItem,
+  ArtifactChunk,
 } from "../../../shared/model-contract";
 import type { TaskEvent, TaskStatus } from "../../../shared/task-contract";
 import { MarkdownMessage } from "../../components/MarkdownMessage";
@@ -57,6 +60,7 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
   const task = useStore(store, (state) => state.activeTask);
   const messages = useStore(store, (state) => state.messages);
   const isChatting = useStore(store, (state) => state.isChatting);
+  const isCompacting = useStore(store, (state) => state.isCompacting);
   const chatWasStopped = useStore(store, (state) => state.chatWasStopped);
   const chatError = useStore(store, (state) => state.chatError);
   const chatStartedAt = useStore(store, (state) => state.chatStartedAt);
@@ -84,8 +88,11 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
     loadPermissionMode,
   );
   const [composerMenu, setComposerMenu] = useState<
-    "context" | "permission" | "model" | "reasoning" | null
+    "context" | "command" | "permission" | "model" | "reasoning" | null
   >(null);
+  const [artifact, setArtifact] = useState<ArtifactChunk>();
+  const [artifactLoading, setArtifactLoading] = useState(false);
+  const [artifactError, setArtifactError] = useState<string>();
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const conversationScrollRef = useRef<HTMLDivElement>(null);
@@ -477,15 +484,51 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
   async function submitFollowUp(event: React.FormEvent) {
     event.preventDefault();
     const content = followUp.trim();
-    if (!content || isChatting) {
+    if (!content || isChatting || isCompacting) {
       return;
     }
     setFollowUp("");
+    setComposerMenu(null);
+    if (content === "/compact") {
+      await store.getState().compactContext(selectedModel || undefined);
+      return;
+    }
     await store.getState().sendMessage(content, {
       model: selectedModel || undefined,
       reasoningEffort,
       permissionMode,
     });
+  }
+
+  async function openArtifact(artifactId: string) {
+    if (!task || !modelApi) return;
+    setArtifact(undefined);
+    setArtifactError(undefined);
+    setArtifactLoading(true);
+    try {
+      setArtifact(await modelApi.readArtifact(task.taskId, artifactId));
+    } catch (error) {
+      setArtifactError(error instanceof Error ? error.message : "Artifact 读取失败");
+    } finally {
+      setArtifactLoading(false);
+    }
+  }
+
+  async function loadMoreArtifact() {
+    if (!task || !modelApi || !artifact?.hasMore || artifact.nextOffset === undefined) return;
+    setArtifactLoading(true);
+    try {
+      const chunk = await modelApi.readArtifact(
+        task.taskId,
+        artifact.artifactId,
+        artifact.nextOffset,
+      );
+      setArtifact({ ...chunk, content: artifact.content + chunk.content });
+    } catch (error) {
+      setArtifactError(error instanceof Error ? error.message : "Artifact 读取失败");
+    } finally {
+      setArtifactLoading(false);
+    }
   }
 
   function openLocalContext(folder: boolean) {
@@ -567,15 +610,15 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
   const contextLimit = modelSettings?.models.find(
     (model) => model.modelId === selectedModel,
   )?.contextWindow ?? modelSettings?.contextWindow ?? 128_000;
-  const reportedTotalTokens = [...messages]
+  const reportedContextTokens = [...messages]
     .reverse()
     .find(
       (message) =>
         message.role === "assistant" &&
-        (message.usage?.totalTokens ?? 0) > 0,
-    )?.usage?.totalTokens;
+        (message.activeContextTokens ?? 0) > 0,
+    )?.activeContextTokens;
   const estimatedTokens = estimateConversationTokens(messages);
-  const contextTokens = reportedTotalTokens ?? estimatedTokens;
+  const contextTokens = reportedContextTokens ?? estimatedTokens;
   const contextPercent = Math.min(
     100,
     Math.round((contextTokens / contextLimit) * 100),
@@ -769,7 +812,7 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
                         }
                         workLog={message.workLog}
                         running={
-                          isChatting &&
+                          (isChatting || isCompacting) &&
                           index === displayMessages.length - 1
                         }
                         stopped={
@@ -777,6 +820,7 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
                           index === displayMessages.length - 1
                         }
                         onReviewChange={openChangeReview}
+                        onOpenArtifact={openArtifact}
                       />
                     )}
                   {message.role === "user" ? (
@@ -1009,7 +1053,12 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
                     placeholder="随心输入"
                     rows={2}
                     value={followUp}
-                    onChange={(event) => setFollowUp(event.target.value)}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setFollowUp(value);
+                      if (value.startsWith("/")) setComposerMenu("command");
+                      else if (composerMenu === "command") setComposerMenu(null);
+                    }}
                     onKeyDown={submitFormOnEnter}
                   />
                   <div className="composer-toolbar">
@@ -1151,11 +1200,11 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
                         >
                           <span>背景信息窗口：</span>
                           <strong>
-                            {reportedTotalTokens === undefined ? "约 " : ""}
+                            {reportedContextTokens === undefined ? "约 " : ""}
                             {contextPercent}% 已用
                           </strong>
                           <b>
-                            已用{reportedTotalTokens === undefined ? "约 " : " "}
+                            已用{reportedContextTokens === undefined ? "约 " : " "}
                             {formatTokenCount(contextTokens)} 标记，共{" "}
                             {formatTokenCount(contextLimit)}
                           </b>
@@ -1307,7 +1356,23 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
                       className="composer-popover context-picker-popover"
                       role="menu"
                     >
-                      <b>添加</b>
+                      <button
+                        className="context-compact-command"
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setFollowUp("/compact");
+                          setComposerMenu("command");
+                          requestAnimationFrame(() => followUpInputRef.current?.focus());
+                        }}
+                      >
+                        <Minimize2 size={17} />
+                        <span>
+                          <strong>压缩</strong>
+                          <small>压缩此聊天的上下文（已使用 {contextPercent}%）</small>
+                        </span>
+                      </button>
+                      <span className="context-picker-section">添加</span>
                       <button
                         type="button"
                         role="menuitem"
@@ -1375,6 +1440,25 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
                       </button>
                     </span>
                   )}
+                  {composerMenu === "command" && followUp.startsWith("/") && (
+                    <span className="composer-popover command-picker-popover" role="menu">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setFollowUp("/compact");
+                          setComposerMenu(null);
+                          requestAnimationFrame(() => followUpInputRef.current?.focus());
+                        }}
+                      >
+                        <Minimize2 size={17} />
+                        <span>
+                          <strong>/compact</strong>
+                          <small>摘要较早消息，保留近期原文</small>
+                        </span>
+                      </button>
+                    </span>
+                  )}
                 </form>
               </div>
             </div>
@@ -1382,6 +1466,41 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
         </section>
 
         <ToolApprovalDialog store={store} />
+
+        {(artifactLoading || artifact || artifactError) && (
+          <div className="artifact-viewer-backdrop" role="presentation">
+            <aside className="artifact-viewer" aria-label="完整 Artifact">
+              <header>
+                <div>
+                  <strong>完整 Artifact</strong>
+                  <small>{artifact?.artifactId ?? "正在读取"}</small>
+                </div>
+                <button
+                  className="icon-button"
+                  type="button"
+                  aria-label="关闭 Artifact"
+                  onClick={() => {
+                    setArtifact(undefined);
+                    setArtifactError(undefined);
+                  }}
+                >
+                  <X size={18} />
+                </button>
+              </header>
+              {artifactError && <p className="artifact-viewer-error">{artifactError}</p>}
+              {artifact && <pre><code>{artifact.content}</code></pre>}
+              <footer>
+                {artifact && <span>{artifact.characterCount.toLocaleString()} 字符</span>}
+                {artifact?.hasMore && (
+                  <button type="button" disabled={artifactLoading} onClick={loadMoreArtifact}>
+                    {artifactLoading && <LoaderCircle className="spin" size={14} />}
+                    继续加载
+                  </button>
+                )}
+              </footer>
+            </aside>
+          </div>
+        )}
 
         {reviewOpen && (
           <DiffReviewPane

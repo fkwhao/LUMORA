@@ -9,7 +9,7 @@ import com.lumora.core.agent.dto.response.AgentChatStreamEventResponse;
 import com.lumora.core.agent.exception.AgentRuntimeException;
 import com.lumora.core.common.constant.HttpContractConstants;
 import com.lumora.core.model.ChatStreamEvent;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -24,13 +24,24 @@ import java.util.function.Consumer;
  * 专门负责 Python SSE 连接和事件解码，避免流处理污染普通 REST Client。
  */
 @Component
-@RequiredArgsConstructor
 public class AgentRuntimeSseClient {
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
     private final AgentDtoMapper dtoMapper;
     private final AgentClientExceptionMapper exceptionMapper;
+
+    public AgentRuntimeSseClient(
+            @Qualifier("agentSseRestClient") RestClient restClient,
+            ObjectMapper objectMapper,
+            AgentDtoMapper dtoMapper,
+            AgentClientExceptionMapper exceptionMapper
+    ) {
+        this.restClient = restClient;
+        this.objectMapper = objectMapper;
+        this.dtoMapper = dtoMapper;
+        this.exceptionMapper = exceptionMapper;
+    }
 
     public void streamChat(
             String correlationId,

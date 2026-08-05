@@ -3,7 +3,9 @@ package com.lumora.core.service.impl;
 import com.lumora.core.model.ChatMessage;
 import com.lumora.core.model.ChatStreamEvent;
 import com.lumora.core.model.ChatStreamEventType;
+import com.lumora.core.service.ArtifactService;
 import com.lumora.core.service.ModelService;
+import com.lumora.core.service.support.conversation.ConversationContextSummaryService;
 import com.lumora.core.service.support.conversation.ConversationPersistenceService;
 import com.lumora.core.service.support.conversation.ConversationRunContext;
 import com.lumora.core.service.support.memory.MemoryExtractionCoordinator;
@@ -67,7 +69,7 @@ class ConversationPermissionServiceTest {
         doAnswer(invocation -> {
             @SuppressWarnings("unchecked")
             java.util.function.Consumer<ChatStreamEvent> consumer =
-                    invocation.getArgument(7);
+                    invocation.getArgument(9);
             consumer.accept(approvalRequested());
             approvalPublished.countDown();
             assertTrue(approvalDecided.await(5, TimeUnit.SECONDS));
@@ -88,6 +90,8 @@ class ConversationPermissionServiceTest {
                 nullable(String.class),
                 nullable(String.class),
                 eq("request_approval"),
+                eq("task-1"),
+                nullable(String.class),
                 any()
         );
         doAnswer(invocation -> {
@@ -102,7 +106,9 @@ class ConversationPermissionServiceTest {
                 persistence,
                 modelService,
                 executor,
-                memoryCoordinator
+                memoryCoordinator,
+                mock(ConversationContextSummaryService.class),
+                mock(ArtifactService.class)
         );
 
         service.streamMessage(

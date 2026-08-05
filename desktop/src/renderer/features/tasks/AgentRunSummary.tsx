@@ -1,10 +1,11 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ChevronDown,
   ChevronRight,
   FilePenLine,
   FileSearch,
   FolderSearch,
+  Minimize2,
+  PackageOpen,
   TerminalSquare,
 } from "lucide-react";
 
@@ -19,6 +20,7 @@ interface AgentRunSummaryProps {
   running: boolean;
   stopped?: boolean;
   onReviewChange?(item: WorkLogItem): void;
+  onOpenArtifact?(artifactId: string): void;
 }
 
 interface WorkPhase {
@@ -36,6 +38,7 @@ export const AgentRunSummary = memo(function AgentRunSummary({
   running,
   stopped = false,
   onReviewChange,
+  onOpenArtifact,
 }: AgentRunSummaryProps) {
   const [expanded, setExpanded] = useState(running);
   const [elapsedMs, setElapsedMs] = useState(durationMs ?? 0);
@@ -86,6 +89,7 @@ export const AgentRunSummary = memo(function AgentRunSummary({
               active={running && index === phases.length - 1}
               key={phase.phaseId}
               onReviewChange={onReviewChange}
+              onOpenArtifact={onOpenArtifact}
               phase={phase}
             />
           ))}
@@ -104,10 +108,12 @@ function WorkPhaseEntry({
   phase,
   active,
   onReviewChange,
+  onOpenArtifact,
 }: {
   phase: WorkPhase;
   active: boolean;
   onReviewChange?: (item: WorkLogItem) => void;
+  onOpenArtifact?: (artifactId: string) => void;
 }) {
   const running = active || phase.items.some((item) => item.status === "running");
   const [expanded, setExpanded] = useState(running);
@@ -127,9 +133,6 @@ function WorkPhaseEntry({
         onClick={() => setExpanded((current) => !current)}
       >
         <span>{phase.title}</span>
-        {phase.items.length > 0 && (
-          <ChevronDown className="work-phase-chevron" size={14} />
-        )}
       </button>
       {phase.items.length > 0 && (
         <div className="work-phase-steps" aria-hidden={!expanded}>
@@ -139,6 +142,7 @@ function WorkPhaseEntry({
               item={item}
               key={item.itemId}
               onReviewChange={onReviewChange}
+              onOpenArtifact={onOpenArtifact}
             />
           ))}
           </div>
@@ -151,9 +155,11 @@ function WorkPhaseEntry({
 function ToolCallItem({
   item,
   onReviewChange,
+  onOpenArtifact,
 }: {
   item: WorkLogItem;
   onReviewChange?: (item: WorkLogItem) => void;
+  onOpenArtifact?: (artifactId: string) => void;
 }) {
   // 单次调用默认保持一行摘要；即使正在执行，也只对摘要做扫光。
   // 详细参数和输出由用户按需展开，避免执行轨迹退化成大块调试面板。
@@ -162,7 +168,8 @@ function ToolCallItem({
   const path = stringArgument(item, "path");
   const primaryDetail = command || path || item.title || item.toolName || "工具调用";
   const isEdit = item.toolName === "write_file" || item.toolName === "apply_patch";
-  const Icon = toolIcon(item.toolName ?? "");
+  const artifactId = stringMetadata(item, "artifactId");
+  const Icon = item.kind === "context" ? Minimize2 : toolIcon(item.toolName ?? "");
 
   function activate() {
     if (isEdit && path && onReviewChange) {
@@ -208,6 +215,16 @@ function ToolCallItem({
               <span>{item.status === "failed" ? "错误输出" : "执行结果"}</span>
               <pre><code>{item.output || item.errorMessage}</code></pre>
             </div>
+          )}
+          {artifactId && onOpenArtifact && (
+            <button
+              className="artifact-open-button"
+              type="button"
+              onClick={() => onOpenArtifact(artifactId)}
+            >
+              <PackageOpen size={14} />
+              查看完整 Artifact
+            </button>
           )}
           <footer>
             {item.exitCode !== undefined && <span>退出码 {item.exitCode}</span>}
@@ -261,6 +278,7 @@ function phaseTitle(content?: string): string {
 }
 
 function fallbackPhaseTitle(item: WorkLogItem): string {
+  if (item.kind === "context") return "整理上下文";
   if (item.toolName === "read_file" || item.toolName === "search_in_file") {
     return "正在定位相关内容";
   }
@@ -296,6 +314,11 @@ function summaryLabel(
 }
 
 function toolCallLabel(item: WorkLogItem, detail: string) {
+  if (item.kind === "context") {
+    if (item.status === "running") return "正在压缩较早的对话内容";
+    if (item.status === "failed") return item.title || "上下文压缩失败";
+    return item.content || item.title || "已压缩上下文";
+  }
   const fileDetail = fileName(detail);
   if (item.status === "running") {
     if (item.toolName === "read_file") return `正在读取 ${fileDetail}`;
@@ -334,6 +357,11 @@ function toolIcon(toolName: string) {
 
 function stringArgument(item: WorkLogItem, key: string) {
   const value = item.arguments?.[key];
+  return typeof value === "string" ? value : "";
+}
+
+function stringMetadata(item: WorkLogItem, key: string) {
+  const value = item.metadata?.[key];
   return typeof value === "string" ? value : "";
 }
 

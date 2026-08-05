@@ -111,6 +111,61 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "412":
           $ref: "#/components/responses/ProtocolMismatch"
+  /api/v1/chat/compact:
+    post:
+      operationId: compactChatContext
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatCompletionRequest"
+      responses:
+        "200":
+          description: 会话上下文摘要及覆盖边界
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContextCompactionResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "412": { $ref: "#/components/responses/ProtocolMismatch" }
+  /api/v1/artifacts/read:
+    post:
+      operationId: readArtifact
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ArtifactReadRequest" }
+      responses:
+        "200":
+          description: 有界 Artifact 文本块
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArtifactReadResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+  /api/v1/artifacts/search:
+    post:
+      operationId: searchArtifact
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ArtifactSearchRequest" }
+      responses:
+        "200":
+          description: 有界 Artifact 搜索结果
+        "400": { $ref: "#/components/responses/BadRequest" }
   /api/v1/tool-approvals/{approvalId}:
     post:
       operationId: decideToolApproval
@@ -259,6 +314,12 @@ components:
           items: { type: string }
         memorySummary:
           type: string
+        taskId:
+          type: string
+          maxLength: 160
+        conversationSummary:
+          type: string
+          maxLength: 100000
         permissionMode:
           type: string
           enum: [full_access, auto_approve, request_approval]
@@ -315,6 +376,10 @@ components:
           minimum: 1
           maximum: 10000000
           description: 当前模型配置的最大输出 Token；未配置时省略。
+        contextWindow:
+          type: integer
+          minimum: 1
+          maximum: 10000000
     ChatMessage:
       type: object
       additionalProperties: false
@@ -326,6 +391,11 @@ components:
         content:
           type: string
           minLength: 1
+        messageId:
+          type: string
+        sequence:
+          type: integer
+          minimum: 1
     ChatCompletionResponse:
       type: object
       additionalProperties: false
@@ -348,6 +418,10 @@ components:
             - text_delta
             - reasoning_delta
             - progress_message
+            - context_compaction_started
+            - context_compaction_progress
+            - context_compacted
+            - context_compaction_failed
             - tool_started
             - tool_completed
             - tool_failed
@@ -362,6 +436,10 @@ components:
           type: string
         usage:
           $ref: "#/components/schemas/TokenUsage"
+        activeContextTokens:
+          type: integer
+          minimum: 0
+          description: 当前最后一次模型请求实际占用的上下文 Token，不属于计费用量累计值。
         errorMessage:
           type: string
         itemId:
@@ -412,6 +490,46 @@ components:
         totalTokens:
           type: integer
           minimum: 0
+    ContextCompactionResponse:
+      type: object
+      additionalProperties: false
+      required: [summary, beforeTokens, afterTokens, usage]
+      properties:
+        summary: { type: string }
+        beforeTokens: { type: integer, minimum: 0 }
+        afterTokens: { type: integer, minimum: 0 }
+        throughSequence: { type: integer, minimum: 1 }
+        retainedFromSequence: { type: integer, minimum: 1 }
+        usage: { $ref: "#/components/schemas/TokenUsage" }
+    ArtifactReadRequest:
+      type: object
+      additionalProperties: false
+      required: [taskId, artifactId]
+      properties:
+        taskId: { type: string, minLength: 1, maxLength: 160 }
+        artifactId: { type: string, pattern: '^art_[0-9a-f]{32}$' }
+        offset: { type: integer, minimum: 0, default: 0 }
+        limit: { type: integer, minimum: 1, maximum: 40000, default: 20000 }
+    ArtifactSearchRequest:
+      type: object
+      additionalProperties: false
+      required: [taskId, artifactId, query]
+      properties:
+        taskId: { type: string, minLength: 1, maxLength: 160 }
+        artifactId: { type: string, pattern: '^art_[0-9a-f]{32}$' }
+        query: { type: string, minLength: 1, maxLength: 500 }
+        maxResults: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    ArtifactReadResponse:
+      type: object
+      additionalProperties: false
+      required: [artifactId, content, offset, hasMore, characterCount]
+      properties:
+        artifactId: { type: string }
+        content: { type: string }
+        offset: { type: integer, minimum: 0 }
+        nextOffset: { type: integer, minimum: 0 }
+        hasMore: { type: boolean }
+        characterCount: { type: integer, minimum: 0 }
     ErrorResponse:
       type: object
       additionalProperties: false

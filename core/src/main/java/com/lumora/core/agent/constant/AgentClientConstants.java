@@ -12,6 +12,7 @@ public final class  AgentClientConstants {
             "/api/v1/chat/completions";
     public static final String CHAT_COMPLETIONS_STREAM_PATH =
             "/api/v1/chat/completions/stream";
+    public static final String CHAT_COMPACTION_PATH = "/api/v1/chat/compact";
     public static final String MODELS_PATH = "/api/v1/models";
     public static final String MEMORY_EXTRACTIONS_PATH =
             "/api/v1/memory/extractions";
@@ -19,6 +20,8 @@ public final class  AgentClientConstants {
             "/api/v1/tool-approvals/{approvalId}";
     public static final String SSE_DATA_PREFIX = "data:";
     public static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(90);
+    /** SSE 跟随任务生命周期，不设置固定读取截止时间。 */
+    public static final Duration STREAM_READ_TIMEOUT = Duration.ZERO;
 
     private AgentClientConstants() {
     }

@@ -30,6 +30,8 @@ export const modelIpcChannels = {
   complete: "model:complete",
   listMessages: "model:list-messages",
   decideToolApproval: "model:decide-tool-approval",
+  compactContext: "model:compact-context",
+  readArtifact: "model:read-artifact",
   streamStart: "model:stream-start",
   streamCancel: "model:stream-cancel",
   streamEvent: "model:stream-event",
@@ -76,6 +78,24 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
   );
   ipcMain.handle(modelIpcChannels.listMessages, (_event, taskId: string) =>
     gateway.listMessages(requireText(taskId, "任务 ID")),
+  );
+  ipcMain.handle(
+    modelIpcChannels.compactContext,
+    (_event, taskId: string, model?: string) =>
+      gateway.compactContext(
+        requireText(taskId, "任务 ID"),
+        model?.trim() || undefined,
+      ),
+  );
+  ipcMain.handle(
+    modelIpcChannels.readArtifact,
+    (_event, taskId: string, artifactId: string, offset?: number, limit?: number) =>
+      gateway.readArtifact(
+        requireText(taskId, "任务 ID"),
+        requireText(artifactId, "Artifact ID"),
+        Number.isInteger(offset) ? offset : 0,
+        Number.isInteger(limit) ? limit : 20_000,
+      ),
   );
   ipcMain.handle(
     modelIpcChannels.decideToolApproval,
@@ -167,6 +187,8 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
     ipcMain.removeHandler(modelIpcChannels.complete);
     ipcMain.removeHandler(modelIpcChannels.listMessages);
     ipcMain.removeHandler(modelIpcChannels.decideToolApproval);
+    ipcMain.removeHandler(modelIpcChannels.compactContext);
+    ipcMain.removeHandler(modelIpcChannels.readArtifact);
     ipcMain.removeAllListeners(modelIpcChannels.streamStart);
     ipcMain.removeAllListeners(modelIpcChannels.streamCancel);
     for (const cancel of subscriptions.values()) {

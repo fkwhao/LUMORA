@@ -18,6 +18,7 @@ import com.lumora.core.agent.model.AgentMemoryCandidate;
 import com.lumora.core.model.ChatCompletion;
 import com.lumora.core.model.ChatMessage;
 import com.lumora.core.model.ChatStreamEvent;
+import com.lumora.core.model.ContextCompaction;
 import com.lumora.core.model.ModelConnection;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -127,6 +128,27 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
     }
 
     @Override
+    public ContextCompaction compactChat(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String memorySummary,
+            String taskId,
+            String conversationSummary,
+            String correlationId
+    ) {
+        return dtoMapper.toContextCompaction(exceptionMapper.execute(
+                () -> httpApi.compactChat(
+                        correlationId,
+                        dtoMapper.toChatRequest(
+                                messages, connection, null, memorySummary,
+                                null, "request_approval", taskId,
+                                conversationSummary
+                        )
+                )
+        ));
+    }
+
+    @Override
     public void streamChat(
             List<ChatMessage> messages,
             ModelConnection connection,
@@ -188,6 +210,30 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
                         memorySummary,
                         workspacePath,
                         permissionMode
+                ),
+                eventConsumer
+        );
+    }
+
+    @Override
+    public void streamChat(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String correlationId,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            Consumer<ChatStreamEvent> eventConsumer
+    ) {
+        sseClient.streamChat(
+                correlationId,
+                dtoMapper.toChatRequest(
+                        messages, connection, reasoningEffort, memorySummary,
+                        workspacePath, permissionMode, taskId,
+                        conversationSummary
                 ),
                 eventConsumer
         );

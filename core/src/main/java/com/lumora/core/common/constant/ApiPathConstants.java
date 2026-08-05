@@ -23,6 +23,10 @@ public final class ApiPathConstants {
             TASK_MESSAGES + "/cancel";
     public static final String TASK_MESSAGE_REGENERATE =
             TASK_MESSAGES + "/{messageId}/regenerate";
+    public static final String TASK_CONTEXT_COMPACT =
+            TASK_BY_ID + "/context/compact";
+    public static final String TASK_ARTIFACT =
+            TASK_BY_ID + "/artifacts/{artifactId}";
     public static final String TASK_APPROVALS =
             TASKS + TASK_BY_ID + "/approvals";
     public static final String APPROVAL_BY_ID = "/{approvalId}";

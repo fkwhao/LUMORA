@@ -48,7 +48,11 @@ export function applyChatEvent(
     event.type === "progress_message" ||
     event.type === "tool_started" ||
     event.type === "tool_completed" ||
-    event.type === "tool_failed"
+    event.type === "tool_failed" ||
+    event.type === "context_compaction_started" ||
+    event.type === "context_compaction_progress" ||
+    event.type === "context_compacted" ||
+    event.type === "context_compaction_failed"
   ) {
     const messages = [...get().messages];
     const last = messages.at(-1);
@@ -65,6 +69,8 @@ export function applyChatEvent(
       ...last,
       workLog,
       model: event.model || last.model,
+      activeContextTokens:
+        event.activeContextTokens || last.activeContextTokens,
     };
     set({ messages });
     return;
@@ -91,6 +97,8 @@ export function applyChatEvent(
         ...last,
         usage: event.usage,
         model: event.model || last.model,
+        activeContextTokens:
+          event.activeContextTokens || last.activeContextTokens,
       };
       set({ messages });
     }

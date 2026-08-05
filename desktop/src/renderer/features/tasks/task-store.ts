@@ -35,6 +35,7 @@ export interface TaskState {
   isCreating: boolean;
   isLoadingHistory: boolean;
   isChatting: boolean;
+  isCompacting: boolean;
   chatWasStopped: boolean;
   chatStartedAt?: number;
   lastChatDurationMs?: number;
@@ -49,6 +50,7 @@ export interface TaskState {
   openTask(taskId: string): Promise<void>;
   createTask(goal: string, projectPath?: string): Promise<TaskSnapshot>;
   sendMessage(content: string, options?: ChatRequestOptions): Promise<void>;
+  compactContext(model?: string): Promise<void>;
   stopChat(): void;
   regenerateMessage(
     messageId: string,
@@ -83,6 +85,7 @@ export function createTaskStore(
     isCreating: false,
     isLoadingHistory: false,
     isChatting: false,
+    isCompacting: false,
     chatWasStopped: false,
     chatStartedAt: undefined,
     lastChatDurationMs: undefined,
@@ -134,6 +137,7 @@ export function createTaskStore(
           taskEvents: [],
           isLoadingHistory: false,
           isChatting: false,
+          isCompacting: false,
           chatWasStopped: false,
           chatStartedAt: undefined,
           lastChatDurationMs: undefined,
@@ -212,6 +216,9 @@ export function createTaskStore(
       if (!task) {
         throw new Error("当前没有活动任务");
       }
+      if (get().isCompacting) {
+        throw new Error("正在压缩上下文，请稍候");
+      }
       const userMessage: ChatMessage = {
         role: "user",
         content: normalizedContent,
@@ -260,6 +267,64 @@ export function createTaskStore(
       unsubscribeChat?.();
       unsubscribeChat = undefined;
       await get().loadRecentTasks();
+    },
+
+    async compactContext(model) {
+      const task = get().activeTask;
+      if (!task || !modelApi) {
+        throw new Error("当前任务无法压缩上下文");
+      }
+      if (get().isChatting || get().isCompacting) {
+        throw new Error("当前任务正在处理，请稍候");
+      }
+      const itemId = `manual-context-compact-${crypto.randomUUID()}`;
+      set({
+        isCompacting: true,
+        chatError: undefined,
+        messages: updateContextWorkLog(get().messages, {
+          itemId,
+          kind: "context",
+          status: "running",
+          title: "正在压缩上下文",
+          content: "正在分析历史消息…",
+        }),
+      });
+      try {
+        const result = await modelApi.compactContext(task.taskId, model);
+        const messages = await modelApi.listMessages(task.taskId);
+        set({ messages, isCompacting: false });
+        if (messages.length === 0) {
+          set({
+            messages: updateContextWorkLog(get().messages, {
+              itemId,
+              kind: "context",
+              status: "completed",
+              title: "已压缩上下文",
+              content: `已压缩上下文 · ${result.beforeTokens} → ${result.afterTokens} Token`,
+              metadata: {
+                beforeTokens: result.beforeTokens,
+                afterTokens: result.afterTokens,
+                throughSequence: result.throughSequence,
+              },
+            }),
+          });
+        }
+      } catch (error) {
+        const message = toErrorMessage(error);
+        set({
+          isCompacting: false,
+          chatError: message,
+          messages: updateContextWorkLog(get().messages, {
+            itemId,
+            kind: "context",
+            status: "failed",
+            title: "上下文压缩失败",
+            content: message,
+            errorMessage: message,
+          }),
+        });
+        throw error;
+      }
     },
 
     stopChat() {
@@ -456,6 +521,7 @@ export function createTaskStore(
           messages: [],
           taskEvents: [],
           isChatting: false,
+          isCompacting: false,
           chatWasStopped: false,
           chatStartedAt: undefined,
           lastChatDurationMs: undefined,
@@ -540,6 +606,7 @@ export function createTaskStore(
         messages: [],
         taskEvents: [],
         isChatting: false,
+        isCompacting: false,
         chatWasStopped: false,
         chatStartedAt: undefined,
         lastChatDurationMs: undefined,
@@ -565,4 +632,39 @@ function applyEvent(
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "任务创建失败";
+}
+
+function updateContextWorkLog(
+  messages: ChatMessage[],
+  item: NonNullable<ChatMessage["workLog"]>[number],
+): ChatMessage[] {
+  const next = [...messages];
+  let index = -1;
+  for (let current = next.length - 1; current >= 0; current -= 1) {
+    if (
+      next[current]?.role === "assistant" &&
+      next[current]?.workLog?.some((entry) => entry.itemId === item.itemId)
+    ) {
+      index = current;
+      break;
+    }
+  }
+  if (index < 0) {
+    return [
+      ...next,
+      {
+        role: "assistant",
+        content: "",
+        workLog: [item],
+        createdAt: new Date().toISOString(),
+      },
+    ];
+  }
+  const message = next[index]!;
+  const workLog = [...(message.workLog ?? [])];
+  const itemIndex = workLog.findIndex((entry) => entry.itemId === item.itemId);
+  if (itemIndex >= 0) workLog[itemIndex] = item;
+  else workLog.push(item);
+  next[index] = { ...message, workLog };
+  return next;
 }

@@ -9,6 +9,8 @@ from app.dto.request.memory_extraction_request import MemoryExtractionRequest
 from app.dto.response.memory_extraction_response import (
     MemoryExtractionResponse,
 )
+from app.exception.provider_errors import ModelProviderError
+from app.harness.ports.model_provider import CompletionProviderPort
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.prompt.prompt_assembly import PromptAssembly
 from app.prompt.prompt_loader import PromptLoader
@@ -19,14 +21,12 @@ from app.prompt.prompt_segment import (
     PromptTarget,
     PromptTrustLevel,
 )
-from app.provider.openai_compatible_provider import OpenAICompatibleProvider
-from app.service.chat_service import ModelProviderError
 
 
 class MemoryExtractionService:
     def __init__(
         self,
-        provider: OpenAICompatibleProvider,
+        provider: CompletionProviderPort,
         prompt_loader: PromptLoader | None = None,
     ) -> None:
         self._provider = provider

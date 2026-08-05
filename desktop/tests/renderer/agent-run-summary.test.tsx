@@ -34,7 +34,11 @@ describe("AgentRunSummary", () => {
     fireEvent.click(screen.getByRole("button", { name: /已处理 4s/ }));
     expect(screen.getByText("正在检查现有实现")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "正在检查现有实现" }));
+    const phaseButton = screen.getByRole("button", {
+      name: "正在检查现有实现",
+    });
+    expect(phaseButton.querySelector("svg")).toBeNull();
+    fireEvent.click(phaseButton);
     fireEvent.click(screen.getByRole("button", { name: /已在 1s 内运行 pnpm typecheck/ }));
 
     expect(screen.getByText("Shell 脚本")).toBeInTheDocument();

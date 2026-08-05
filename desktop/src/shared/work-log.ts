@@ -13,6 +13,32 @@ export function workLogItemFromEvent(
     };
   }
   if (
+    event.type === "context_compaction_started" ||
+    event.type === "context_compaction_progress" ||
+    event.type === "context_compacted" ||
+    event.type === "context_compaction_failed"
+  ) {
+    return {
+      itemId: event.itemId || "context-compact",
+      kind: "context",
+      status:
+        event.type === "context_compaction_failed"
+          ? "failed"
+          : event.type === "context_compacted"
+            ? "completed"
+            : "running",
+      title:
+        event.type === "context_compaction_failed"
+          ? "上下文压缩失败"
+          : event.type === "context_compacted"
+            ? "已压缩上下文"
+            : "正在压缩上下文",
+      content: event.delta,
+      errorMessage: event.errorMessage,
+      metadata: event.metadata,
+    };
+  }
+  if (
     event.type !== "tool_started" &&
     event.type !== "tool_completed" &&
     event.type !== "tool_failed"

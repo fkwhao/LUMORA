@@ -2,8 +2,11 @@ from pathlib import Path
 from typing import get_args
 
 import yaml
-
+from app.config.settings import AgentSettings
 from app.dto.response.chat_stream_event_response import ChatStreamEventResponse
+from app.harness.run_event import RunEventType
+from app.main import create_app
+from app.service.planner_service import PlannerService
 
 
 def test_openapi_stream_event_enum_matches_runtime_dto() -> None:
@@ -12,8 +15,13 @@ def test_openapi_stream_event_enum_matches_runtime_dto() -> None:
     schemas = contract["components"]["schemas"]
     contract_types = set(schemas["ChatStreamEvent"]["properties"]["type"]["enum"])
     runtime_types = set(get_args(ChatStreamEventResponse.model_fields["type"].annotation))
+    internal_types = set(get_args(RunEventType))
+    event_properties = schemas["ChatStreamEvent"]["properties"]
 
     assert runtime_types == contract_types
+    assert internal_types == contract_types
+    assert event_properties["usage"]["$ref"].endswith("/TokenUsage")
+    assert event_properties["activeContextTokens"]["minimum"] == 0
 
 
 def test_prompt_context_contract_contains_only_runtime_facts() -> None:
@@ -26,6 +34,34 @@ def test_prompt_context_contract_contains_only_runtime_facts() -> None:
         "projectInstructions",
         "availableTools",
         "memorySummary",
+        "taskId",
+        "conversationSummary",
         "permissionMode",
         "permissionRules",
+    }
+
+
+def test_http_route_split_preserves_public_paths_and_methods() -> None:
+    app = create_app(
+        AgentSettings(
+            host="127.0.0.1",
+            port=45101,
+            startup_token="a" * 64,
+            protocol_version="1",
+        ),
+        PlannerService(),
+    )
+    paths = app.openapi()["paths"]
+
+    assert {path: set(operations) for path, operations in paths.items()} == {
+        "/api/v1/health": {"get"},
+        "/api/v1/tasks/plan": {"post"},
+        "/api/v1/chat/completions": {"post"},
+        "/api/v1/chat/completions/stream": {"post"},
+        "/api/v1/chat/compact": {"post"},
+        "/api/v1/artifacts/read": {"post"},
+        "/api/v1/artifacts/search": {"post"},
+        "/api/v1/models": {"post"},
+        "/api/v1/memory/extractions": {"post"},
+        "/api/v1/tool-approvals/{approval_id}": {"post"},
     }

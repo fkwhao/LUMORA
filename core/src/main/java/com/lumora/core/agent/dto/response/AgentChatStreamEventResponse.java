@@ -12,6 +12,7 @@ public class AgentChatStreamEventResponse {
     private final String delta;
     private final String model;
     private final AgentTokenUsageResponse usage;
+    private final int activeContextTokens;
     private final String errorMessage;
     private final String itemId;
     private final String toolCallId;
@@ -35,6 +36,7 @@ public class AgentChatStreamEventResponse {
             @JsonProperty("delta") String delta,
             @JsonProperty("model") String model,
             @JsonProperty("usage") AgentTokenUsageResponse usage,
+            @JsonProperty("activeContextTokens") int activeContextTokens,
             @JsonProperty("errorMessage") String errorMessage,
             @JsonProperty("itemId") String itemId,
             @JsonProperty("toolCallId") String toolCallId,
@@ -56,6 +58,7 @@ public class AgentChatStreamEventResponse {
         this.delta = delta;
         this.model = model;
         this.usage = usage;
+        this.activeContextTokens = Math.max(0, activeContextTokens);
         this.errorMessage = errorMessage;
         this.itemId = itemId;
         this.toolCallId = toolCallId;
@@ -88,6 +91,10 @@ public class AgentChatStreamEventResponse {
 
     public AgentTokenUsageResponse getUsage() {
         return usage;
+    }
+
+    public int getActiveContextTokens() {
+        return activeContextTokens;
     }
 
     public String getErrorMessage() {

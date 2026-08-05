@@ -9,6 +9,7 @@ class ModelConnectionSettings:
     api_key: str
     model: str
     max_output_tokens: int | None = None
+    context_window: int | None = None
 
     def validate(self) -> None:
         provider_name = self.provider_name.strip()
@@ -19,6 +20,8 @@ class ModelConnectionSettings:
             raise ValueError("模型供应商、API 地址、API Key 和模型名称均不能为空")
         if self.max_output_tokens is not None and self.max_output_tokens < 1:
             raise ValueError("最大输出 Token 必须大于 0")
+        if self.context_window is not None and self.context_window < 1:
+            raise ValueError("上下文窗口必须大于 0")
 
         parsed = urlparse(base_url)
         is_loopback_http = (

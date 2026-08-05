@@ -1,13 +1,11 @@
+import json
 import unittest
 
-from fastapi.testclient import TestClient
-
 from app.config.settings import AgentSettings
-from app.dto.response.chat_stream_event_response import (
-    ChatStreamEventResponse,
-)
+from app.harness.run_event import RunEvent
 from app.main import create_app
 from app.service.planner_service import PlannerService
+from fastapi.testclient import TestClient
 
 STARTUP_TOKEN = "a" * 64
 
@@ -195,6 +193,20 @@ class AgentControllerTest(unittest.TestCase):
         self.assertIn('"delta":"你好"', response.text)
         self.assertIn('"type":"completed"', response.text)
         self.assertEqual(chat_service.last_reasoning_effort, "high")
+        frames = [frame for frame in response.text.strip().split("\n\n") if frame]
+        event_names = [frame.splitlines()[0].removeprefix("event: ") for frame in frames]
+        payloads = [
+            json.loads(frame.splitlines()[1].removeprefix("data: "))
+            for frame in frames
+        ]
+        self.assertEqual(
+            event_names,
+            ["reasoning_delta", "text_delta", "completed"],
+        )
+        self.assertEqual(
+            [payload["type"] for payload in payloads],
+            event_names,
+        )
 
     def test_model_list_returns_provider_model_ids(self) -> None:
         chat_service = StreamingChatService()
@@ -260,17 +272,17 @@ class StreamingChatService:
             "reasoning_effort",
             None,
         )
-        yield ChatStreamEventResponse(
+        yield RunEvent(
             type="reasoning_delta",
             delta="先理解用户问题。",
             model="test-model",
         )
-        yield ChatStreamEventResponse(
+        yield RunEvent(
             type="text_delta",
             delta="你好",
             model="test-model",
         )
-        yield ChatStreamEventResponse(
+        yield RunEvent(
             type="completed",
             model="test-model",
         )

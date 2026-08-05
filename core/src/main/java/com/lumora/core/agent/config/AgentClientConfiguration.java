@@ -6,6 +6,7 @@ import com.lumora.core.common.constant.HttpContractConstants;
 import com.lumora.core.config.CoreProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
@@ -19,7 +20,26 @@ import java.net.http.HttpClient;
 public class AgentClientConfiguration {
 
     @Bean
+    @Primary
     public RestClient agentRestClient(CoreProperties properties) {
+        return buildAgentRestClient(
+                properties,
+                AgentClientConstants.REQUEST_TIMEOUT
+        );
+    }
+
+    @Bean("agentSseRestClient")
+    public RestClient agentSseRestClient(CoreProperties properties) {
+        return buildAgentRestClient(
+                properties,
+                AgentClientConstants.STREAM_READ_TIMEOUT
+        );
+    }
+
+    private RestClient buildAgentRestClient(
+            CoreProperties properties,
+            java.time.Duration readTimeout
+    ) {
         URI agentUri = validateAgentUri(properties.getAgentUrl());
         HttpClient httpClient = HttpClient.newBuilder()
                 .connectTimeout(AgentClientConstants.REQUEST_TIMEOUT)
@@ -28,9 +48,9 @@ public class AgentClientConfiguration {
                 .build();
         JdkClientHttpRequestFactory requestFactory =
                 new JdkClientHttpRequestFactory(httpClient);
-        requestFactory.setReadTimeout(
-                AgentClientConstants.REQUEST_TIMEOUT
-        );
+        if (!readTimeout.isZero()) {
+            requestFactory.setReadTimeout(readTimeout);
+        }
 
         return RestClient.builder()
                 .baseUrl(agentUri.toString())

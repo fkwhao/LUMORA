@@ -5,6 +5,7 @@ import com.lumora.core.agent.model.AgentMemoryCandidate;
 import com.lumora.core.model.ChatCompletion;
 import com.lumora.core.model.ChatMessage;
 import com.lumora.core.model.ChatStreamEvent;
+import com.lumora.core.model.ContextCompaction;
 import com.lumora.core.model.ModelConnection;
 
 import java.util.List;
@@ -64,6 +65,15 @@ public interface AgentRuntimeClient {
             String correlationId
     );
 
+    ContextCompaction compactChat(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String memorySummary,
+            String taskId,
+            String conversationSummary,
+            String correlationId
+    );
+
     /**
      * 通过 Python Agent 执行流式模型对话。
      *
@@ -113,5 +123,21 @@ public interface AgentRuntimeClient {
                 workspacePath,
                 eventConsumer
         );
+    }
+
+    default void streamChat(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String correlationId,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            Consumer<ChatStreamEvent> eventConsumer
+    ) {
+        streamChat(messages, connection, correlationId, reasoningEffort,
+                memorySummary, workspacePath, permissionMode, eventConsumer);
     }
 }

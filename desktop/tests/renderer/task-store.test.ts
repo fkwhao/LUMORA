@@ -106,6 +106,74 @@ describe("task store", () => {
     });
   });
 
+  it("shows manual compaction as an independent processing record", async () => {
+    const api = createApi();
+    const modelApi = createModelApi();
+    let finishCompaction: (() => void) | undefined;
+    vi.mocked(modelApi.compactContext).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishCompaction = () =>
+            resolve({
+              beforeTokens: 8_000,
+              afterTokens: 2_800,
+              usage: {
+                promptTokens: 8_000,
+                completionTokens: 800,
+                totalTokens: 8_800,
+              },
+            });
+        }),
+    );
+    vi.mocked(modelApi.listMessages)
+      .mockResolvedValueOnce([
+        { role: "user", content: "整理下载目录" },
+        { role: "assistant", content: "可以开始整理。" },
+      ])
+      .mockResolvedValueOnce([
+        { role: "user", content: "整理下载目录" },
+        { role: "assistant", content: "可以开始整理。" },
+        {
+          role: "assistant",
+          content: "",
+          activeContextTokens: 2_800,
+          workLog: [
+            {
+              itemId: "manual-context-compact-persisted",
+              kind: "context",
+              status: "completed",
+              title: "已压缩上下文",
+            },
+          ],
+        },
+      ]);
+    const store = createTaskStore(api, modelApi);
+    await store.getState().openTask(createdTask.taskId);
+
+    const pending = store.getState().compactContext();
+
+    expect(store.getState().messages).toHaveLength(3);
+    expect(store.getState().messages[1]?.workLog).toBeUndefined();
+    expect(store.getState().messages[2]).toMatchObject({
+      role: "assistant",
+      content: "",
+      workLog: [
+        expect.objectContaining({
+          itemId: expect.stringMatching(/^manual-context-compact-/),
+          status: "running",
+        }),
+      ],
+    });
+
+    finishCompaction?.();
+    await pending;
+
+    expect(store.getState().messages[2]).toMatchObject({
+      activeContextTokens: 2_800,
+      workLog: [expect.objectContaining({ status: "completed" })],
+    });
+  });
+
   it("replaces the latest answer after editing the latest user message", async () => {
     const api = createApi();
     const modelApi = createModelApi();
@@ -322,6 +390,8 @@ function createModelApi(): LumoraModelApi {
     updateSettings: vi.fn(),
     listModels: vi.fn(async () => []),
     complete: vi.fn(),
+    compactContext: vi.fn(),
+    readArtifact: vi.fn(),
     listMessages: vi.fn(async () => [
       { role: "user" as const, content: "整理下载目录" },
       {

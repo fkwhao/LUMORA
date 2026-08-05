@@ -5,6 +5,8 @@ import type {
   ChatMessage,
   ChatRequestOptions,
   ChatStreamEvent,
+  ContextCompactionResult,
+  ArtifactChunk,
   ListModelsInput,
   ModelSettings,
   ModelProvider,
@@ -147,6 +149,31 @@ export class RestModelGateway implements ModelGateway {
       `/api/v1/tasks/${encodeURIComponent(taskId)}/messages`,
     );
     return messages.map(hydrateWorkLog);
+  }
+
+  compactContext(taskId: string, model?: string): Promise<ContextCompactionResult> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/context/compact`,
+      { method: "POST", body: JSON.stringify({ model }) },
+      150_000,
+    );
+  }
+
+  readArtifact(
+    taskId: string,
+    artifactId: string,
+    offset = 0,
+    limit = 20_000,
+  ): Promise<ArtifactChunk> {
+    const query = new URLSearchParams({
+      offset: String(offset),
+      limit: String(limit),
+    });
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}?${query}`,
+      {},
+      30_000,
+    );
   }
 
   async decideToolApproval(

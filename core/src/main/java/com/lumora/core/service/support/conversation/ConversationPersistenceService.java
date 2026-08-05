@@ -7,9 +7,11 @@ import com.lumora.core.common.constant.ConversationConstants;
 import com.lumora.core.entity.ChatMessageRole;
 import com.lumora.core.entity.Conversation;
 import com.lumora.core.entity.ConversationMessage;
+import com.lumora.core.entity.ConversationContextSummary;
 import com.lumora.core.mapper.ConversationMapper;
 import com.lumora.core.mapper.ConversationMessageMapper;
 import com.lumora.core.model.ChatMessage;
+import com.lumora.core.model.ChatStreamEvent;
 import com.lumora.core.model.TokenUsage;
 import com.lumora.core.service.TaskService;
 import com.lumora.core.service.MemoryService;
@@ -34,6 +36,7 @@ public class ConversationPersistenceService {
     private final ConversationMessageMapper messageMapper;
     private final TaskService taskService;
     private final MemoryService memoryService;
+    private final ConversationContextSummaryService contextSummaryService;
     private final Clock clock;
     private final TransactionTemplate transactionTemplate;
     private final ObjectMapper objectMapper;
@@ -86,6 +89,74 @@ public class ConversationPersistenceService {
         transactionTemplate.executeWithoutResult(
                 status -> insertAssistant(context, accumulator)
         );
+    }
+
+    public ContextCompactionInput prepareCompaction(String taskId) {
+        taskService.getTask(taskId);
+        Conversation conversation = requireConversation(taskId);
+        List<ConversationMessage> history = loadMessages(
+                conversation.getConversationId()
+        );
+        if (history.isEmpty()) {
+            throw new IllegalArgumentException("当前会话没有可压缩的消息");
+        }
+        ConversationContextSummary summary = contextSummaryService.latest(
+                conversation.getConversationId()
+        );
+        List<ChatMessage> messages = history.stream()
+                .filter(message -> summary == null
+                        || message.getSequence() > summary.getThroughSequence())
+                .filter(this::isModelVisible)
+                .map(this::toModelMessage)
+                .toList();
+        if (messages.isEmpty()) {
+            throw new IllegalArgumentException("当前会话已经完成压缩");
+        }
+        return new ContextCompactionInput(
+                conversation.getConversationId(), messages,
+                memoryService.buildPromptSummary(conversation.getConversationId()),
+                summary == null ? null : summary.getSummaryText()
+        );
+    }
+
+    public void appendWorkLogEvent(String taskId, ChatStreamEvent event) {
+        transactionTemplate.executeWithoutResult(
+                status -> insertWorkLogMessage(taskId, event)
+        );
+    }
+
+    private void insertWorkLogMessage(String taskId, ChatStreamEvent event) {
+        Conversation conversation = requireConversation(taskId);
+        List<ConversationMessage> history = loadMessages(
+                conversation.getConversationId()
+        );
+        TokenUsage usage = event.getUsage() == null
+                ? new TokenUsage(0, 0, 0)
+                : event.getUsage();
+        Instant now = clock.instant();
+        ConversationMessage activity = new ConversationMessage(
+                UUID.randomUUID().toString(),
+                conversation.getConversationId(),
+                history.size() + 1,
+                ChatMessageRole.ASSISTANT,
+                "",
+                event.getModel(),
+                usage.getPromptTokens(),
+                usage.getCompletionTokens(),
+                usage.getTotalTokens(),
+                0L,
+                now
+        );
+        try {
+            activity.setWorkLogJson(objectMapper.writeValueAsString(
+                    List.of(WorkLogEventProjector.project(event))
+            ));
+        } catch (JsonProcessingException error) {
+            throw new IllegalStateException("无法保存上下文压缩记录", error);
+        }
+        activity.setActiveContextTokens(event.getActiveContextTokens());
+        messageMapper.insert(activity);
+        touchConversation(conversation, taskId, now);
     }
 
     /**
@@ -192,6 +263,9 @@ public class ConversationPersistenceService {
                 now
         );
         assistantMessage.setWorkLogJson(serializeWorkLog(accumulator));
+        assistantMessage.setActiveContextTokens(
+                accumulator.getActiveContextTokens()
+        );
         messageMapper.insert(assistantMessage);
         Conversation conversation = conversationMapper.selectById(
                 context.getConversationId()
@@ -245,16 +319,28 @@ public class ConversationPersistenceService {
             List<ConversationMessage> history,
             ConversationMessage currentUserMessage
     ) {
+        ConversationContextSummary summary = contextSummaryService.latest(
+                conversationId
+        );
+        List<ConversationMessage> uncompactedHistory = summary == null
+                ? history.stream().filter(this::isModelVisible).toList()
+                : history.stream()
+                        .filter(message -> message.getSequence()
+                                > summary.getThroughSequence())
+                        .filter(this::isModelVisible)
+                        .toList();
         int retainedHistoryCount = Math.max(
                 0,
                 ConversationConstants.MAX_MODEL_CONTEXT_MESSAGES - 1
         );
         int firstContextIndex = Math.max(
                 0,
-                history.size() - retainedHistoryCount
+                uncompactedHistory.size() - retainedHistoryCount
         );
         List<ChatMessage> modelMessages = new ArrayList<>(
-                history.subList(firstContextIndex, history.size())
+                uncompactedHistory.subList(
+                        firstContextIndex, uncompactedHistory.size()
+                )
                         .stream()
                         .map(this::toModelMessage)
                         .toList()
@@ -269,6 +355,7 @@ public class ConversationPersistenceService {
                 currentUserMessage.getContent(),
                 memoryService.buildPromptSummary(conversationId),
                 memoryService.buildExtractionContext(conversationId),
+                summary == null ? null : summary.getSummaryText(),
                 System.nanoTime()
         );
     }
@@ -371,7 +458,17 @@ public class ConversationPersistenceService {
     private ChatMessage toModelMessage(ConversationMessage message) {
         return new ChatMessage(
                 message.getRole().name().toLowerCase(),
-                message.getContent()
+                message.getContent(),
+                message.getMessageId(),
+                message.getSequence()
         );
+    }
+
+    private boolean isModelVisible(ConversationMessage message) {
+        return message.getRole() != ChatMessageRole.ASSISTANT
+                || (message.getContent() != null
+                && !message.getContent().isBlank())
+                || message.getWorkLogJson() == null
+                || message.getWorkLogJson().equals("[]");
     }
 }

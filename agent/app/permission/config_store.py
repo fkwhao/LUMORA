@@ -100,7 +100,7 @@ class PermissionConfigStore:
     @staticmethod
     def _input_pattern(tool: Tool, input_data: ToolInput) -> str:
         if tool.category is ToolCategory.SHELL:
-            return str(input_data.get("command") or "")
+            return "*"
         return str(input_data.get("path") or input_data.get("pattern") or "*")
 
     @staticmethod

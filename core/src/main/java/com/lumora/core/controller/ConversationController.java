@@ -6,8 +6,11 @@ import com.lumora.core.converter.ConversationMessageResponseConverter;
 import com.lumora.core.dto.request.SendMessageRequest;
 import com.lumora.core.dto.request.ToolApprovalDecisionRequest;
 import com.lumora.core.dto.response.ConversationMessageResponse;
+import com.lumora.core.dto.response.ContextCompactionResponse;
 import com.lumora.core.model.ChatStreamEvent;
 import com.lumora.core.model.ChatStreamEventType;
+import com.lumora.core.model.ArtifactChunk;
+import com.lumora.core.service.ArtifactService;
 import com.lumora.core.service.ConversationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +41,7 @@ public class ConversationController {
 
     private final ConversationService conversationService;
     private final ConversationMessageResponseConverter responseConverter;
+    private final ArtifactService artifactService;
 
     @GetMapping(ApiPathConstants.TASK_MESSAGES)
     public List<ConversationMessageResponse> listMessages(
@@ -124,6 +128,31 @@ public class ConversationController {
                 request.getDecision()
         );
         return Map.of("accepted", true);
+    }
+
+    @GetMapping(ApiPathConstants.TASK_ARTIFACT)
+    public ArtifactChunk readArtifact(
+            @PathVariable String taskId,
+            @PathVariable String artifactId,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "0")
+            long offset,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "20000")
+            int limit
+    ) {
+        return artifactService.read(taskId, artifactId, offset, limit);
+    }
+
+    @PostMapping(ApiPathConstants.TASK_CONTEXT_COMPACT)
+    public ContextCompactionResponse compactContext(
+            @PathVariable String taskId,
+            @RequestBody(required = false) Map<String, String> request,
+            @RequestHeader(HttpContractConstants.CORRELATION_ID_HEADER)
+            String correlationId
+    ) {
+        String model = request == null ? null : request.get("model");
+        return ContextCompactionResponse.from(
+                conversationService.compactContext(taskId, model, correlationId)
+        );
     }
 
     private void completeWithStreamError(

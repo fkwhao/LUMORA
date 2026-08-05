@@ -36,7 +36,20 @@ public final class WorkLogEventProjector {
             "replacements",
             "previousLines",
             "currentLines",
-            "created"
+            "created",
+            "artifactId",
+            "artifactUri",
+            "artifactMimeType",
+            "artifactByteSize",
+            "artifactCharacterCount",
+            "artifactEstimatedTokens",
+            "artifactSha256",
+            "artifactTruncated",
+            "beforeTokens",
+            "afterTokens",
+            "throughSequence",
+            "retainedFromSequence",
+            "trigger"
     );
 
     private WorkLogEventProjector() {

@@ -737,12 +737,16 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
                       <div className="provider-model-actions">
                         <button
                           type="button"
+                          className={connectedModelId === providerModel.modelConfigurationId ? "is-connected" : undefined}
                           aria-label={`测试 ${providerModel.modelId} 连接`}
                           title={connectedModelId === providerModel.modelConfigurationId ? "连接成功" : "测试连接"}
                           onClick={() => void testModel(providerModel)}
                         >
                           {connectedModelId === providerModel.modelConfigurationId ? (
-                            <CircleCheck size={15} />
+                            <>
+                              <CircleCheck size={15} />
+                              <span>连接成功</span>
+                            </>
                           ) : (
                             <Cable
                               size={15}

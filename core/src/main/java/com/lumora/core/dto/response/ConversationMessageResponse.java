@@ -10,6 +10,7 @@ public class ConversationMessageResponse {
     private final String content;
     private final String model;
     private final TokenUsageResponse usage;
+    private final int activeContextTokens;
     private final long durationMs;
     private final String workLogJson;
     private final Instant createdAt;
@@ -21,6 +22,7 @@ public class ConversationMessageResponse {
             String content,
             String model,
             TokenUsageResponse usage,
+            int activeContextTokens,
             long durationMs,
             String workLogJson,
             Instant createdAt
@@ -31,6 +33,7 @@ public class ConversationMessageResponse {
         this.content = content;
         this.model = model;
         this.usage = usage;
+        this.activeContextTokens = Math.max(0, activeContextTokens);
         this.durationMs = durationMs;
         this.workLogJson = workLogJson == null ? "[]" : workLogJson;
         this.createdAt = createdAt;
@@ -58,6 +61,10 @@ public class ConversationMessageResponse {
 
     public TokenUsageResponse getUsage() {
         return usage;
+    }
+
+    public int getActiveContextTokens() {
+        return activeContextTokens;
     }
 
     public long getDurationMs() {

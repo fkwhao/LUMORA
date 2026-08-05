@@ -1,13 +1,12 @@
 import asyncio
 
 import pytest
-
 from app.dto.request.memory_extraction_request import MemoryExtractionRequest
 from app.dto.response.chat_completion_response import (
     ChatCompletionResponse,
     TokenUsageResponse,
 )
-from app.service.chat_service import ModelProviderError
+from app.exception.provider_errors import ModelProviderError
 from app.service.memory_extraction_service import MemoryExtractionService
 
 

@@ -6,8 +6,8 @@ from app.tool.base import (
     ToolResult,
     function_tool,
 )
+from app.tool.default_registry import create_default_tool_registry
 from app.tool.registry import ToolInputError, ToolRegistry
-from app.tool.tool_runtime import create_default_tool_registry
 
 __all__ = [
     "FunctionTool",

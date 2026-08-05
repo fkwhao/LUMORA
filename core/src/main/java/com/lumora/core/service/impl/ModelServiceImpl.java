@@ -11,6 +11,7 @@ import com.lumora.core.mapper.ModelConfigurationModelMapper;
 import com.lumora.core.model.ChatCompletion;
 import com.lumora.core.model.ChatMessage;
 import com.lumora.core.model.ChatStreamEvent;
+import com.lumora.core.model.ContextCompaction;
 import com.lumora.core.model.ModelConnection;
 import com.lumora.core.model.ModelSettings;
 import com.lumora.core.model.ModelProvider;
@@ -453,6 +454,28 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
+    public ContextCompaction compactContext(
+            List<ChatMessage> messages,
+            String memorySummary,
+            String taskId,
+            String conversationSummary,
+            String model,
+            String correlationId
+    ) {
+        if (messages == null || messages.isEmpty()) {
+            throw new IllegalArgumentException("没有可压缩的会话消息");
+        }
+        return agentRuntimeClient.compactChat(
+                List.copyOf(messages),
+                requireConnection(model),
+                memorySummary,
+                requireText(taskId, "任务 ID"),
+                conversationSummary,
+                requireText(correlationId, "关联 ID")
+        );
+    }
+
+    @Override
     public void streamChat(
             List<ChatMessage> messages,
             String correlationId,
@@ -500,6 +523,29 @@ public class ModelServiceImpl implements ModelService {
         );
     }
 
+    @Override
+    public void streamChat(
+            List<ChatMessage> messages,
+            String correlationId,
+            String model,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            Consumer<ChatStreamEvent> eventConsumer
+    ) {
+        if (messages == null || messages.isEmpty()) {
+            throw new IllegalArgumentException("对话消息不能为空");
+        }
+        agentRuntimeClient.streamChat(
+                List.copyOf(messages), requireConnection(model), correlationId,
+                reasoningEffort, memorySummary, workspacePath, permissionMode,
+                taskId, conversationSummary, eventConsumer
+        );
+    }
+
     private ModelConnection requireConnection() {
         return requireConnection(null);
     }
@@ -523,7 +569,10 @@ public class ModelServiceImpl implements ModelService {
                         configuration.getApiKeyCiphertext()
                 ),
                 modelConfiguration == null
-                        ? null : modelConfiguration.getMaxOutputTokens()
+                        ? null : modelConfiguration.getMaxOutputTokens(),
+                modelConfiguration == null
+                        ? configuration.getContextWindow()
+                        : modelConfiguration.getContextWindow()
         );
     }
 

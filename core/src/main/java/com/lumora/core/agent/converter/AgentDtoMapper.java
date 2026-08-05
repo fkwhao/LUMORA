@@ -5,6 +5,7 @@ import com.lumora.core.agent.dto.request.AgentChatMessageRequest;
 import com.lumora.core.agent.dto.request.AgentModelConnectionRequest;
 import com.lumora.core.agent.dto.request.AgentPromptContextRequest;
 import com.lumora.core.agent.dto.response.AgentChatCompletionResponse;
+import com.lumora.core.agent.dto.response.AgentContextCompactionResponse;
 import com.lumora.core.agent.dto.response.AgentChatStreamEventResponse;
 import com.lumora.core.agent.dto.response.AgentPlanStepResponse;
 import com.lumora.core.agent.dto.response.AgentMemoryExtractionResponse;
@@ -16,6 +17,7 @@ import com.lumora.core.agent.model.AgentMemoryCandidate;
 import com.lumora.core.model.ChatCompletion;
 import com.lumora.core.model.ChatMessage;
 import com.lumora.core.model.ChatStreamEvent;
+import com.lumora.core.model.ContextCompaction;
 import com.lumora.core.model.ModelConnection;
 import com.lumora.core.model.TokenUsage;
 import org.springframework.stereotype.Component;
@@ -92,10 +94,26 @@ public class AgentDtoMapper {
             String workspacePath,
             String permissionMode
     ) {
+        return toChatRequest(messages, connection, reasoningEffort,
+                memorySummary, workspacePath, permissionMode, null, null);
+    }
+
+    public AgentChatCompletionRequest toChatRequest(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary
+    ) {
         List<AgentChatMessageRequest> requestMessages = messages.stream()
                 .map(message -> new AgentChatMessageRequest(
                         message.getRole(),
-                        message.getContent()
+                        message.getContent(),
+                        message.getMessageId(),
+                        message.getSequence()
                 ))
                 .toList();
         return new AgentChatCompletionRequest(
@@ -104,9 +122,27 @@ public class AgentDtoMapper {
                 AgentPromptContextRequest.forWorkspace(
                         memorySummary,
                         workspacePath,
-                        permissionMode
+                        permissionMode,
+                        taskId,
+                        conversationSummary
                 ),
                 reasoningEffort
+        );
+    }
+
+    public ContextCompaction toContextCompaction(
+            AgentContextCompactionResponse response
+    ) {
+        if (response == null || response.getUsage() == null) {
+            throw new AgentRuntimeException("Python Agent 返回无效压缩结果");
+        }
+        return new ContextCompaction(
+                response.getSummary(),
+                response.getBeforeTokens(),
+                response.getAfterTokens(),
+                response.getThroughSequence(),
+                response.getRetainedFromSequence(),
+                toTokenUsage(response.getUsage())
         );
     }
 
@@ -171,7 +207,8 @@ public class AgentDtoMapper {
                 response.getReason(),
                 response.getRiskLevel(),
                 response.getReversible(),
-                response.getDecision()
+                response.getDecision(),
+                response.getActiveContextTokens()
         );
     }
 

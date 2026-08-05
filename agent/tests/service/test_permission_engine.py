@@ -2,9 +2,10 @@ import asyncio
 from pathlib import Path
 
 import yaml
-
 from app.dto.request.chat_completion_request import ChatMessageRequest
 from app.dto.response.chat_completion_response import TokenUsageResponse
+from app.harness.agent_loop import AgentLoopRunner
+from app.harness.contracts import ProviderToolCall, ProviderTurn
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.permission.broker import ApprovalBroker
 from app.permission.config_store import PermissionConfigStore
@@ -17,7 +18,6 @@ from app.permission.model import (
     PermissionRule,
 )
 from app.prompt.prompt_assembly import PromptAssembly
-from app.provider.agent_loop import AgentLoopRunner, ProviderToolCall, ProviderTurn
 from app.tool.base import ToolCategory, ToolContext, ToolResult, function_tool
 from app.tool.registry import ToolRegistry
 
@@ -161,6 +161,18 @@ def test_more_specific_layer_and_later_rule_win(tmp_path: Path) -> None:
     assert "local" in result.reason
 
 
+def test_auto_approve_allows_non_destructive_shell(tmp_path: Path) -> None:
+    result = PermissionEngine().evaluate(
+        _tool(category=ToolCategory.SHELL),
+        ToolContext(tmp_path.resolve()),
+        {"command": "mvn test"},
+        PermissionPolicy(PermissionMode.AUTO_APPROVE),
+    )
+
+    assert result.decision is PermissionDecision.ALLOW
+    assert result.layer == "mode"
+
+
 def test_later_rule_can_override_deny_inside_same_layer(
     tmp_path: Path,
 ) -> None:
@@ -215,7 +227,17 @@ def test_config_store_loads_three_layers_and_persists_local_allow(
 
     assert [rule.source for rule in policy.rules] == ["user", "project"]
     assert saved.source == "local"
+    assert saved.pattern == "*"
     assert payload["rules"][-1]["decision"] == "allow"
+    assert payload["rules"][-1]["pattern"] == "*"
+    reloaded = store.load_policy(workspace, PermissionPolicy())
+    different_command = PermissionEngine().evaluate(
+        _tool(category=ToolCategory.SHELL),
+        ToolContext(workspace.resolve()),
+        {"command": "mvn test"},
+        reloaded,
+    )
+    assert different_command.decision is PermissionDecision.ALLOW
     assert "/permissions.local.yaml" in (
         workspace / ".lumora" / ".gitignore"
     ).read_text(encoding="utf-8")

@@ -103,7 +103,6 @@ class PermissionEngine:
         if (
             policy.mode is PermissionMode.AUTO_APPROVE
             and not tool.is_destructive(input_data)
-            and tool.category is not ToolCategory.SHELL
         ):
             return PermissionEvaluation(
                 PermissionDecision.ALLOW,

@@ -17,7 +17,32 @@ public class ConversationRunContext {
     private final String currentUserContent;
     private final String memorySummary;
     private final String memoryExtractionContext;
+    private final String conversationSummary;
     private final long startedAtNanos;
+
+    public ConversationRunContext(
+            String taskId,
+            String conversationId,
+            int assistantSequence,
+            List<ChatMessage> modelMessages,
+            String currentUserMessageId,
+            String currentUserContent,
+            String memorySummary,
+            String memoryExtractionContext,
+            String conversationSummary,
+            long startedAtNanos
+    ) {
+        this.taskId = taskId;
+        this.conversationId = conversationId;
+        this.assistantSequence = assistantSequence;
+        this.modelMessages = List.copyOf(modelMessages);
+        this.currentUserMessageId = currentUserMessageId;
+        this.currentUserContent = currentUserContent;
+        this.memorySummary = memorySummary;
+        this.memoryExtractionContext = memoryExtractionContext;
+        this.conversationSummary = conversationSummary;
+        this.startedAtNanos = startedAtNanos;
+    }
 
     public ConversationRunContext(
             String taskId,
@@ -30,15 +55,9 @@ public class ConversationRunContext {
             String memoryExtractionContext,
             long startedAtNanos
     ) {
-        this.taskId = taskId;
-        this.conversationId = conversationId;
-        this.assistantSequence = assistantSequence;
-        this.modelMessages = List.copyOf(modelMessages);
-        this.currentUserMessageId = currentUserMessageId;
-        this.currentUserContent = currentUserContent;
-        this.memorySummary = memorySummary;
-        this.memoryExtractionContext = memoryExtractionContext;
-        this.startedAtNanos = startedAtNanos;
+        this(taskId, conversationId, assistantSequence, modelMessages,
+                currentUserMessageId, currentUserContent, memorySummary,
+                memoryExtractionContext, null, startedAtNanos);
     }
 
     public String getTaskId() {
@@ -72,6 +91,8 @@ public class ConversationRunContext {
     public String getMemoryExtractionContext() {
         return memoryExtractionContext;
     }
+
+    public String getConversationSummary() { return conversationSummary; }
 
     public long getStartedAtNanos() {
         return startedAtNanos;

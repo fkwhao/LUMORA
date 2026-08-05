@@ -6,6 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class ChatMessageRequest(BaseModel):
     role: Literal["user", "assistant"]
     content: str = Field(min_length=1, max_length=100_000)
+    message_id: str | None = Field(default=None, alias="messageId")
+    sequence: int | None = Field(default=None, ge=1)
 
 
 class ModelConnectionRequest(BaseModel):
@@ -22,6 +24,12 @@ class ModelConnectionRequest(BaseModel):
     max_output_tokens: int | None = Field(
         default=None,
         alias="maxOutputTokens",
+        ge=1,
+        le=10_000_000,
+    )
+    context_window: int | None = Field(
+        default=None,
+        alias="contextWindow",
         ge=1,
         le=10_000_000,
     )
@@ -54,6 +62,12 @@ class PromptContextRequest(BaseModel):
     memory_summary: str | None = Field(
         default=None,
         alias="memorySummary",
+        max_length=100_000,
+    )
+    task_id: str | None = Field(default=None, alias="taskId", max_length=160)
+    conversation_summary: str | None = Field(
+        default=None,
+        alias="conversationSummary",
         max_length=100_000,
     )
     permission_mode: Literal[

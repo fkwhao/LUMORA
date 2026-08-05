@@ -3,6 +3,8 @@ import type {
   ChatMessage,
   ChatRequestOptions,
   ChatStreamEvent,
+  ContextCompactionResult,
+  ArtifactChunk,
   ListModelsInput,
   ModelSettings,
   ModelProvider,
@@ -30,6 +32,8 @@ export interface ModelGateway {
   listModels(input: ListModelsInput): Promise<string[]>;
   complete(messages: ChatMessage[]): Promise<ChatCompletion>;
   listMessages(taskId: string): Promise<ChatMessage[]>;
+  compactContext(taskId: string, model?: string): Promise<ContextCompactionResult>;
+  readArtifact(taskId: string, artifactId: string, offset?: number, limit?: number): Promise<ArtifactChunk>;
   decideToolApproval(
     taskId: string,
     approvalId: string,

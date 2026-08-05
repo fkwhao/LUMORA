@@ -17,6 +17,7 @@ import type {
 } from "../shared/model-contract";
 import {
   validateApprovalDecisionInput,
+  validateArtifactId,
   validateGoal,
   validateMessageId,
   validateTaskId,
@@ -84,6 +85,20 @@ const api: LumoraApi = {
       ipcRenderer.invoke("model:complete", messages),
     listMessages: (taskId) =>
       ipcRenderer.invoke("model:list-messages", validateTaskId(taskId)),
+    compactContext: (taskId, model) =>
+      ipcRenderer.invoke(
+        "model:compact-context",
+        validateTaskId(taskId),
+        model?.trim() || undefined,
+      ),
+    readArtifact: (taskId, artifactId, offset, limit) =>
+      ipcRenderer.invoke(
+        "model:read-artifact",
+        validateTaskId(taskId),
+        validateArtifactId(artifactId),
+        offset,
+        limit,
+      ),
     decideToolApproval: (
       taskId,
       approvalId,

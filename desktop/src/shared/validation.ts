@@ -31,6 +31,13 @@ export function validateMessageId(input: unknown): string {
   return input;
 }
 
+export function validateArtifactId(input: unknown): string {
+  if (typeof input !== "string" || !/^art_[0-9a-f]{32}$/.test(input)) {
+    throw new Error("Artifact ID 格式无效");
+  }
+  return input;
+}
+
 export function validateApprovalId(input: unknown): string {
   if (typeof input !== "string" || !identifierPattern.test(input)) {
     throw new Error("审批 ID 格式无效");

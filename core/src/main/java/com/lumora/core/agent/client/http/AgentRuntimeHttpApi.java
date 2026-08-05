@@ -7,6 +7,7 @@ import com.lumora.core.agent.dto.request.AgentModelListRequest;
 import com.lumora.core.agent.dto.request.AgentMemoryExtractionRequest;
 import com.lumora.core.agent.dto.request.AgentToolApprovalDecisionRequest;
 import com.lumora.core.agent.dto.response.AgentChatCompletionResponse;
+import com.lumora.core.agent.dto.response.AgentContextCompactionResponse;
 import com.lumora.core.agent.dto.response.AgentPlanTaskResponse;
 import com.lumora.core.agent.dto.response.AgentModelListResponse;
 import com.lumora.core.agent.dto.response.AgentMemoryExtractionResponse;
@@ -75,6 +76,13 @@ public interface AgentRuntimeHttpApi {
      */
     @PostExchange(AgentClientConstants.CHAT_COMPLETIONS_PATH)
     AgentChatCompletionResponse completeChat(
+            @RequestHeader(HttpContractConstants.CORRELATION_ID_HEADER)
+            String correlationId,
+            @RequestBody AgentChatCompletionRequest request
+    );
+
+    @PostExchange(AgentClientConstants.CHAT_COMPACTION_PATH)
+    AgentContextCompactionResponse compactChat(
             @RequestHeader(HttpContractConstants.CORRELATION_ID_HEADER)
             String correlationId,
             @RequestBody AgentChatCompletionRequest request

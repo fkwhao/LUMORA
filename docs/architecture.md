@@ -49,7 +49,45 @@ Python Agent Runtime
 - Agent OpenAPI 的关键枚举和 PromptContext 字段由契约一致性测试校验，防止 Python
   DTO 与公开契约静默漂移。
 
+Python HTTP 层按资源拆分为 `chat_routes.py`、`artifact_routes.py`、`model_routes.py`、
+`memory_routes.py`、`approval_routes.py` 和 `system_routes.py`。`AgentHttpController` 只聚合
+版本化子路由；`HttpRequestGuard` 统一认证与协议错误映射，`AgentHttpError` 位于独立错误模块，
+`ChatStreamEventMapper` 独占内部 `RunEvent` 到公开 SSE DTO 的转换。公开路径与 HTTP 方法由
+OpenAPI 路由集合契约测试锁定。
+
 ## 3. Agent Harness
+
+当前 Python Runtime 已将运行时按以下依赖方向拆分：
+
+```text
+transport/http
+  → ChatService（请求用例、REST/SSE 边界）
+  → AgentHarness（一次 Agent 运行生命周期）
+      ├── AgentLoopRunner（模型—工具循环与运行事件）
+      ├── ToolCallExecutor（校验、审批与单次工具生命周期）
+      ├── ContextPlanner（预算与 Compact）
+      ├── ToolResultProcessor（Artifact 与模型输出保护）
+      ├── ToolRegistry / PermissionEngine
+      └── ModelProviderPort
+              ↑
+          OpenAICompatibleProvider（供应商协议适配器）
+```
+
+`ChatService` 依赖完整 `ModelProviderPort`，`MemoryExtractionService` 只依赖最小的
+`CompletionProviderPort`，`AgentHarness` 只依赖 `AgentTurnProviderPort`。具体
+`OpenAICompatibleProvider` 仅在 `main.py` 组合根实例化，可替换为 Responses、Anthropic、
+本地模型或测试 Fake Provider。Provider 不再创建或拥有 Agent Loop；它只实现模型发现、完成、
+流式完成、单回合工具调用和摘要能力。Provider 回合结构与回调契约集中在
+`app/harness/contracts.py`，Port 集中在 `app/harness/ports/model_provider.py`，从而避免 Provider
+反向依赖具体 `AgentLoopRunner`。`AgentHarness` 为每次运行创建独立 Runner，避免并发任务共享
+可变 Prompt 或中途摘要状态。Provider、ChatService、Harness 与 ToolCallExecutor 统一输出内部
+`RunEvent`；只有 HTTP Controller 的 `ChatStreamEventMapper` 可以将其映射为公开
+`ChatStreamEventResponse`，因此核心运行层不再依赖 SSE DTO。
+
+所有流式聊天请求都从 `ChatService` 进入 `AgentHarness`，不再由 Service 在 Provider 原生流和
+Agent Loop 之间分支。Harness 保留两种内部策略：没有可用工具时透传 Provider 原生增量流；
+存在工具且已建立工作区 ToolContext 时进入 `AgentLoopRunner`。统一入口不会牺牲普通聊天的
+逐段输出，同时为两种策略提供共同的取消、Tracing、上下文守卫和后续多 Agent 扩展点。
 
 目标架构采用 Supervisor、动态 Worker、有界并发和队列调度：
 
@@ -70,8 +108,10 @@ Capability，不是固定 Agent 类型。首版本机调度使用 `asyncio.Queue
 
 ## 4. 统一运行事件
 
-统一执行过程逐步收敛到 `RunEvent`。当前会话链路已经实现模型文本、进度消息和
-工具调用事件，后续 Agent/Artifact 等事件继续沿用同一结构扩展：
+Python 会话执行过程已经统一使用 transport-neutral 的 `RunEvent`，覆盖模型文本、推理、进度、
+工具、审批、上下文压缩、用量和生命周期事件。HTTP 边界负责 camelCase 字段与 SSE 序列化，
+公开事件枚举、内部事件枚举和 OpenAPI 由契约测试保持一致。后续 Agent/Artifact 等事件继续沿用
+同一结构扩展：
 
 ```text
 RunEvent
@@ -134,17 +174,21 @@ Python Harness 的 Tool Registry 提供名称、用途、输入 JSON Schema、�
 局部修改通过唯一文本匹配的原子补丁完成。注册中心
 统一执行 Schema 校验、业务校验、工作区约束、并发锁和 UI metadata 装配。工具返回
 的 `content` 会反馈给模型，`metadata` 只沿 SSE 事件发送给 UI，不进入模型上下文。
-破坏性属性目前用于审计和界面表达；真正的执行前审批闸门尚未接入，因此新增高风险
-工具前必须先补齐审批调度，不能只依赖 Prompt 或 `isDestructive` 标记。
+内置工具按 `artifact_tools.py`、`filesystem_tools.py` 和 `shell_tools.py` 分能力维护，
+`default_registry.py` 只按稳定顺序装配；`tool_runtime.py` 保留旧导入兼容入口。破坏性属性
+同时用于审计、界面表达和执行前权限审批，不能只依赖 Prompt 或标记本身阻止危险操作。
 
 Java 发给 Python 的 PromptContext 只包含 `workspacePath`、`projectInstructions`、
 `availableTools` 和 `memorySummary`。稳定行为规则只存在于 Python 静态 Prompt；工具
 Schema 只由 Python Tool Registry 生成。跨进程接口不再提供 `systemReminders` 或
 `toolDefinitions` 这类可注入稳定规则、复制 Schema 的旁路。
 
-Provider 只负责供应商请求和响应适配；最多二十轮的模型—工具循环由独立
-`AgentLoopRunner` 编排。这样新增 Provider 不需要复制工具生命周期逻辑，工具开始、
-完成、失败、阶段说明和累计 TokenUsage 仍通过同一事件协议输出。
+Provider 只负责供应商请求和响应适配；最多二十轮的模型—工具循环位于
+`app/harness/agent_loop.py`，由 `AgentHarness` 创建和驱动。单次工具调用的参数校验、权限审批、
+执行与事件投影位于 `app/execution/tool_call_executor.py`；工具结果的 Artifact 外置及 40,000
+字符模型输入保护位于 `app/execution/tool_result_processor.py`。这样新增 Provider 不需要复制
+工具生命周期、权限或上下文逻辑，工具开始、完成、失败、阶段说明和累计 TokenUsage 仍通过
+同一事件协议输出。
 
 完整设计与扩展方式见
 [工具调用运行时设计](tool-calling-runtime-design.md)。
@@ -182,7 +226,8 @@ Python：Agent 编排状态、模型适配和 Harness Checkpoint
 默认模型指针、兼容旧接口的默认上下文缓存、API 格式、DPAPI Key 密文和启用状态。模型 ID 及其上下文窗口、最大
 输出 Token 位于 `model_configuration_model` 子表。V12 迁移为旧单配置行补充
 `api_format=chat-completions` 与 `is_active=1`；V13 再把原模型字段迁移为首条模型
-配置，因此升级不会丢失原有连接。
+配置，因此升级不会丢失原有连接。模型目录同步后，父表仍只保留一条供应商记录，
+多个模型应在 `model_configuration_model` 中分别查询；设置页模型连接测试成功时使用绿色确认态。
 
 供应商的创建、修改、删除、启用和模型目录查询通过以下 Java API 暴露给 Electron
 Main，Renderer 仍只经过白名单 Preload IPC：
@@ -249,11 +294,123 @@ Assistant 回答，然后使用更新后的上下文重新调用模型。服务�
 - API Key 不进入 LocalStorage、日志或 Git。
 - Java 使用当前 Windows 用户的 DPAPI 加密 API Key，SQLite 只保存密文。
 - Python 仅在已认证的 localhost 模型请求中临时使用明文 Key，不持久化。
-- 工具执行采用工作区限制、风险分级和有界输出；高风险审批仍是待完成安全边界。
+- 工具执行采用工作区限制、风险分级和有界输出；高风险调用已经接入分层规则、权限模式与 HITL 审批。
+- 当前文件与 Shell 工具仍运行在宿主用户权限下，应用层策略不能替代操作系统级隔离。
 - 文件路径、命令参数和工具结果进入事件前必须脱敏。
 - 平台 Provider Key 只存在于独立部署的云端服务，不下发到桌面端。
 
-## 8. 仓库边界
+## 8. 高级本地能力目标设计
+
+> 状态：渐进实现。8.1 的两层上下文压缩已经落地；浏览器、插件、多 Agent 与操作系统
+> 沙箱仍是目标设计，不能作为当前产品已经具备这些能力的声明。
+
+这些能力继续复用现有 `ToolRegistry`、`RunEvent`、权限引擎和 Java 持久化边界。
+不为浏览器、插件或 Worker 另建一套不可审计的执行通道。
+
+### 8.1 上下文编排（已实现）
+
+当前采用两层压缩，详细协议见 `docs/context-management-design.md`：
+
+1. Python Agent 在工具结果进入下一轮模型上下文之前执行 Artifact 外置。单个成功结果超过
+   50,000 字符，或同一模型回合内联结果累计超过 200,000 字符时，将完整 UTF-8 文本写入
+   按任务隔离的本地 Artifact 存储；事件和模型上下文仅保留预览、不透明 Artifact ID、哈希与
+   大小。模型只能通过有界的 `artifact_read` / `artifact_search` 工具再次读取。
+2. `ContextPlanner` 根据模型 `contextWindow`、最大输出、下一轮增长和估算误差预留计算触发线。
+   到达触发线后，将较早消息生成结构化会话摘要，同时至少保留最近 5 条原文，并尽量保留最近
+   10,000 Token。Java 将摘要版本和覆盖到的消息序号独立持久化，后续请求不再重复发送已覆盖原文。
+
+自动与手动压缩共用同一条链路。自动压缩通过 `context_compaction_started`、
+`context_compacted` 事件进入工作过程；Desktop 在处理步骤中显示扫光。用户也可在输入框首部
+输入 `/compact`，或从 `+` 菜单选择“压缩”后触发。Artifact 通过任务归属校验后按块展示，
+不会把完整大结果重新注入聊天消息。
+
+供应商返回的 TokenUsage 仍是已发生请求的事实值；发起请求前的预算使用本地保守估算。后续可
+继续增强模型专用 tokenizer、压缩失败熔断、Artifact 生命周期清理和摘要失效重建。
+
+### 8.2 浏览器 Capability
+
+浏览器能力由独立 Browser Worker 承载，首版使用 Playwright。模型只看到注册中心暴露的
+受控工具，例如导航、读取页面快照、点击、输入、截图和下载；不直接获得 CDP 地址、浏览器
+进程句柄或任意 JavaScript 执行入口。
+
+浏览器会话按任务隔离并由 `BrowserSessionManager` 管理。页面文本、可访问性树、截图和下载
+作为 Artifact 进入统一事件链；大页面仍受上下文预算约束。跨域导航、文件上传、下载、登录态
+使用和外部网络访问进入现有权限引擎。Cookie 与凭据保存在本地受保护存储中，模型只能引用
+凭据槽位，不能读取明文。
+
+### 8.3 插件系统
+
+插件以声明式 `plugin.json` 作为入口，至少包含插件 ID、版本、兼容的 LUMORA 版本、工具
+Schema、所需权限、入口进程和发布者信息。插件安装、启用、升级与卸载由 Desktop 发起，
+Java 保存状态和授权，Python 只接收本次运行允许注册的能力。
+
+第三方插件不能注入 Renderer、不能在主 Python 进程中任意 `import`，也不能绕过 Tool
+Registry 直接执行。插件代码运行在独立 Plugin Host 中，通过版本化 IPC 调用；文件、网络、
+Shell、凭据和浏览器能力仍由 Capability Broker 授权。首版只支持随应用发布或用户明确安装的
+本地官方插件，完成签名、撤销、兼容性和隔离后再开放第三方市场。
+
+### 8.4 多 Agent 调度
+
+现有 Supervisor/Worker 目标模型继续沿用统一 Run。Supervisor 把目标拆成带依赖关系的 DAG，
+Worker 只获得任务所需的上下文切片、工具白名单、预算和截止时间，不复制完整会话。所有 Worker
+事件携带 `runId`、`agentId`、`parentAgentId` 和单调序号，由 Supervisor 汇总证据后生成最终回答。
+
+首版只并行执行只读研究任务。涉及写文件时使用工作区写入租约：同一目标文件只能由一个 Worker
+持有写租约，其他 Worker 必须等待或重新规划；提交补丁前再次校验基线哈希。调度器同时限制
+Worker 数量、模型并发、Token 预算和工具并发，单个 Worker 失败不会直接取消已有证据，
+但必须由 Supervisor 决定重试、降级或结束。
+
+多 Agent 稳定版依赖 ContextPlanner、Artifact 引用、Run Snapshot 和 Agent Checkpoint，避免
+进程重启后丢失 DAG、租约或已完成结果。
+
+### 8.5 Windows OS 权限隔离
+
+应用层权限继续负责“用户是否允许”，操作系统隔离负责“即使代码出错也不能越界”。目标结构为：
+
+```text
+Electron / Java Core
+  → Capability Broker
+  → 受限 Agent / Browser / Plugin Worker
+       ├── Restricted Token 或 AppContainer
+       ├── Job Object 进程树与资源上限
+       ├── 工作区 ACL / 显式 Capability 授权
+       └── 受控网络、文件和子进程入口
+```
+
+Shell 子进程必须继承受限令牌并加入同一 Job Object，取消、超时或主进程退出时终止完整进程树。
+工作区外路径、敏感目录、网络和凭据不能仅依靠字符串黑名单；应由 Broker 持有宿主权限并按单次
+批准执行最小操作。硬拒绝、路径沙箱、分层规则、权限模式与 HITL 仍然保留，形成纵深防御。
+
+该能力不引入 Rust。Python Agent 保留模型循环、`ToolRegistry` 和权限编排，实际文件与 Shell
+副作用逐步迁移到独立 Python Tool Worker；Windows 后端通过 `pywin32` 创建 Restricted Token
+进程并管理 Job Object/ACL。Java Core 继续负责任务归属、审批路由、持久化与审计。工具先生成
+本次 `requiredPermissions`，Resolver 合并为 `PermissionProfile`，Reviewer 只能返回其中的授权
+子集，Sandbox Backend 再把 `grantedPermissions` 落实到 Worker。
+
+审批策略、审批者与沙箱模式必须分离：“替我审批”只切换自动 Reviewer，不能关闭工作区边界；
+`allowExternalPaths` 一类全局布尔开关应替换为精确路径授权。若后端不能准确实现 deny、只读
+carve-out 或网络限制，必须 fail closed。迁移期间的应用层路径检查只能称为逻辑防护，不能称为
+操作系统沙箱。
+
+AppContainer、Restricted Token 与文件 ACL 的兼容性需要先做 Windows 技术验证。验证期间不得
+把应用层审批描述成系统沙箱，也不得让第三方插件获得与桌面主进程相同的权限。
+
+### 8.6 实施顺序
+
+```text
+ContextPlanner 与自动压缩
+  → 浏览器只读/交互工具
+  → 只读多 Agent
+  → Windows Worker 隔离与 Capability Broker
+  → 官方插件
+  → 可写多 Agent
+  → 第三方插件生态
+```
+
+浏览器工具在现有权限体系内可以先交付；第三方插件和可写多 Agent 必须等待进程隔离、资源预算、
+Checkpoint 和冲突控制完成。该顺序用于避免“功能可以运行”先于“功能可以安全恢复和审计”。
+
+## 9. 仓库边界
 
 本仓库包含完整桌面产品：
 
@@ -263,7 +420,7 @@ desktop + core + agent + contracts
 
 云端套餐后台和运营管理端属于独立部署单元，使用单独仓库维护。
 
-## 9. 云端套餐与微服务演进
+## 10. 云端套餐与微服务演进
 
 本地 Electron、Java Local Core 和 Python Agent Runtime 不进行微服务化。云端套餐
 后台首版采用 Spring Boot、MyBatis-Plus 和 MySQL 的模块化单体，出现真实并发与独立

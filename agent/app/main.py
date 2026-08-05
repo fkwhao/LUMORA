@@ -11,9 +11,10 @@ from app.constants.http_contract import CORRELATION_ID_HEADER
 from app.constants.service_metadata import SERVICE_TITLE, SERVICE_VERSION
 from app.controller.http.agent_controller import (
     AgentHttpController,
-    AgentHttpError,
 )
+from app.controller.http.errors import AgentHttpError
 from app.dto.response.error_response import ErrorResponse
+from app.harness.ports.model_provider import ModelProviderPort
 from app.prompt.prompt_builder import PromptBuilder
 from app.provider.openai_compatible_provider import OpenAICompatibleProvider
 from app.service.chat_service import ChatService
@@ -33,7 +34,7 @@ def create_app(
     memory_extraction_service: MemoryExtractionService | None = None,
 ) -> FastAPI:
     app = FastAPI(title=SERVICE_TITLE, version=SERVICE_VERSION)
-    provider = OpenAICompatibleProvider()
+    provider: ModelProviderPort = OpenAICompatibleProvider()
     resolved_chat_service = chat_service or ChatService(
         provider,
         PromptBuilder(),

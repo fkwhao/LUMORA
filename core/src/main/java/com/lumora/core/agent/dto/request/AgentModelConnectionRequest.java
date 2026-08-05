@@ -9,6 +9,7 @@ public class AgentModelConnectionRequest {
     private final String model;
     private final String apiKey;
     private final Integer maxOutputTokens;
+    private final Integer contextWindow;
 
     public AgentModelConnectionRequest(ModelConnection connection) {
         this.providerName = connection.getProviderName();
@@ -16,6 +17,7 @@ public class AgentModelConnectionRequest {
         this.model = connection.getModel();
         this.apiKey = connection.getApiKey();
         this.maxOutputTokens = connection.getMaxOutputTokens();
+        this.contextWindow = connection.getContextWindow();
     }
 
     public String getProviderName() {
@@ -37,4 +39,6 @@ public class AgentModelConnectionRequest {
     public Integer getMaxOutputTokens() {
         return maxOutputTokens;
     }
+
+    public Integer getContextWindow() { return contextWindow; }
 }

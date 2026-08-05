@@ -8,6 +8,7 @@ public class ChatStreamEvent {
     private final String delta;
     private final String model;
     private final TokenUsage usage;
+    private final int activeContextTokens;
     private final String errorMessage;
     private final String itemId;
     private final String toolCallId;
@@ -84,10 +85,42 @@ public class ChatStreamEvent {
             Boolean reversible,
             String decision
     ) {
+        this(
+                type, delta, model, usage, errorMessage, itemId, toolCallId,
+                toolName, title, arguments, output, durationMs, exitCode,
+                metadata, approvalId, permissionLayer, reason, riskLevel,
+                reversible, decision, 0
+        );
+    }
+
+    public ChatStreamEvent(
+            ChatStreamEventType type,
+            String delta,
+            String model,
+            TokenUsage usage,
+            String errorMessage,
+            String itemId,
+            String toolCallId,
+            String toolName,
+            String title,
+            Map<String, Object> arguments,
+            String output,
+            long durationMs,
+            Integer exitCode,
+            Map<String, Object> metadata,
+            String approvalId,
+            String permissionLayer,
+            String reason,
+            String riskLevel,
+            Boolean reversible,
+            String decision,
+            int activeContextTokens
+    ) {
         this.type = type;
         this.delta = delta;
         this.model = model;
         this.usage = usage;
+        this.activeContextTokens = Math.max(0, activeContextTokens);
         this.errorMessage = errorMessage;
         this.itemId = itemId;
         this.toolCallId = toolCallId;
@@ -120,6 +153,10 @@ public class ChatStreamEvent {
 
     public TokenUsage getUsage() {
         return usage;
+    }
+
+    public int getActiveContextTokens() {
+        return activeContextTokens;
     }
 
     public String getErrorMessage() {

@@ -118,3 +118,21 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 014-context-compaction-and-artifact
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V14__context_compaction_and_artifact.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false
+  - changeSet:
+      id: 015-active-context-tokens
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V15__active_context_tokens.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

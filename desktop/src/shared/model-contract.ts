@@ -64,6 +64,7 @@ export interface ChatMessage {
   content: string;
   model?: string;
   usage?: TokenUsage;
+  activeContextTokens?: number;
   durationMs?: number;
   workLog?: WorkLogItem[];
   workLogJson?: string;
@@ -74,7 +75,7 @@ export type WorkLogItemStatus = "running" | "completed" | "failed";
 
 export interface WorkLogItem {
   itemId: string;
-  kind: "progress" | "tool";
+  kind: "progress" | "tool" | "context";
   status: WorkLogItemStatus;
   content?: string;
   toolCallId?: string;
@@ -140,6 +141,10 @@ export type ChatStreamEventType =
   | "tool_failed"
   | "tool_approval_requested"
   | "tool_approval_resolved"
+  | "context_compaction_started"
+  | "context_compaction_progress"
+  | "context_compacted"
+  | "context_compaction_failed"
   | "usage"
   | "completed"
   | "failed";
@@ -149,6 +154,7 @@ export interface ChatStreamEvent {
   delta: string;
   model: string;
   usage?: TokenUsage;
+  activeContextTokens?: number;
   errorMessage: string;
   itemId?: string;
   toolCallId?: string;
@@ -165,6 +171,25 @@ export interface ChatStreamEvent {
   riskLevel?: string;
   reversible?: boolean;
   decision?: "allow" | "deny" | "";
+}
+
+export interface ContextCompactionResult {
+  beforeTokens: number;
+  afterTokens: number;
+  throughSequence?: number;
+  retainedFromSequence?: number;
+  usage: TokenUsage;
+}
+
+export interface ArtifactChunk {
+  artifactId: string;
+  content: string;
+  offset: number;
+  nextOffset?: number;
+  hasMore: boolean;
+  characterCount: number;
+  mimeType: string;
+  byteSize: number;
 }
 
 export interface LumoraModelApi {
@@ -184,6 +209,13 @@ export interface LumoraModelApi {
   listModels(input: ListModelsInput): Promise<string[]>;
   complete(messages: ChatMessage[]): Promise<ChatCompletion>;
   listMessages(taskId: string): Promise<ChatMessage[]>;
+  compactContext(taskId: string, model?: string): Promise<ContextCompactionResult>;
+  readArtifact(
+    taskId: string,
+    artifactId: string,
+    offset?: number,
+    limit?: number,
+  ): Promise<ArtifactChunk>;
   decideToolApproval(
     taskId: string,
     approvalId: string,

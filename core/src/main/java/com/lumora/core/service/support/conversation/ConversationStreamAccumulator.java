@@ -17,6 +17,7 @@ public class ConversationStreamAccumulator {
     private final StringBuilder content = new StringBuilder();
     private String model = "";
     private TokenUsage usage;
+    private int activeContextTokens;
     private boolean completed;
     private final List<ChatStreamEvent> workLogEvents = new ArrayList<>();
 
@@ -34,7 +35,11 @@ public class ConversationStreamAccumulator {
         if (event.getType() == ChatStreamEventType.PROGRESS_MESSAGE
                 || event.getType() == ChatStreamEventType.TOOL_STARTED
                 || event.getType() == ChatStreamEventType.TOOL_COMPLETED
-                || event.getType() == ChatStreamEventType.TOOL_FAILED) {
+                || event.getType() == ChatStreamEventType.TOOL_FAILED
+                || event.getType() == ChatStreamEventType.CONTEXT_COMPACTION_STARTED
+                || event.getType() == ChatStreamEventType.CONTEXT_COMPACTION_PROGRESS
+                || event.getType() == ChatStreamEventType.CONTEXT_COMPACTED
+                || event.getType() == ChatStreamEventType.CONTEXT_COMPACTION_FAILED) {
             mergeWorkLogEvent(event);
         }
 
@@ -43,6 +48,9 @@ public class ConversationStreamAccumulator {
         }
         if (event.getUsage() != null) {
             usage = event.getUsage();
+        }
+        if (event.getActiveContextTokens() > 0) {
+            activeContextTokens = event.getActiveContextTokens();
         }
     }
 
@@ -56,6 +64,10 @@ public class ConversationStreamAccumulator {
 
     public TokenUsage getUsage() {
         return usage;
+    }
+
+    public int getActiveContextTokens() {
+        return activeContextTokens;
     }
 
     public boolean isCompleted() {

@@ -6,6 +6,7 @@ import com.lumora.core.model.ChatStreamEvent;
 import com.lumora.core.model.ModelSettings;
 import com.lumora.core.model.ModelProvider;
 import com.lumora.core.model.ProviderModel;
+import com.lumora.core.model.ContextCompaction;
 import com.lumora.core.agent.model.AgentMemoryCandidate;
 
 import java.util.List;
@@ -112,6 +113,15 @@ public interface ModelService {
             String correlationId
     );
 
+    ContextCompaction compactContext(
+            List<ChatMessage> messages,
+            String memorySummary,
+            String taskId,
+            String conversationSummary,
+            String model,
+            String correlationId
+    );
+
     /**
      * 执行一次流式模型对话。
      *
@@ -152,5 +162,21 @@ public interface ModelService {
                 workspacePath,
                 eventConsumer
         );
+    }
+
+    default void streamChat(
+            List<ChatMessage> messages,
+            String correlationId,
+            String model,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            Consumer<ChatStreamEvent> eventConsumer
+    ) {
+        streamChat(messages, correlationId, model, reasoningEffort,
+                memorySummary, workspacePath, permissionMode, eventConsumer);
     }
 }
