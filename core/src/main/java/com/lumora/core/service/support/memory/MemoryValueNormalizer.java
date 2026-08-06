@@ -7,7 +7,9 @@ import com.lumora.core.entity.MemoryScopeType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.text.Normalizer;
@@ -56,6 +58,24 @@ public class MemoryValueNormalizer {
             return LOCAL_USER_SCOPE_ID;
         }
         return requireText(scopeId, "记忆范围 ID");
+    }
+
+    public String normalizeProjectScopeId(String workspacePath) {
+        if (workspacePath == null || workspacePath.isBlank()) {
+            return null;
+        }
+        try {
+            String normalized = Path.of(workspacePath.trim())
+                    .toAbsolutePath()
+                    .normalize()
+                    .toString()
+                    .replace('\\', '/');
+            return File.separatorChar == '\\'
+                    ? normalized.toLowerCase(Locale.ROOT)
+                    : normalized;
+        } catch (RuntimeException error) {
+            throw new IllegalArgumentException("工作区路径无效", error);
+        }
     }
 
     public String normalizeStructuredData(String value) {

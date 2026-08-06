@@ -3,6 +3,7 @@ package com.lumora.core.agent.converter;
 import com.lumora.core.agent.dto.request.AgentChatCompletionRequest;
 import com.lumora.core.agent.dto.request.AgentChatMessageRequest;
 import com.lumora.core.agent.dto.request.AgentModelConnectionRequest;
+import com.lumora.core.agent.dto.request.AgentMemoryContextRequest;
 import com.lumora.core.agent.dto.request.AgentPromptContextRequest;
 import com.lumora.core.agent.dto.response.AgentChatCompletionResponse;
 import com.lumora.core.agent.dto.response.AgentContextCompactionResponse;
@@ -19,6 +20,7 @@ import com.lumora.core.model.ChatMessage;
 import com.lumora.core.model.ChatStreamEvent;
 import com.lumora.core.model.ContextCompaction;
 import com.lumora.core.model.ModelConnection;
+import com.lumora.core.model.MemoryContextItem;
 import com.lumora.core.model.TokenUsage;
 import org.springframework.stereotype.Component;
 
@@ -108,6 +110,22 @@ public class AgentDtoMapper {
             String taskId,
             String conversationSummary
     ) {
+        return toChatRequest(messages, connection, reasoningEffort,
+                memorySummary, workspacePath, permissionMode, taskId,
+                conversationSummary, List.of());
+    }
+
+    public AgentChatCompletionRequest toChatRequest(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<MemoryContextItem> memoryCandidates
+    ) {
         List<AgentChatMessageRequest> requestMessages = messages.stream()
                 .map(message -> new AgentChatMessageRequest(
                         message.getRole(),
@@ -124,7 +142,10 @@ public class AgentDtoMapper {
                         workspacePath,
                         permissionMode,
                         taskId,
-                        conversationSummary
+                        conversationSummary,
+                        memoryCandidates.stream()
+                                .map(AgentMemoryContextRequest::new)
+                                .toList()
                 ),
                 reasoningEffort
         );
@@ -178,7 +199,10 @@ public class AgentDtoMapper {
                         candidate.getTargetMemoryId(),
                         candidate.getStructuredData(),
                         candidate.getConfidence(),
-                        candidate.getTtlSeconds()
+                        candidate.getImportance(),
+                        candidate.getTtlSeconds(),
+                        candidate.getAction(),
+                        candidate.getStorage()
                 ))
                 .toList();
     }

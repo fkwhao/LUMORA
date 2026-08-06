@@ -1,6 +1,7 @@
 package com.lumora.core.service.support.conversation;
 
 import com.lumora.core.model.ChatMessage;
+import com.lumora.core.model.MemoryContextItem;
 
 import java.util.List;
 
@@ -17,6 +18,8 @@ public class ConversationRunContext {
     private final String currentUserContent;
     private final String memorySummary;
     private final String memoryExtractionContext;
+    private final List<MemoryContextItem> memoryCandidates;
+    private final String projectScopeId;
     private final String conversationSummary;
     private final long startedAtNanos;
 
@@ -32,6 +35,26 @@ public class ConversationRunContext {
             String conversationSummary,
             long startedAtNanos
     ) {
+        this(taskId, conversationId, assistantSequence, modelMessages,
+                currentUserMessageId, currentUserContent, memorySummary,
+                memoryExtractionContext, conversationSummary, List.of(), null,
+                startedAtNanos);
+    }
+
+    public ConversationRunContext(
+            String taskId,
+            String conversationId,
+            int assistantSequence,
+            List<ChatMessage> modelMessages,
+            String currentUserMessageId,
+            String currentUserContent,
+            String memorySummary,
+            String memoryExtractionContext,
+            String conversationSummary,
+            List<MemoryContextItem> memoryCandidates,
+            String projectScopeId,
+            long startedAtNanos
+    ) {
         this.taskId = taskId;
         this.conversationId = conversationId;
         this.assistantSequence = assistantSequence;
@@ -40,6 +63,8 @@ public class ConversationRunContext {
         this.currentUserContent = currentUserContent;
         this.memorySummary = memorySummary;
         this.memoryExtractionContext = memoryExtractionContext;
+        this.memoryCandidates = List.copyOf(memoryCandidates);
+        this.projectScopeId = projectScopeId;
         this.conversationSummary = conversationSummary;
         this.startedAtNanos = startedAtNanos;
     }
@@ -91,6 +116,12 @@ public class ConversationRunContext {
     public String getMemoryExtractionContext() {
         return memoryExtractionContext;
     }
+
+    public List<MemoryContextItem> getMemoryCandidates() {
+        return memoryCandidates;
+    }
+
+    public String getProjectScopeId() { return projectScopeId; }
 
     public String getConversationSummary() { return conversationSummary; }
 

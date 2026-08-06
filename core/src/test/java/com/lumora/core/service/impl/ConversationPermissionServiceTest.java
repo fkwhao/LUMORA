@@ -5,6 +5,7 @@ import com.lumora.core.model.ChatStreamEvent;
 import com.lumora.core.model.ChatStreamEventType;
 import com.lumora.core.service.ArtifactService;
 import com.lumora.core.service.ModelService;
+import com.lumora.core.service.MemoryService;
 import com.lumora.core.service.support.conversation.ConversationContextSummaryService;
 import com.lumora.core.service.support.conversation.ConversationPersistenceService;
 import com.lumora.core.service.support.conversation.ConversationRunContext;
@@ -60,7 +61,9 @@ class ConversationPermissionServiceTest {
                 null,
                 System.nanoTime()
         );
-        when(persistence.prepareNewMessage("task-1", "检查仓库"))
+        when(persistence.prepareNewMessage(
+                "task-1", "检查仓库", "F:/project/demo"
+        ))
                 .thenReturn(context);
 
         CountDownLatch approvalPublished = new CountDownLatch(1);
@@ -69,7 +72,7 @@ class ConversationPermissionServiceTest {
         doAnswer(invocation -> {
             @SuppressWarnings("unchecked")
             java.util.function.Consumer<ChatStreamEvent> consumer =
-                    invocation.getArgument(9);
+                    invocation.getArgument(10);
             consumer.accept(approvalRequested());
             approvalPublished.countDown();
             assertTrue(approvalDecided.await(5, TimeUnit.SECONDS));
@@ -92,6 +95,7 @@ class ConversationPermissionServiceTest {
                 eq("request_approval"),
                 eq("task-1"),
                 nullable(String.class),
+                anyList(),
                 any()
         );
         doAnswer(invocation -> {
@@ -108,7 +112,8 @@ class ConversationPermissionServiceTest {
                 executor,
                 memoryCoordinator,
                 mock(ConversationContextSummaryService.class),
-                mock(ArtifactService.class)
+                mock(ArtifactService.class),
+                mock(MemoryService.class)
         );
 
         service.streamMessage(

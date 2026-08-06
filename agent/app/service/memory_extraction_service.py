@@ -14,6 +14,7 @@ from app.harness.ports.model_provider import CompletionProviderPort
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.prompt.prompt_assembly import PromptAssembly
 from app.prompt.prompt_loader import PromptLoader
+from app.prompt.project_instruction_loader import ProjectInstructionLoader
 from app.prompt.prompt_segment import (
     PromptCachePolicy,
     PromptPriority,
@@ -24,13 +25,23 @@ from app.prompt.prompt_segment import (
 
 
 class MemoryExtractionService:
+    _REVOCATION_PATTERN = re.compile(
+        r"(?:取消|撤销|作废|删除|移除|不要了|不再要求|不再强制|无需继续)"
+    )
+    _NEGATED_CANDIDATE_PATTERN = re.compile(
+        r"(?:不再|取消|撤销|无需|不要求|不强制|不限制|可以引入|允许)"
+    )
     def __init__(
         self,
         provider: CompletionProviderPort,
         prompt_loader: PromptLoader | None = None,
+        project_instruction_loader: ProjectInstructionLoader | None = None,
     ) -> None:
         self._provider = provider
         self._prompt_loader = prompt_loader or PromptLoader()
+        self._project_instruction_loader = (
+            project_instruction_loader or ProjectInstructionLoader()
+        )
 
     async def extract(
         self,
@@ -59,6 +70,9 @@ class MemoryExtractionService:
             "userMessage": request.user_message,
             "assistantMessage": request.assistant_message,
             "existingMemorySummary": request.existing_memory_summary or "",
+            "existingProjectInstructions": self._load_project_instructions(
+                request.workspace_path
+            ),
         }
         try:
             completion = await self._provider.complete(
@@ -76,9 +90,15 @@ class MemoryExtractionService:
             )
             parsed = self._parse_json_object(completion.message)
             response = MemoryExtractionResponse.model_validate(parsed)
+            self._normalize_revocations(response, request.user_message)
             self._validate_retention(response)
             return response
-        except (httpx.HTTPError, ValueError, ValidationError) as error:
+        except (
+            httpx.HTTPError,
+            TypeError,
+            ValueError,
+            ValidationError,
+        ) as error:
             raise ModelProviderError("记忆提取失败") from error
 
     @staticmethod
@@ -106,9 +126,26 @@ class MemoryExtractionService:
     def _validate_retention(response: MemoryExtractionResponse) -> None:
         for candidate in response.candidates:
             if candidate.retention == "LONG_TERM":
+                if candidate.scope == "CONVERSATION":
+                    raise ValueError(
+                        "长期记忆必须属于用户或项目范围"
+                    )
                 candidate.ttl_seconds = None
             elif candidate.scope != "CONVERSATION":
                 raise ValueError("短期记忆只能属于当前会话")
+            if candidate.storage == "PROJECT_INSTRUCTIONS":
+                if (
+                    candidate.scope != "PROJECT"
+                    or candidate.retention != "LONG_TERM"
+                    or candidate.type not in {"CONSTRAINT", "DECISION"}
+                ):
+                    raise ValueError("项目指令候选的范围或类型无效")
+            if (
+                candidate.action == "ARCHIVE"
+                and candidate.storage == "MEMORY"
+                and not candidate.target_memory_id
+            ):
+                raise ValueError("归档动态记忆必须指定 targetMemoryId")
 
     @staticmethod
     def _is_deepseek(request: MemoryExtractionRequest) -> bool:
@@ -116,3 +153,30 @@ class MemoryExtractionService:
         return "deepseek" in (
             f"{connection.provider_name} {connection.base_url}"
         ).lower()
+
+    def _load_project_instructions(self, workspace_path: str | None) -> str:
+        try:
+            return "\n\n".join(
+                self._project_instruction_loader.load(workspace_path)
+            )
+        except (OSError, RuntimeError, ValueError):
+            return ""
+
+    @classmethod
+    def _normalize_revocations(
+        cls,
+        response: MemoryExtractionResponse,
+        user_message: str,
+    ) -> None:
+        if not cls._REVOCATION_PATTERN.search(user_message):
+            return
+        for candidate in response.candidates:
+            if (
+                candidate.action == "UPSERT"
+                and candidate.storage == "MEMORY"
+                and candidate.target_memory_id
+                and cls._NEGATED_CANDIDATE_PATTERN.search(
+                    f"{candidate.content} {candidate.value}"
+                )
+            ):
+                candidate.action = "ARCHIVE"

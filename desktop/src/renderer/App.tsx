@@ -9,6 +9,7 @@ import {
 import { useStore } from "zustand";
 
 import type { LumoraModelApi } from "../shared/model-contract";
+import type { LumoraMemoryApi } from "../shared/memory-contract";
 import type { LumoraTaskApi } from "../shared/task-contract";
 import type { ProjectDirectory } from "../shared/window-contract";
 import { AppSidebar } from "./components/AppSidebar";
@@ -41,9 +42,11 @@ import {
 interface AppProps {
   api?: LumoraTaskApi;
   modelApi?: LumoraModelApi;
+  memoryApi?: LumoraMemoryApi;
 }
 
 type AppView = "work" | "settings" | PrototypeView;
+type ComposerMotion = "to-task" | "to-home";
 
 interface AppLocation {
   view: AppView;
@@ -55,19 +58,29 @@ interface NavigationState {
   index: number;
 }
 
-export function App({ api, modelApi }: AppProps) {
+export function App({ api, modelApi, memoryApi }: AppProps) {
   const resolvedTaskApi = api ?? window.lumora?.tasks;
   const resolvedModelApi = modelApi ?? window.lumora?.model;
+  const resolvedMemoryApi = memoryApi ?? window.lumora?.memory;
   if (!resolvedTaskApi) {
     return <DesktopBridgeError />;
   }
   return (
-    <ConnectedApp api={resolvedTaskApi} modelApi={resolvedModelApi} />
+    <ConnectedApp
+      api={resolvedTaskApi}
+      modelApi={resolvedModelApi}
+      memoryApi={resolvedMemoryApi}
+    />
   );
 }
 
-function ConnectedApp({ api, modelApi }: Required<Pick<AppProps, "api">> & {
+function ConnectedApp({
+  api,
+  modelApi,
+  memoryApi,
+}: Required<Pick<AppProps, "api">> & {
   modelApi?: LumoraModelApi;
+  memoryApi?: LumoraMemoryApi;
 }) {
   // Store 与能力边界绑定，切换测试 API 时不会泄漏旧任务订阅。
   const store = useMemo(
@@ -92,6 +105,7 @@ function ConnectedApp({ api, modelApi }: Required<Pick<AppProps, "api">> & {
   const [view, setView] = useState<AppView>("work");
   const [notice, setNotice] = useState<ToastNotice>();
   const [homeRevision, setHomeRevision] = useState(0);
+  const [composerMotion, setComposerMotion] = useState<ComposerMotion>();
   const [projectNames, setProjectNames] = useState(loadProjectNames);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
@@ -183,6 +197,21 @@ function ConnectedApp({ api, modelApi }: Required<Pick<AppProps, "api">> & {
     }
   }
 
+  function updateLocation(
+    location: AppLocation,
+    updateNavigation: () => void,
+  ) {
+    const changesComposerPosition =
+      currentLocation.view === "work" &&
+      location.view === "work" &&
+      Boolean(currentLocation.taskId) !== Boolean(location.taskId);
+    if (changesComposerPosition) {
+      setComposerMotion(location.taskId ? "to-task" : "to-home");
+    }
+    updateNavigation();
+    applyLocation(location);
+  }
+
   function navigateTo(location: AppLocation) {
     if (sameLocation(currentLocation, location)) {
       return;
@@ -191,9 +220,10 @@ function ConnectedApp({ api, modelApi }: Required<Pick<AppProps, "api">> & {
       ...navigation.entries.slice(0, navigation.index + 1),
       location,
     ];
-    applyingNavigationRef.current = true;
-    setNavigation({ entries, index: entries.length - 1 });
-    applyLocation(location);
+    updateLocation(location, () => {
+      applyingNavigationRef.current = true;
+      setNavigation({ entries, index: entries.length - 1 });
+    });
   }
 
   function moveInHistory(offset: -1 | 1) {
@@ -202,9 +232,10 @@ function ConnectedApp({ api, modelApi }: Required<Pick<AppProps, "api">> & {
     if (!target) {
       return;
     }
-    applyingNavigationRef.current = true;
-    setNavigation({ ...navigation, index: targetIndex });
-    applyLocation(target);
+    updateLocation(target, () => {
+      applyingNavigationRef.current = true;
+      setNavigation({ ...navigation, index: targetIndex });
+    });
   }
 
   function openBlankConversation() {
@@ -220,6 +251,15 @@ function ConnectedApp({ api, modelApi }: Required<Pick<AppProps, "api">> & {
     setHomeRevision((revision) => revision + 1);
     navigateTo({ view: "work" });
     notify(`已创建项目：${project.name}`, "success");
+  }
+
+  function openConversationInProject(project: ProjectDirectory) {
+    saveActiveProject(project);
+    saveProjectName(project.path, project.name);
+    setProjectNames((names) => ({ ...names, [project.path]: project.name }));
+    setHomeRevision((revision) => revision + 1);
+    navigateTo({ view: "work" });
+    notify(`已在 ${project.name} 下新建会话`, "success");
   }
 
   function startSidebarResize(event: React.PointerEvent<HTMLDivElement>) {
@@ -291,6 +331,7 @@ function ConnectedApp({ api, modelApi }: Required<Pick<AppProps, "api">> & {
         {windowChrome}
         <SettingsPage
           api={modelApi}
+          memoryApi={memoryApi}
           archivedTasks={archivedTasks}
           notify={notify}
           onBack={() =>
@@ -332,6 +373,7 @@ function ConnectedApp({ api, modelApi }: Required<Pick<AppProps, "api">> & {
         archivedTaskIds={archivedTaskIds}
         onArchiveTask={(taskId) => store.getState().archiveTask(taskId)}
         onNewProject={openNewProjectConversation}
+        onNewProjectConversation={openConversationInProject}
         onNavigate={(nextView) => navigateTo({ view: nextView })}
         notify={notify}
         onNewTask={openBlankConversation}
@@ -344,12 +386,22 @@ function ConnectedApp({ api, modelApi }: Required<Pick<AppProps, "api">> & {
         view === "skills" ? (
         <PrototypePage view={view} notify={notify} />
       ) : activeTask ? (
-        <TaskPage store={store} modelApi={modelApi} notify={notify} />
+        <TaskPage
+          store={store}
+          modelApi={modelApi}
+          notify={notify}
+          composerMotion={
+            composerMotion === "to-task" ? "from-center" : undefined
+          }
+        />
       ) : (
         <HomePage
           key={homeRevision}
           store={store}
           notify={notify}
+          composerMotion={
+            composerMotion === "to-home" ? "from-bottom" : undefined
+          }
         />
       )}
       <ToastViewport

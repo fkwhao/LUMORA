@@ -4,8 +4,10 @@ import { app, BrowserWindow, screen, shell } from "electron";
 import { registerTaskIpc } from "./ipc";
 import { registerAppearanceIpc } from "./appearance-ipc";
 import { registerModelIpc } from "./model-ipc";
+import { registerMemoryIpc } from "./memory-ipc";
 import { registerWorkspaceIpc } from "./workspace-ipc";
 import { RestModelGateway } from "./rest-model-gateway";
+import { RestMemoryGateway } from "./rest-memory-gateway";
 import { RestTaskGateway } from "./rest-task-gateway";
 import type { TaskGateway } from "./task-gateway";
 import { createMainWindowOptions } from "./window-options";
@@ -35,10 +37,15 @@ const modelGateway = new RestModelGateway(
     sessionToken: devConfig.startupToken,
   },
 );
+const memoryGateway = new RestMemoryGateway({
+  baseUrl: devConfig.coreUrl,
+  sessionToken: devConfig.startupToken,
+});
 // BrowserWindow 必须保留强引用，否则窗口可能在函数返回后被垃圾回收。
 const mainWindow = new WindowReference<BrowserWindow>();
 let unregisterIpc: (() => void) | undefined;
 let unregisterModelIpc: (() => void) | undefined;
+let unregisterMemoryIpc: (() => void) | undefined;
 let unregisterAppearanceIpc: (() => void) | undefined;
 let unregisterWorkspaceIpc: (() => void) | undefined;
 
@@ -91,6 +98,7 @@ async function createWindow(): Promise<BrowserWindow> {
 app.whenReady().then(async () => {
   unregisterIpc = registerTaskIpc(gateway);
   unregisterModelIpc = registerModelIpc(modelGateway);
+  unregisterMemoryIpc = registerMemoryIpc(memoryGateway);
   unregisterAppearanceIpc = registerAppearanceIpc();
   unregisterWorkspaceIpc = registerWorkspaceIpc();
   await createWindow();
@@ -111,6 +119,7 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   unregisterIpc?.();
   unregisterModelIpc?.();
+  unregisterMemoryIpc?.();
   unregisterAppearanceIpc?.();
   unregisterWorkspaceIpc?.();
   gateway.dispose();

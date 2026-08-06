@@ -1,7 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowDown,
-  ArrowLeft,
   ArrowUp,
   Check,
   ChevronDown,
@@ -10,6 +9,7 @@ import {
   File,
   FileDiff,
   Folder,
+  FolderClosed,
   Globe2,
   Hand,
   Lightbulb,
@@ -20,7 +20,6 @@ import {
   Pencil,
   Plus,
   ShieldAlert,
-  Square,
   Target,
   ThumbsDown,
   ThumbsUp,
@@ -37,7 +36,7 @@ import type {
   WorkLogItem,
   ArtifactChunk,
 } from "../../../shared/model-contract";
-import type { TaskEvent, TaskStatus } from "../../../shared/task-contract";
+import type { TaskEvent } from "../../../shared/task-contract";
 import { MarkdownMessage } from "../../components/MarkdownMessage";
 import { resizeTextarea } from "../../utils/auto-resize-textarea";
 import { submitFormOnEnter } from "../../utils/submit-on-enter";
@@ -50,13 +49,19 @@ import type { TaskStore } from "./task-store";
 interface TaskPageProps {
   store: TaskStore;
   modelApi?: LumoraModelApi;
+  composerMotion?: "from-center";
   notify(message: string, tone?: "info" | "success"): void;
 }
 
 type ComposerReasoningEffort = ReasoningEffort;
 const EMPTY_TASK_EVENTS: TaskEvent[] = [];
 
-export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
+export function TaskPage({
+  store,
+  modelApi,
+  composerMotion,
+  notify,
+}: TaskPageProps) {
   const task = useStore(store, (state) => state.activeTask);
   const messages = useStore(store, (state) => state.messages);
   const isChatting = useStore(store, (state) => state.isChatting);
@@ -625,23 +630,17 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
   );
 
   return (
-    <main className="task-layout">
+    <main
+      className={`task-layout${composerMotion ? ` composer-enter-${composerMotion}` : ""}`}
+    >
       <header className="task-header">
         <div className="task-title-row">
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="返回新建任务"
-            onClick={() => store.getState().clearActiveTask()}
-          >
-            <ArrowLeft size={18} />
-          </button>
-          <div>
+          <span className="task-project-folder" aria-hidden="true">
+            <FolderClosed size={18} strokeWidth={1.65} />
+          </span>
+          <div className="task-title-copy">
             <h1>{task.goal}</h1>
           </div>
-          <span className={`status-badge status-${task.status.toLowerCase()}`}>
-            {statusLabel(task.status)}
-          </span>
         </div>
 
         <div className="task-actions" ref={taskActionsRef}>
@@ -1340,13 +1339,9 @@ export function TaskPage({ store, modelApi, notify }: TaskPageProps) {
                         }
                       >
                         {isChatting ? (
-                          <Square
-                            size={10}
-                            strokeWidth={2.2}
-                            fill="currentColor"
-                          />
+                          <span className="stop-glyph" aria-hidden="true" />
                         ) : (
-                          <ArrowUp size={18} />
+                          <ArrowUp size={16} strokeWidth={2} />
                         )}
                       </button>
                     </div>
@@ -1671,20 +1666,6 @@ function estimateTextTokens(content: string): number {
     }
   }
   return nonAsciiCharacters + Math.ceil(asciiCharacters / 4);
-}
-
-function statusLabel(status: TaskStatus): string {
-  const labels: Record<TaskStatus, string> = {
-    CREATED: "已创建",
-    PLANNING: "规划中",
-    RUNNING: "运行中",
-    WAITING_APPROVAL: "等待确认",
-    COMPLETED: "已完成",
-    REJECTED: "已拒绝",
-    INTERRUPTED: "已中断",
-    FAILED: "失败",
-  };
-  return labels[status];
 }
 
 function formatMessageTime(createdAt?: string): string {

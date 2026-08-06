@@ -14,6 +14,7 @@ from app.exception.provider_errors import ModelProviderError
 from app.harness.agent_harness import AgentHarness
 from app.harness.ports.model_provider import ModelProviderPort
 from app.harness.run_event import RunEvent
+from app.memory.retrieval import MemoryRetriever
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.permission.broker import ApprovalBroker
 from app.permission.config_store import PermissionConfigStore
@@ -25,6 +26,7 @@ from app.permission.model import (
     PermissionPolicy,
     PermissionRule,
 )
+from app.prompt.project_instruction_loader import ProjectInstructionLoader
 from app.prompt.prompt_builder import PromptBuilder
 from app.prompt.prompt_context import PromptContext
 from app.tool.base import ToolContext
@@ -44,6 +46,8 @@ class ChatService:
         context_planner: ContextPlanner | None = None,
         artifact_store: ArtifactStore | None = None,
         agent_harness: AgentHarness | None = None,
+        memory_retriever: MemoryRetriever | None = None,
+        project_instruction_loader: ProjectInstructionLoader | None = None,
     ) -> None:
         self._provider = provider
         self._prompt_builder = prompt_builder
@@ -56,6 +60,10 @@ class ChatService:
         self._context_planner = context_planner or ContextPlanner()
         self._artifact_store = artifact_store or ArtifactStore()
         self._agent_harness = agent_harness
+        self._memory_retriever = memory_retriever or MemoryRetriever()
+        self._project_instruction_loader = (
+            project_instruction_loader or ProjectInstructionLoader()
+        )
 
     async def list_models(self, request: ModelListRequest) -> list[str]:
         connection = request
@@ -115,9 +123,19 @@ class ChatService:
     ) -> AsyncIterator[RunEvent]:
         try:
             settings = self._connection(request)
-            prompt = self._prompt_builder.build(self._prompt_context(request))
+            prompt_context = self._prompt_context(request)
+            prompt = self._prompt_builder.build(prompt_context)
             request_messages = request.messages
             active_summary = request.prompt_context.conversation_summary
+            if prompt_context.selected_memory_ids:
+                yield RunEvent(
+                    type="progress_message",
+                    title="已检索相关记忆",
+                    metadata={
+                        "category": "memory_retrieval",
+                        "memoryIds": list(prompt_context.selected_memory_ids),
+                    },
+                )
             should_compact, before_tokens, _threshold = (
                 self._context_planner.should_compact(
                     settings, prompt, request_messages
@@ -306,6 +324,21 @@ class ChatService:
         conversation_summary: str | None = None,
     ) -> PromptContext:
         context = request.prompt_context
+        current_request = next(
+            (
+                message.content
+                for message in reversed(request.messages)
+                if message.role == "user"
+            ),
+            "",
+        )
+        selection = self._memory_retriever.select(
+            context.memory_candidates,
+            current_request,
+        )
+        file_instructions = self._project_instruction_loader.load(
+            context.workspace_path
+        )
         allowed_names = tuple(
             name
             for name in context.available_tools
@@ -313,10 +346,18 @@ class ChatService:
         )
         return PromptContext(
             workspace_path=context.workspace_path,
-            project_instructions=tuple(context.project_instructions),
+            project_instructions=(
+                tuple(context.project_instructions) + file_instructions
+            ),
             available_tools=allowed_names,
             tool_definitions=self._tool_registry.model_definitions(allowed_names),
-            memory_summary=context.memory_summary,
+            memory_summary=(
+                None if context.memory_candidates else context.memory_summary
+            ),
+            user_memory=selection.user_memory,
+            project_memory=selection.project_memory,
+            conversation_memory=selection.conversation_memory,
+            selected_memory_ids=selection.memory_ids,
             conversation_summary=(
                 conversation_summary
                 if conversation_summary is not None

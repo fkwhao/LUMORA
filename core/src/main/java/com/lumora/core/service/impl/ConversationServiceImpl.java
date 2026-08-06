@@ -7,6 +7,7 @@ import com.lumora.core.model.ContextCompaction;
 import com.lumora.core.service.ArtifactService;
 import com.lumora.core.service.ConversationService;
 import com.lumora.core.service.ModelService;
+import com.lumora.core.service.MemoryService;
 import com.lumora.core.service.support.conversation.ContextCompactionInput;
 import com.lumora.core.service.support.conversation.ConversationContextSummaryService;
 import com.lumora.core.service.support.conversation.ConversationPersistenceService;
@@ -15,6 +16,8 @@ import com.lumora.core.service.support.conversation.ConversationStreamAccumulato
 import com.lumora.core.service.support.conversation.WorkLogEventProjector;
 import com.lumora.core.service.support.memory.MemoryExtractionCoordinator;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -24,8 +27,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.FutureTask;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * 会话业务编排器。
@@ -47,6 +48,7 @@ public class ConversationServiceImpl implements ConversationService {
     private final MemoryExtractionCoordinator memoryExtractionCoordinator;
     private final ConversationContextSummaryService contextSummaryService;
     private final ArtifactService artifactService;
+    private final MemoryService memoryService;
     private final ConcurrentHashMap<String, FutureTask<Void>> activeRuns =
             new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, PendingToolApproval>
@@ -83,7 +85,8 @@ public class ConversationServiceImpl implements ConversationService {
                 permissionMode,
                 () -> persistenceService.prepareNewMessage(
                         taskId,
-                        normalizedContent
+                        normalizedContent,
+                        workspacePath
                 ),
                 eventConsumer,
                 completionCallback,
@@ -117,7 +120,8 @@ public class ConversationServiceImpl implements ConversationService {
                 () -> persistenceService.prepareRegeneration(
                         taskId,
                         normalizedMessageId,
-                        normalizedContent
+                        normalizedContent,
+                        workspacePath
                 ),
                 eventConsumer,
                 completionCallback,
@@ -282,6 +286,7 @@ public class ConversationServiceImpl implements ConversationService {
                     permissionMode,
                     context.getTaskId(),
                     context.getConversationSummary(),
+                    context.getMemoryCandidates(),
                     event -> handleStreamEvent(
                             context,
                             accumulator,
@@ -318,6 +323,7 @@ public class ConversationServiceImpl implements ConversationService {
                 try {
                     memoryExtractionCoordinator.extractAndStore(
                             context.getConversationId(),
+                            context.getProjectScopeId(),
                             context.getCurrentUserMessageId(),
                             context.getCurrentUserContent(),
                             accumulator.getContent(),
@@ -341,6 +347,15 @@ public class ConversationServiceImpl implements ConversationService {
             String correlationId,
             Consumer<ChatStreamEvent> eventConsumer
     ) {
+        if (event.getType() == ChatStreamEventType.PROGRESS_MESSAGE
+                && "memory_retrieval".equals(
+                        event.getMetadata().get("category")
+                )) {
+            memoryService.markUsed(stringList(
+                    event.getMetadata().get("memoryIds")
+            ));
+            return;
+        }
         if (event.getType() == ChatStreamEventType.CONTEXT_COMPACTED) {
             Map<String, Object> metadata = event.getMetadata();
             Object summary = metadata.get("summary");
@@ -382,15 +397,25 @@ public class ConversationServiceImpl implements ConversationService {
         if (event.getType() == ChatStreamEventType.COMPLETED) {
             persistenceService.persistAssistant(context, accumulator);
         }
-                    eventConsumer.accept(
-                            event.getType() == ChatStreamEventType.CONTEXT_COMPACTED
-                                    ? WorkLogEventProjector.project(event)
-                                    : event
-                    );
+        eventConsumer.accept(
+                event.getType() == ChatStreamEventType.CONTEXT_COMPACTED
+                        ? WorkLogEventProjector.project(event)
+                        : event
+        );
     }
 
     private static int number(Object value) {
         return value instanceof Number number ? number.intValue() : 0;
+    }
+
+    private static List<String> stringList(Object value) {
+        if (!(value instanceof List<?> values)) {
+            return List.of();
+        }
+        return values.stream()
+                .filter(String.class::isInstance)
+                .map(String.class::cast)
+                .toList();
     }
 
     private String requireText(String value, String label) {

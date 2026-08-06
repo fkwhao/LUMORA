@@ -77,6 +77,26 @@ def test_rejects_short_term_user_scope() -> None:
         asyncio.run(MemoryExtractionService(provider).extract(request()))
 
 
+def test_accepts_long_term_project_memory_with_importance() -> None:
+    provider = FakeProvider("""
+    {"candidates":[{"scope":"PROJECT","type":"DECISION","retention":"LONG_TERM","content":"项目使用 SQLite 持久化业务状态","dedupeKey":"project.persistence.database","subject":"项目","predicate":"persistence_database","value":"SQLite","structuredData":{},"confidence":0.95,"importance":0.85,"ttlSeconds":null}]}
+    """)
+
+    response = asyncio.run(MemoryExtractionService(provider).extract(request()))
+
+    assert response.candidates[0].scope == "PROJECT"
+    assert response.candidates[0].importance == 0.85
+
+
+def test_rejects_short_term_project_scope() -> None:
+    provider = FakeProvider("""
+    {"candidates":[{"scope":"PROJECT","type":"SUMMARY","retention":"SHORT_TERM","content":"临时诊断","dedupeKey":"project.temporary_diagnostic","subject":"项目","predicate":"temporary_diagnostic","value":"失败","structuredData":{},"confidence":0.9,"importance":0.2,"ttlSeconds":3600}]}
+    """)
+
+    with pytest.raises(ModelProviderError):
+        asyncio.run(MemoryExtractionService(provider).extract(request()))
+
+
 def test_accepts_empty_candidate_list() -> None:
     response = asyncio.run(
         MemoryExtractionService(FakeProvider('{"candidates":[]}'))
@@ -84,6 +104,55 @@ def test_accepts_empty_candidate_list() -> None:
     )
 
     assert response.candidates == []
+
+
+def test_accepts_archiving_an_existing_memory() -> None:
+    provider = FakeProvider("""
+    {"candidates":[{"action":"ARCHIVE","storage":"MEMORY","scope":"PROJECT","type":"CONSTRAINT","retention":"LONG_TERM","content":"项目只使用 Java","dedupeKey":"project.language.constraint","subject":"当前项目","predicate":"programming_language","value":"Java","targetMemoryId":"memory-java","structuredData":{},"confidence":0.98,"importance":0.8,"ttlSeconds":null}]}
+    """)
+
+    response = asyncio.run(MemoryExtractionService(provider).extract(request()))
+
+    assert response.candidates[0].action == "ARCHIVE"
+    assert response.candidates[0].target_memory_id == "memory-java"
+
+
+def test_normalizes_a_negated_update_into_archive() -> None:
+    provider = FakeProvider("""
+    {"candidates":[{"action":"UPSERT","storage":"MEMORY","scope":"PROJECT","type":"DECISION","retention":"LONG_TERM","content":"项目不再强制统一使用 Java，可以引入其他语言","dedupeKey":"project.language.constraint","subject":"当前项目","predicate":"programming_language","value":"不限制","targetMemoryId":"memory-java","structuredData":{},"confidence":0.98,"importance":0.8,"ttlSeconds":null}]}
+    """)
+    extraction_request = request().model_copy(update={
+        "user_message": "取消当前项目只能使用 Java、不允许其他语言的要求。",
+    })
+
+    response = asyncio.run(
+        MemoryExtractionService(provider).extract(extraction_request)
+    )
+
+    assert response.candidates[0].action == "ARCHIVE"
+
+
+def test_includes_existing_project_instructions_for_rule_updates(
+    tmp_path,
+) -> None:
+    instruction_dir = tmp_path / ".lumora"
+    instruction_dir.mkdir()
+    (instruction_dir / "AGENTS.md").write_text(
+        "- [project.language.constraint] 项目只使用 Java",
+        encoding="utf-8",
+    )
+    provider = RecordingProvider('{"candidates":[]}')
+    extraction_request = request().model_copy(update={
+        "workspace_path": str(tmp_path),
+    })
+
+    asyncio.run(
+        MemoryExtractionService(provider).extract(extraction_request)
+    )
+
+    payload = provider.messages[0].content
+    assert "existingProjectInstructions" in payload
+    assert "project.language.constraint" in payload
 
 
 def test_prompt_requires_legacy_memory_semantic_backfill() -> None:

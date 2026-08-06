@@ -179,7 +179,8 @@ Python Harness 的 Tool Registry 提供名称、用途、输入 JSON Schema、�
 同时用于审计、界面表达和执行前权限审批，不能只依赖 Prompt 或标记本身阻止危险操作。
 
 Java 发给 Python 的 PromptContext 只包含 `workspacePath`、`projectInstructions`、
-`availableTools` 和 `memorySummary`。稳定行为规则只存在于 Python 静态 Prompt；工具
+`availableTools`、兼容旧调用的 `memorySummary`、结构化 `memoryCandidates`、任务 ID、
+会话摘要和权限事实。稳定行为规则只存在于 Python 静态 Prompt；工具
 Schema 只由 Python Tool Registry 生成。跨进程接口不再提供 `systemReminders` 或
 `toolDefinitions` 这类可注入稳定规则、复制 Schema 的旁路。
 
@@ -274,6 +275,31 @@ Controller 不直接调用 Entity 的静态映射方法：任务和会话响应�
 下的 Projector 完成，避免 Web、DTO、Entity 与持久化策略互相渗透。
 记忆输入的规范化、JSON 校验与稳定哈希集中在 `MemoryValueNormalizer`，业务 Service
 只负责记忆选择、版本更新和持久化流程。
+
+### Memory 分层
+
+Memory 保持 Java 持久化、Python 检索与提取的既有边界，并明确分为 User、Project 和
+Conversation 三个动态范围；Project Instructions 是工作区中的 `AGENTS.md`、`CLAUDE.md`
+或 `.lumora/` 下同名文件，不进入动态记忆表。Java 每个范围只发送有界候选，Python 按当前请求
+综合相关性、重要度、置信度、更新时间和实际使用频率选取少量条目。会话 Auto-Compact 摘要仍由
+独立表维护，不与长期 Memory 合并。
+
+提取协议使用 `UPSERT`、`ARCHIVE` 表达动态记忆生命周期。归档前 Java 必须确认目标 ID 来自
+本轮活动记忆提取上下文，并重新校验数据库作用域，避免模型越权失效其他记忆；类型和语义键不是
+稳定身份，允许在规则分类升级时变化。明确的长期项目规则由 Python 分类为
+`PROJECT_INSTRUCTIONS`，Java 只维护 `.lumora/AGENTS.md` 中带边界标记的受控区块；同键更新、
+撤销删除，受控区块以外的用户手写内容不被覆盖。
+跨轮次重新确认已归档的动态事实时，Java 在处理 `UPSERT` 时按语义槽恢复最近的 `ARCHIVED`
+记录，不依赖自然语言内容哈希完全一致。归档历史不进入聊天检索，仅以每作用域最多 8 条的有界
+集合进入 Python 记忆提取上下文，帮助提取器复用稳定语义键和目标 ID。
+
+动态内容继续集中在 `memory_item` 一张表，`scope_type` 表达层级。Desktop“个性化”页通过
+Java Core 的 `GET/PUT /api/v1/memory/settings` 控制全局记忆开关，通过 `DELETE /api/v1/memory`
+重置全部动态记忆；开关值存入通用 `application_setting`，关闭时同时停止检索注入和自动提取，
+但不删除已有内容。重置操作不触碰聊天、Auto-Compact 摘要或项目指令文件。
+
+完整数据字段、提取规则、注入优先级和兼容策略见
+[Memory 系统设计](memory-system-design.md)。
 
 Desktop 的 Zustand Store 负责动作和状态生命周期；聊天流事件处理、任务事件归并和
 历史/实时工作记录映射分别位于独立模块，避免网关与 Store 各自维护一套事件投影。

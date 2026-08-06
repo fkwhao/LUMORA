@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Clock3,
   Folder,
+  FolderClosed,
   FolderOpen,
   Plus,
   Search,
@@ -21,6 +22,47 @@ import lumoraLogoDark from "../assets/lumora-logo-dark.png";
 import lumoraLogo from "../assets/lumora-logo.png";
 import type { PrototypeView } from "../features/prototype/PrototypePage";
 
+const COLLAPSED_PROJECTS_STORAGE_KEY = "lumora.sidebar.collapsed-projects";
+const HISTORY_PIXEL_COLUMNS = 40;
+const HISTORY_PIXEL_ROWS = 6;
+const HISTORY_PROCESSING_PIXELS = Array.from(
+  { length: HISTORY_PIXEL_COLUMNS * HISTORY_PIXEL_ROWS },
+  (_, index) => {
+    const column = index % HISTORY_PIXEL_COLUMNS;
+    const row = Math.floor(index / HISTORY_PIXEL_COLUMNS);
+    const progress = column / (HISTORY_PIXEL_COLUMNS - 1);
+    const fillRate =
+      column < 18 ? 100 : Math.max(8, 100 - (column - 17) * 4.2);
+    const random =
+      ((index * 73 + row * 31 + column * column * 17 + 19) % 101) / 100;
+    const colorProgress = Math.min(
+      1,
+      Math.max(0, Math.pow(progress, 0.88) + (random - 0.5) * 0.16),
+    );
+    const red = Math.round(238 + (76 - 238) * colorProgress);
+    const green = Math.round(234 + (34 - 234) * colorProgress);
+    const blue = Math.round(246 + (138 - 246) * colorProgress);
+    const glowAlpha = 0.42 - progress * 0.14;
+    const density =
+      column < 18
+        ? "dense"
+        : fillRate >= 74
+          ? "high"
+          : fillRate >= 48
+            ? "medium"
+            : fillRate >= 24
+              ? "low"
+              : "trace";
+    return {
+      density,
+      color: `rgb(${red} ${green} ${blue})`,
+      glow: `0 0 ${Math.round(6 - progress * 2)}px rgb(${red} ${green} ${blue} / ${glowAlpha})`,
+      delay: `${-((index * 137 + row * 223 + column * 41) % 1900)}ms`,
+      duration: `${980 + ((index * 89 + row * 47) % 760)}ms`,
+    };
+  },
+);
+
 interface AppSidebarProps {
   activeView: "home" | "task" | "settings" | PrototypeView;
   activeTaskId?: string;
@@ -32,6 +74,7 @@ interface AppSidebarProps {
   isLoadingHistory: boolean;
   onNewTask(): void;
   onNewProject(project: ProjectDirectory): void;
+  onNewProjectConversation(project: ProjectDirectory): void;
   onNavigate(view: PrototypeView): void;
   onOpenTask(taskId: string): void;
   onArchiveTask(taskId: string): void;
@@ -50,6 +93,7 @@ export function AppSidebar({
   isLoadingHistory,
   onNewTask,
   onNewProject,
+  onNewProjectConversation,
   onNavigate,
   onOpenTask,
   onArchiveTask,
@@ -60,6 +104,9 @@ export function AppSidebar({
   const [query, setQuery] = useState("");
   const [projectsExpanded, setProjectsExpanded] = useState(true);
   const [recentExpanded, setRecentExpanded] = useState(true);
+  const [collapsedProjectPaths, setCollapsedProjectPaths] = useState<Set<string>>(
+    loadCollapsedProjectPaths,
+  );
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const archivedTaskIdSet = new Set(archivedTaskIds);
   const activeTasks = recentTasks.filter(
@@ -173,26 +220,84 @@ export function AppSidebar({
             </div>
           </div>
 
-          {projectsExpanded &&
-            projectGroups.map((group) => (
-              <section className="project-task-group" key={group.path}>
-                <div className="history-label" title={group.path}>
-                  <Folder size={16} strokeWidth={1.7} />
-                  <span>{group.name}</span>
+          <div
+            className={`sidebar-section-list${projectsExpanded ? " is-expanded" : " is-collapsed"}`}
+            aria-hidden={!projectsExpanded}
+          >
+            <div className="sidebar-section-list-inner">
+            {projectGroups.map((group) => {
+              const projectExpanded = !collapsedProjectPaths.has(group.path);
+              return (
+              <section
+                className={`project-task-group${projectExpanded ? " is-expanded" : " is-collapsed"}`}
+                key={group.path}
+              >
+                <div className="project-group-heading">
+                  <button
+                    className="history-label project-group-toggle"
+                    type="button"
+                    title={group.path}
+                    aria-label={`${projectExpanded ? "收起" : "展开"}项目 ${group.name} 的会话`}
+                    aria-expanded={projectExpanded}
+                    onClick={() =>
+                      setCollapsedProjectPaths((current) =>
+                        toggleCollapsedProject(current, group.path),
+                      )
+                    }
+                  >
+                    {projectExpanded ? (
+                      <FolderOpen
+                        className="project-folder-icon is-open"
+                        size={16}
+                        strokeWidth={1.7}
+                      />
+                    ) : (
+                      <FolderClosed
+                        className="project-folder-icon is-closed"
+                        size={16}
+                        strokeWidth={1.7}
+                      />
+                    )}
+                    <span>{group.name}</span>
+                  </button>
+                  <button
+                    className="project-new-conversation-action"
+                    type="button"
+                    aria-label={`在项目 ${group.name} 下新建会话`}
+                    title="在当前项目下新建会话"
+                    onClick={() =>
+                      onNewProjectConversation({
+                        name: group.name,
+                        path: group.path,
+                      })
+                    }
+                  >
+                    <SquarePen size={13} />
+                  </button>
                 </div>
-                {group.tasks.map((task) => (
-                  <HistoryRow
-                    key={task.taskId}
-                    task={task}
-                    activeTaskId={activeTaskId}
-                    processingTaskId={processingTaskId}
-                    onOpenTask={onOpenTask}
-                    onArchiveTask={onArchiveTask}
-                    notify={notify}
-                  />
-                ))}
+                <div
+                  className="project-task-list"
+                  aria-hidden={!projectExpanded}
+                >
+                  <div className="project-task-list-inner">
+                    {group.tasks.map((task) => (
+                      <HistoryRow
+                        key={task.taskId}
+                        task={task}
+                        activeTaskId={activeTaskId}
+                        processingTaskId={processingTaskId}
+                        onOpenTask={onOpenTask}
+                        onArchiveTask={onArchiveTask}
+                        notify={notify}
+                      />
+                    ))}
+                  </div>
+                </div>
               </section>
-            ))}
+              );
+            })}
+            </div>
+          </div>
 
           <section className="recent-task-group">
             <div className="sidebar-section-heading collapsible-heading">
@@ -220,18 +325,24 @@ export function AppSidebar({
                 </button>
               </div>
             </div>
-            {recentExpanded &&
-              unscopedTasks.map((task) => (
-                <HistoryRow
-                  key={task.taskId}
-                  task={task}
-                  activeTaskId={activeTaskId}
-                  processingTaskId={processingTaskId}
-                  onOpenTask={onOpenTask}
-                  onArchiveTask={onArchiveTask}
-                  notify={notify}
-                />
-              ))}
+            <div
+              className={`sidebar-section-list${recentExpanded ? " is-expanded" : " is-collapsed"}`}
+              aria-hidden={!recentExpanded}
+            >
+              <div className="sidebar-section-list-inner">
+                {unscopedTasks.map((task) => (
+                  <HistoryRow
+                    key={task.taskId}
+                    task={task}
+                    activeTaskId={activeTaskId}
+                    processingTaskId={processingTaskId}
+                    onOpenTask={onOpenTask}
+                    onArchiveTask={onArchiveTask}
+                    notify={notify}
+                  />
+                ))}
+              </div>
+            </div>
           </section>
         </section>
       </div>
@@ -371,6 +482,10 @@ function HistoryRow({
       Math.ceil(viewport.scrollWidth - viewport.clientWidth),
     );
     viewport.style.setProperty("--history-title-overflow", `${overflow}px`);
+    viewport.style.setProperty(
+      "--history-title-duration",
+      `${Math.max(0.8, overflow / 36)}s`,
+    );
     viewport.classList.toggle("is-overflowing", overflow > 1);
   }
 
@@ -382,6 +497,26 @@ function HistoryRow({
       onFocusCapture={prepareTitleMarquee}
       onPointerEnter={prepareTitleMarquee}
     >
+      {task.taskId === processingTaskId && (
+        <span
+          className="history-processing-pixels"
+          role="status"
+          aria-label="正在处理"
+        >
+          {HISTORY_PROCESSING_PIXELS.map((pixel, index) => (
+            <i
+              className={`density-${pixel.density}`}
+              key={index}
+              style={{
+                background: pixel.color,
+                boxShadow: pixel.glow,
+                animationDelay: pixel.delay,
+                animationDuration: pixel.duration,
+              }}
+            />
+          ))}
+        </span>
+      )}
       <button
         className="history-item"
         type="button"
@@ -392,13 +527,6 @@ function HistoryRow({
           <span className="history-title-text">{task.goal}</span>
         </span>
       </button>
-      {task.taskId === processingTaskId && (
-        <span
-          className="history-processing-indicator"
-          role="status"
-          aria-label="正在处理"
-        />
-      )}
       <button
         className="history-archive-action"
         type="button"
@@ -447,6 +575,43 @@ function organizeTasks(
 
 function projectName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+}
+
+function loadCollapsedProjectPaths(): Set<string> {
+  try {
+    const value = globalThis.localStorage?.getItem(
+      COLLAPSED_PROJECTS_STORAGE_KEY,
+    );
+    const paths = value ? JSON.parse(value) : [];
+    return new Set(
+      Array.isArray(paths)
+        ? paths.filter((path): path is string => typeof path === "string")
+        : [],
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function toggleCollapsedProject(
+  current: Set<string>,
+  projectPath: string,
+): Set<string> {
+  const next = new Set(current);
+  if (next.has(projectPath)) {
+    next.delete(projectPath);
+  } else {
+    next.add(projectPath);
+  }
+  try {
+    globalThis.localStorage?.setItem(
+      COLLAPSED_PROJECTS_STORAGE_KEY,
+      JSON.stringify([...next]),
+    );
+  } catch {
+    // Sidebar state can remain session-local when storage is unavailable.
+  }
+  return next;
 }
 
 interface NavItemProps {

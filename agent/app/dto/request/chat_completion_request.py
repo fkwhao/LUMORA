@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -41,6 +42,24 @@ class PermissionRuleRequest(BaseModel):
     decision: Literal["allow", "deny", "ask"] = "ask"
 
 
+class MemoryContextRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    memory_id: str = Field(alias="memoryId", min_length=1, max_length=100)
+    scope: Literal["USER", "PROJECT", "CONVERSATION"]
+    type: Literal[
+        "PREFERENCE", "FACT", "DECISION", "CONSTRAINT", "SUMMARY"
+    ]
+    content: str = Field(min_length=1, max_length=4_000)
+    importance: float = Field(default=0.5, ge=0.0, le=1.0)
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    usage_count: int = Field(default=0, alias="usageCount", ge=0)
+    last_used_time: datetime | None = Field(
+        default=None, alias="lastUsedTime"
+    )
+    updated_time: datetime = Field(alias="updatedTime")
+
+
 class PromptContextRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -63,6 +82,11 @@ class PromptContextRequest(BaseModel):
         default=None,
         alias="memorySummary",
         max_length=100_000,
+    )
+    memory_candidates: list[MemoryContextRequest] = Field(
+        default_factory=list,
+        alias="memoryCandidates",
+        max_length=60,
     )
     task_id: str | None = Field(default=None, alias="taskId", max_length=160)
     conversation_summary: str | None = Field(

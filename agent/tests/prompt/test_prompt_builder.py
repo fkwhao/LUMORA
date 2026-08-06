@@ -63,6 +63,37 @@ class PromptBuilderTest(unittest.TestCase):
         self.assertEqual(len(assembly.context_messages), 1)
         self.assertEqual(assembly.tools[0]["function"]["name"], "file_read")
 
+    def test_orders_project_rules_before_layered_memory_and_summary(self) -> None:
+        assembly = PromptBuilder().build(PromptContext(
+            project_instructions=("必须运行测试。",),
+            user_memory=("用户偏好中文。",),
+            project_memory=("项目使用 SQLite。",),
+            conversation_memory=("当前正在修改 Memory。",),
+            conversation_summary="较早对话摘要",
+        ))
+
+        keys = [segment.key for segment in assembly.segments]
+        self.assertLess(
+            keys.index("runtime.project_instructions"),
+            keys.index("memory.user"),
+        )
+        self.assertLess(keys.index("memory.user"), keys.index("memory.project"))
+        self.assertLess(
+            keys.index("memory.project"),
+            keys.index("memory.conversation"),
+        )
+        self.assertLess(
+            keys.index("memory.conversation"),
+            keys.index("conversation.summary"),
+        )
+        self.assertEqual(
+            next(
+                segment for segment in assembly.segments
+                if segment.key == "runtime.project_instructions"
+            ).target,
+            PromptTarget.SYSTEM,
+        )
+
     def test_loader_rejects_empty_prompt_section(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)

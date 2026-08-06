@@ -6,7 +6,9 @@ from pydantic import BaseModel, ConfigDict, Field
 class MemoryCandidateResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    scope: Literal["USER", "CONVERSATION"]
+    action: Literal["UPSERT", "ARCHIVE"] = "UPSERT"
+    storage: Literal["MEMORY", "PROJECT_INSTRUCTIONS"] = "MEMORY"
+    scope: Literal["USER", "PROJECT", "CONVERSATION"]
     type: Literal[
         "PREFERENCE",
         "FACT",
@@ -35,6 +37,7 @@ class MemoryCandidateResponse(BaseModel):
         alias="structuredData",
     )
     confidence: float = Field(ge=0.0, le=1.0)
+    importance: float = Field(default=0.5, ge=0.0, le=1.0)
     ttl_seconds: int | None = Field(
         default=None,
         alias="ttlSeconds",

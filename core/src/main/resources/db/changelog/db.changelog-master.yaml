@@ -136,3 +136,30 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 016-memory-lifecycle-and-ranking
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V16__memory_lifecycle_and_ranking.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false
+  - changeSet:
+      id: 017-application-setting
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V17__application_setting.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false
+  - changeSet:
+      id: 018-normalize-application-setting-timestamps
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V18__normalize_application_setting_timestamps.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

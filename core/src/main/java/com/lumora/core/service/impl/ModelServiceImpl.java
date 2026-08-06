@@ -13,6 +13,7 @@ import com.lumora.core.model.ChatMessage;
 import com.lumora.core.model.ChatStreamEvent;
 import com.lumora.core.model.ContextCompaction;
 import com.lumora.core.model.ModelConnection;
+import com.lumora.core.model.MemoryContextItem;
 import com.lumora.core.model.ModelSettings;
 import com.lumora.core.model.ModelProvider;
 import com.lumora.core.model.ProviderModel;
@@ -335,6 +336,24 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
+    public List<AgentMemoryCandidate> extractMemories(
+            String userMessage,
+            String assistantMessage,
+            String existingMemorySummary,
+            String workspacePath,
+            String correlationId
+    ) {
+        return agentRuntimeClient.extractMemories(
+                requireText(userMessage, "用户消息"),
+                requireText(assistantMessage, "助手回答"),
+                existingMemorySummary,
+                workspacePath,
+                requireConnection(),
+                requireText(correlationId, "关联 ID")
+        );
+    }
+
+    @Override
     public ModelSettings getSettings(String correlationId) {
         requireText(correlationId, "关联 ID");
         ModelConfiguration configuration = loadConfiguration();
@@ -543,6 +562,32 @@ public class ModelServiceImpl implements ModelService {
                 List.copyOf(messages), requireConnection(model), correlationId,
                 reasoningEffort, memorySummary, workspacePath, permissionMode,
                 taskId, conversationSummary, eventConsumer
+        );
+    }
+
+    @Override
+    public void streamChat(
+            List<ChatMessage> messages,
+            String correlationId,
+            String model,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<MemoryContextItem> memoryCandidates,
+            Consumer<ChatStreamEvent> eventConsumer
+    ) {
+        if (messages == null || messages.isEmpty()) {
+            throw new IllegalArgumentException("对话消息不能为空");
+        }
+        agentRuntimeClient.streamChat(
+                List.copyOf(messages), requireConnection(model), correlationId,
+                reasoningEffort, memorySummary, workspacePath, permissionMode,
+                taskId, conversationSummary, memoryCandidates == null
+                        ? List.of() : List.copyOf(memoryCandidates),
+                eventConsumer
         );
     }
 

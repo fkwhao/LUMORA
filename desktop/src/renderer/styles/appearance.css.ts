@@ -460,15 +460,22 @@ globalStyle('[data-theme="dark"] .conversation-footer', {
 });
 
 globalStyle('[data-theme="dark"] .question-rail-tooltip', {
-  borderColor: "#43464c",
-  background: "rgb(45 46 49 / 97%)",
+  borderColor: "rgb(255 255 255 / 8%)",
+  background: "rgb(43 43 43)",
+  backdropFilter: "none",
   boxShadow: "0 18px 48px rgb(0 0 0 / 42%)",
 });
 
 globalStyle('[data-theme="dark"] .follow-up-composer', {
   borderColor: "rgb(255 255 255 / 5%)",
-  background: "#292a2d",
+  background: "rgb(41 42 45 / 88%)",
+  backdropFilter: "blur(12px)",
   boxShadow: "0 1px 5px rgb(0 0 0 / 22%)",
+});
+
+globalStyle('[data-theme="dark"] .goal-composer', {
+  background: "rgb(39 40 43 / 88%)",
+  backdropFilter: "blur(12px)",
 });
 
 globalStyle(
@@ -480,9 +487,17 @@ globalStyle(
 
 globalStyle('[data-theme="dark"] .composer-popover', {
   color: "#f1f1f1",
-  borderColor: "#414141",
-  background: "#2b2b2b",
-  boxShadow: "0 18px 48px rgb(0 0 0 / 34%)",
+  borderColor: "rgb(255 255 255 / 8%)",
+  background: "rgb(43 43 43 / 96%)",
+  backdropFilter: "blur(32px) saturate(125%)",
+  boxShadow:
+    "inset 0 1px 0 rgb(255 255 255 / 8%), 0 18px 48px rgb(0 0 0 / 34%)",
+});
+
+globalStyle('[data-theme="dark"] .context-picker-popover', {
+  borderColor: "rgb(255 255 255 / 8%)",
+  background: "rgb(43 43 43 / 96%)",
+  backdropFilter: "blur(32px) saturate(125%)",
 });
 
 globalStyle('[data-theme="dark"] .composer-popover > button.is-selected', {

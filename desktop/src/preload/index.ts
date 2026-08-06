@@ -184,6 +184,16 @@ const api: LumoraApi = {
       };
     },
   },
+  memory: {
+    getSettings: () => ipcRenderer.invoke("memory:get-settings"),
+    updateSettings: (enabled: boolean) => {
+      if (typeof enabled !== "boolean") {
+        throw new TypeError("记忆开关必须是布尔值");
+      }
+      return ipcRenderer.invoke("memory:update-settings", enabled);
+    },
+    reset: () => ipcRenderer.invoke("memory:reset"),
+  },
   window: {
     setAppearance: (theme: ResolvedAppearanceTheme) => {
       if (theme !== "light" && theme !== "dark") {

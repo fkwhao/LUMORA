@@ -1,5 +1,13 @@
 import { globalStyle, keyframes } from "@vanilla-extract/css";
 
+const composerFromCenter = keyframes({
+  from: {
+    opacity: "0.82",
+    transform: "translateY(-32vh) scaleX(1.07) scaleY(1.18)",
+  },
+  to: { opacity: "1", transform: "translateY(0) scale(1)" },
+});
+
 const streamCursorBlink = keyframes({
   "0%, 45%": { opacity: 1 },
   "46%, 100%": { opacity: 0 },
@@ -67,8 +75,23 @@ globalStyle(".task-title-row > div", {
   minWidth: "0",
 });
 
+globalStyle(".task-title-copy", {
+  position: "relative",
+  display: "flex",
+  width: "min(420px, 42vw)",
+  minWidth: "0",
+  height: "30px",
+  flex: "0 1 420px",
+  alignItems: "center",
+  overflow: "hidden",
+});
+
 globalStyle(".task-title-row h1", {
-  maxWidth: "680px",
+  position: "relative",
+  zIndex: "2",
+  width: "100%",
+  maxWidth: "100%",
+  flex: "0 1 100%",
   margin: "0",
   overflow: "hidden",
   fontSize: "15px",
@@ -171,6 +194,15 @@ globalStyle(".task-actions > button:not(.icon-button)", {
   background: "#fff",
   cursor: "pointer",
   fontSize: "10px",
+});
+
+globalStyle(".task-project-folder", {
+  display: "grid",
+  width: "30px",
+  height: "30px",
+  flex: "0 0 auto",
+  placeItems: "center",
+  color: "var(--muted)",
 });
 
 globalStyle(".task-actions > .review-toggle.active", {
@@ -308,20 +340,21 @@ globalStyle(".question-rail-tooltip", {
   color: "#f5f6f7",
   border: "1px solid rgb(255 255 255 / 8%)",
   borderRadius: "13px",
-  background: "rgb(31 33 37 / 96%)",
+  background: "rgb(31 33 37)",
+  backdropFilter: "none",
   boxShadow: "0 18px 45px rgb(0 0 0 / 24%)",
   opacity: "0",
+  visibility: "hidden",
   pointerEvents: "none",
-  transform: "translate(6px, -50%) scale(0.98)",
-  transformOrigin: "left center",
-  transition: "opacity 140ms ease, transform 160ms ease",
+  transform: "translate(0, -50%)",
+  transition: "none",
 });
 
 globalStyle(
   ".question-rail-item:hover .question-rail-tooltip,\n.question-rail-item:focus-visible .question-rail-tooltip",
   {
     opacity: "1",
-    transform: "translate(0, -50%) scale(1)",
+    visibility: "visible",
   },
 );
 
@@ -378,7 +411,7 @@ globalStyle(".conversation-scroll::-webkit-scrollbar-track", {
 });
 
 globalStyle(".conversation-content,\n.conversation-footer-inner", {
-  width: "min(100%, 860px)",
+  width: "min(100%, 726px)",
   margin: "0 auto",
 });
 
@@ -1437,15 +1470,22 @@ globalStyle(".follow-up-composer", {
   position: "relative",
   width: "100%",
   minWidth: "0",
-  padding: "13px 14px 10px",
+  padding: "10px 12px 8px",
   border: "1px solid color-mix(in srgb, var(--line) 58%, transparent)",
-  borderRadius: "28px",
-  background: "#f8f9fb",
+  borderRadius: "24px",
+  background: "rgb(248 249 251 / 88%)",
+  backdropFilter: "blur(12px)",
   boxShadow: "0 1px 4px rgb(28 35 45 / 8%)",
 });
 
+globalStyle(".task-layout.composer-enter-from-center .follow-up-composer", {
+  animation: `${composerFromCenter} 520ms cubic-bezier(0.22, 1, 0.36, 1) both`,
+  transformOrigin: "top center",
+  willChange: "transform, opacity",
+});
+
 globalStyle(".follow-up-composer textarea", {
-  minHeight: "56px",
+  minHeight: "42px",
   maxHeight: "180px",
   padding: "0 2px",
   fontSize: "12px",
@@ -1592,8 +1632,10 @@ globalStyle(".composer-popover", {
   color: "var(--ink)",
   border: "1px solid var(--line-strong)",
   borderRadius: "12px",
-  background: "color-mix(in srgb, var(--surface) 94%, var(--ink) 6%)",
-  boxShadow: "0 16px 44px rgb(0 0 0 / 24%)",
+  background: "rgb(248 249 251 / 96%)",
+  backdropFilter: "blur(32px) saturate(125%)",
+  boxShadow:
+    "inset 0 1px 0 rgb(255 255 255 / 72%), 0 16px 44px rgb(0 0 0 / 24%)",
   animation: `${composerMenuIn} 120ms cubic-bezier(.2,.75,.25,1)`,
 });
 
@@ -1708,12 +1750,14 @@ globalStyle(".context-picker-popover", {
   padding: "8px",
   overflowY: "auto",
   borderRadius: "18px",
+  background: "rgb(248 249 251 / 96%)",
+  backdropFilter: "blur(32px) saturate(125%)",
 });
 
 globalStyle(".context-picker-popover .context-compact-command", {
   marginBottom: "2px",
-  border: "1px solid color-mix(in srgb, var(--line-strong) 72%, transparent)",
-  background: "color-mix(in srgb, var(--surface-soft) 86%, transparent)",
+  border: "0",
+  background: "transparent !important",
 });
 
 globalStyle(".command-picker-popover", {
@@ -1842,19 +1886,22 @@ globalStyle(".spin", { animation: `${artifactSpin} 800ms linear infinite` });
 
 
 globalStyle(".follow-up-composer .context-picker-popover > button", {
-  minHeight: "48px",
+  minHeight: "40px",
   gridTemplateColumns: "22px minmax(0, 1fr)",
-  padding: "7px 11px",
+  padding: "6px 10px",
 });
 
 globalStyle(".context-picker-popover button > span", {
-  display: "grid",
-  gap: "2px",
-  overflow: "visible",
-  whiteSpace: "normal",
+  display: "flex",
+  minWidth: "0",
+  alignItems: "baseline",
+  gap: "8px",
+  overflow: "hidden",
+  whiteSpace: "nowrap",
 });
 
 globalStyle(".context-picker-popover button strong", {
+  flex: "0 0 auto",
   color: "var(--ink)",
   fontSize: "12.5px",
   fontWeight: "560",
@@ -1862,8 +1909,12 @@ globalStyle(".context-picker-popover button strong", {
 });
 
 globalStyle(".context-picker-popover button small", {
+  minWidth: "0",
+  overflow: "hidden",
   color: "var(--subtle)",
   fontSize: "10.5px",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
 });
 
 globalStyle(".context-picker-section", {
@@ -2047,8 +2098,10 @@ globalStyle(".context-usage-tooltip", {
   color: "#f2f2f2",
   border: "1px solid #414141",
   borderRadius: "14px",
-  background: "#2c2c2c",
-  boxShadow: "0 12px 30px rgb(0 0 0 / 22%)",
+  background: "rgb(44 44 44 / 96%)",
+  backdropFilter: "blur(32px) saturate(125%)",
+  boxShadow:
+    "inset 0 1px 0 rgb(255 255 255 / 8%), 0 12px 30px rgb(0 0 0 / 22%)",
   opacity: "0",
   pointerEvents: "none",
   transform: "translate(-50%, 4px)",
@@ -2149,8 +2202,8 @@ globalStyle(".model-select", {
 });
 
 globalStyle(".follow-up-composer .send-follow-up", {
-  width: "36px",
-  height: "36px",
+  width: "32px",
+  height: "32px",
   padding: "0",
   color: "var(--surface)",
   border: "0",
@@ -2168,8 +2221,12 @@ globalStyle(
   },
 );
 
-globalStyle(".follow-up-composer .send-follow-up.is-stopping svg", {
-  borderRadius: "1px",
+globalStyle(".follow-up-composer .send-follow-up .stop-glyph", {
+  display: "block",
+  width: "13px",
+  height: "13px",
+  borderRadius: "3.5px",
+  background: "currentColor",
 });
 
 globalStyle(".follow-up-composer .send-follow-up:disabled,\n.submit-task:disabled", {

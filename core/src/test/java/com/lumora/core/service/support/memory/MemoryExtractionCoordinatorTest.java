@@ -34,11 +34,14 @@ class MemoryExtractionCoordinatorTest {
     private ModelService modelService;
     private MemoryService memoryService;
     private MemoryExtractionCoordinator coordinator;
+    private ProjectInstructionService projectInstructionService;
 
     @BeforeEach
     void setUp() {
         modelService = mock(ModelService.class);
         memoryService = mock(MemoryService.class);
+        projectInstructionService = mock(ProjectInstructionService.class);
+        when(memoryService.isEnabled()).thenReturn(true);
         when(memoryService.remember(any())).thenReturn(mock(MemoryItem.class));
         CoreProperties properties = new CoreProperties();
         properties.setMemoryAutoExtractionEnabled(true);
@@ -47,14 +50,16 @@ class MemoryExtractionCoordinatorTest {
                 memoryService,
                 new ObjectMapper(),
                 Clock.fixed(NOW, ZoneOffset.UTC),
-                properties
+                properties,
+                projectInstructionService
         );
     }
 
     @Test
     void storesLongTermUserMemoryWithoutExpiry() {
         when(modelService.extractMemories(
-                anyString(), anyString(), nullable(String.class), anyString()
+                anyString(), anyString(), nullable(String.class),
+                nullable(String.class), anyString()
         )).thenReturn(List.of(new AgentMemoryCandidate(
                 "USER",
                 "PREFERENCE",
@@ -94,7 +99,8 @@ class MemoryExtractionCoordinatorTest {
     @Test
     void storesShortTermConversationMemoryWithBoundedExpiry() {
         when(modelService.extractMemories(
-                anyString(), anyString(), nullable(String.class), anyString()
+                anyString(), anyString(), nullable(String.class),
+                nullable(String.class), anyString()
         )).thenReturn(List.of(new AgentMemoryCandidate(
                 "CONVERSATION",
                 "SUMMARY",
@@ -132,9 +138,54 @@ class MemoryExtractionCoordinatorTest {
     }
 
     @Test
+    void storesProjectMemoryInNormalizedWorkspaceScope() {
+        when(modelService.extractMemories(
+                anyString(), anyString(), nullable(String.class),
+                nullable(String.class), anyString()
+        )).thenReturn(List.of(new AgentMemoryCandidate(
+                "PROJECT",
+                "DECISION",
+                "LONG_TERM",
+                "项目使用 SQLite 持久化业务状态",
+                "project.persistence.database",
+                "项目",
+                "persistence_database",
+                "SQLite",
+                null,
+                Map.of(),
+                0.95,
+                0.85,
+                null
+        )));
+
+        coordinator.extractAndStore(
+                "conversation-1",
+                "f:/project/lumora",
+                "message-1",
+                "保持 SQLite",
+                "已确认",
+                null,
+                "correlation-1"
+        );
+
+        ArgumentCaptor<MemoryWriteRequest> captor = ArgumentCaptor.forClass(
+                MemoryWriteRequest.class
+        );
+        verify(memoryService).remember(captor.capture());
+        assertThat(captor.getValue().getScopeType())
+                .isEqualTo(MemoryScopeType.PROJECT);
+        assertThat(captor.getValue().getScopeId())
+                .isEqualTo("f:/project/lumora");
+        assertThat(captor.getValue().getImportance()).isEqualTo(0.85);
+        assertThat(captor.getValue().getSourceType())
+                .isEqualTo("CONVERSATION_EXTRACTION");
+    }
+
+    @Test
     void onlyLetsOneCandidateReuseTheSameLegacyMemoryId() {
         when(modelService.extractMemories(
-                anyString(), anyString(), nullable(String.class), anyString()
+                anyString(), anyString(), nullable(String.class),
+                nullable(String.class), anyString()
         )).thenReturn(List.of(
                 candidate(
                         "lumora.cloud.relational_database",
@@ -167,6 +218,130 @@ class MemoryExtractionCoordinatorTest {
         assertThat(captor.getAllValues().get(0).getTargetMemoryId())
                 .isEqualTo("legacy-combined");
         assertThat(captor.getAllValues().get(1).getTargetMemoryId()).isNull();
+    }
+
+    @Test
+    void archivesAnExplicitlyRevokedMemory() {
+        when(modelService.extractMemories(
+                anyString(), anyString(), nullable(String.class),
+                nullable(String.class), anyString()
+        )).thenReturn(List.of(new AgentMemoryCandidate(
+                "PROJECT",
+                "CONSTRAINT",
+                "LONG_TERM",
+                "项目只使用 Java",
+                "project.language.constraint",
+                "当前项目",
+                "programming_language",
+                "Java",
+                "memory-java",
+                Map.of(),
+                0.98,
+                0.8,
+                null,
+                "ARCHIVE",
+                "MEMORY"
+        )));
+
+        int count = coordinator.extractAndStore(
+                "conversation-1",
+                "f:/project/lumora",
+                "message-1",
+                "取消只能使用 Java 的要求",
+                "已取消",
+                "id=memory-java; scope=PROJECT; type=DECISION; "
+                        + "key=project.language.constraint; content=项目只使用 Java",
+                "correlation-1"
+        );
+
+        assertThat(count).isEqualTo(1);
+        verify(memoryService).archive(
+                "memory-java",
+                MemoryScopeType.PROJECT,
+                "f:/project/lumora"
+        );
+    }
+
+    @Test
+    void writesAProjectRuleToTheManagedInstructionFile() {
+        when(modelService.extractMemories(
+                anyString(), anyString(), nullable(String.class),
+                nullable(String.class), anyString()
+        )).thenReturn(List.of(new AgentMemoryCandidate(
+                "PROJECT",
+                "CONSTRAINT",
+                "LONG_TERM",
+                "当前项目统一使用 Java，不引入其他语言",
+                "project.language.constraint",
+                "当前项目",
+                "programming_language",
+                "Java",
+                null,
+                Map.of(),
+                0.98,
+                0.9,
+                null,
+                "UPSERT",
+                "PROJECT_INSTRUCTIONS"
+        )));
+        when(projectInstructionService.apply(
+                anyString(), anyString(), anyString(), anyString()
+        )).thenReturn(true);
+
+        int count = coordinator.extractAndStore(
+                "conversation-1",
+                "f:/project/lumora",
+                "message-1",
+                "这个项目统一使用 Java",
+                "已记录",
+                null,
+                "correlation-1"
+        );
+
+        assertThat(count).isEqualTo(1);
+        verify(projectInstructionService).apply(
+                "f:/project/lumora",
+                "UPSERT",
+                "project.language.constraint",
+                "当前项目统一使用 Java，不引入其他语言"
+        );
+        verify(memoryService, org.mockito.Mockito.never()).remember(any());
+    }
+
+    @Test
+    void doesNotReactivateATargetArchivedEarlierInTheSameExtraction() {
+        AgentMemoryCandidate archived = new AgentMemoryCandidate(
+                "PROJECT", "DECISION", "LONG_TERM",
+                "项目不再限制编程语言", "project.language.constraint",
+                "当前项目", "programming_language", "不限制",
+                "memory-java", Map.of(), 0.98, 0.8, null,
+                "ARCHIVE", "MEMORY"
+        );
+        AgentMemoryCandidate conflictingUpdate = new AgentMemoryCandidate(
+                "PROJECT", "DECISION", "LONG_TERM",
+                "项目可以引入其他语言", "project.language.constraint",
+                "当前项目", "programming_language", "不限制",
+                "memory-java", Map.of(), 0.95, 0.8, null,
+                "UPSERT", "MEMORY"
+        );
+        when(modelService.extractMemories(
+                anyString(), anyString(), nullable(String.class),
+                nullable(String.class), anyString()
+        )).thenReturn(List.of(archived, conflictingUpdate));
+
+        int count = coordinator.extractAndStore(
+                "conversation-1", "f:/project/lumora", "message-1",
+                "取消只能使用 Java 的要求", "已取消",
+                "id=memory-java; scope=PROJECT; type=DECISION; "
+                        + "key=project.language.constraint; content=项目只使用 Java",
+                "correlation-1"
+        );
+
+        assertThat(count).isEqualTo(1);
+        verify(memoryService).archive(
+                "memory-java", MemoryScopeType.PROJECT, "f:/project/lumora"
+        );
+        verify(memoryService, org.mockito.Mockito.never()).remember(any());
     }
 
     private static AgentMemoryCandidate candidate(

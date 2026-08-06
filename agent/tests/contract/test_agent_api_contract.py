@@ -34,11 +34,30 @@ def test_prompt_context_contract_contains_only_runtime_facts() -> None:
         "projectInstructions",
         "availableTools",
         "memorySummary",
+        "memoryCandidates",
         "taskId",
         "conversationSummary",
         "permissionMode",
         "permissionRules",
     }
+
+    memory_schema = contract["components"]["schemas"]["MemoryContext"]
+    assert memory_schema["properties"]["scope"]["enum"] == [
+        "USER", "PROJECT", "CONVERSATION"
+    ]
+
+
+def test_memory_extraction_contract_supports_lifecycle_and_project_rules() -> None:
+    contract_path = Path(__file__).resolve().parents[3] / "contracts" / "agent-api.yaml"
+    contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    schemas = contract["components"]["schemas"]
+
+    assert "workspacePath" in schemas["MemoryExtractionRequest"]["properties"]
+    candidate = schemas["MemoryCandidate"]
+    assert candidate["properties"]["action"]["enum"] == ["UPSERT", "ARCHIVE"]
+    assert candidate["properties"]["storage"]["enum"] == [
+        "MEMORY", "PROJECT_INSTRUCTIONS"
+    ]
 
 
 def test_http_route_split_preserves_public_paths_and_methods() -> None:

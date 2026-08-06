@@ -17,4 +17,9 @@ class MemoryExtractionRequest(BaseModel):
         alias="existingMemorySummary",
         max_length=20_000,
     )
+    workspace_path: str | None = Field(
+        default=None,
+        alias="workspacePath",
+        max_length=1_000,
+    )
     connection: ModelConnectionRequest

@@ -7,6 +7,7 @@ import com.lumora.core.model.ChatMessage;
 import com.lumora.core.model.ChatStreamEvent;
 import com.lumora.core.model.ContextCompaction;
 import com.lumora.core.model.ModelConnection;
+import com.lumora.core.model.MemoryContextItem;
 
 import java.util.List;
 import java.util.function.Consumer;
@@ -36,6 +37,18 @@ public interface AgentRuntimeClient {
             ModelConnection connection,
             String correlationId
     );
+
+    default List<AgentMemoryCandidate> extractMemories(
+            String userMessage,
+            String assistantMessage,
+            String existingMemorySummary,
+            String workspacePath,
+            ModelConnection connection,
+            String correlationId
+    ) {
+        return extractMemories(userMessage, assistantMessage,
+                existingMemorySummary, connection, correlationId);
+    }
 
     /**
      * 请求 Python Agent 为任务生成初始计划。
@@ -139,5 +152,23 @@ public interface AgentRuntimeClient {
     ) {
         streamChat(messages, connection, correlationId, reasoningEffort,
                 memorySummary, workspacePath, permissionMode, eventConsumer);
+    }
+
+    default void streamChat(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String correlationId,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<MemoryContextItem> memoryCandidates,
+            Consumer<ChatStreamEvent> eventConsumer
+    ) {
+        streamChat(messages, connection, correlationId, reasoningEffort,
+                memorySummary, workspacePath, permissionMode, taskId,
+                conversationSummary, eventConsumer);
     }
 }

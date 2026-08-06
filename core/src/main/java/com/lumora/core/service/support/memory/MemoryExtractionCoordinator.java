@@ -36,12 +36,16 @@ public class MemoryExtractionCoordinator {
             "(?i)(api[_ -]?key|access[_ -]?token|password|密码|令牌)"
                     + "\\s*[:=：]\\s*\\S+"
     );
+    private static final Pattern EXISTING_MEMORY_ID = Pattern.compile(
+            "(?m)^id=([A-Za-z0-9_-]{1,100});"
+    );
 
     private final ModelService modelService;
     private final MemoryService memoryService;
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final CoreProperties coreProperties;
+    private final ProjectInstructionService projectInstructionService;
 
     public int extractAndStore(
             String conversationId,
@@ -51,22 +55,66 @@ public class MemoryExtractionCoordinator {
             String existingMemorySummary,
             String correlationId
     ) {
-        if (!coreProperties.isMemoryAutoExtractionEnabled()) {
+        return extractAndStore(conversationId, null, sourceMessageId,
+                userMessage, assistantMessage, existingMemorySummary,
+                correlationId);
+    }
+
+    public int extractAndStore(
+            String conversationId,
+            String projectScopeId,
+            String sourceMessageId,
+            String userMessage,
+            String assistantMessage,
+            String existingMemorySummary,
+            String correlationId
+    ) {
+        if (!coreProperties.isMemoryAutoExtractionEnabled()
+                || !memoryService.isEnabled()) {
             return 0;
         }
         List<AgentMemoryCandidate> candidates = modelService.extractMemories(
                 userMessage,
                 assistantMessage,
                 existingMemorySummary,
+                projectScopeId,
                 correlationId
         );
         int stored = 0;
         Set<String> claimedTargetIds = new HashSet<>();
+        Set<String> archivedTargetIds = new HashSet<>();
+        Set<String> allowedTargetIds = existingMemoryIds(
+                existingMemorySummary
+        );
         for (AgentMemoryCandidate candidate : candidates) {
             try {
+                if ("PROJECT_INSTRUCTIONS".equals(candidate.getStorage())) {
+                    if (applyProjectInstruction(candidate, projectScopeId)) {
+                        stored++;
+                    }
+                    continue;
+                }
+                if (archiveMemory(
+                        candidate,
+                        conversationId,
+                        projectScopeId,
+                        claimedTargetIds,
+                        archivedTargetIds,
+                        allowedTargetIds
+                )) {
+                    stored++;
+                    continue;
+                }
+                if (candidate.getTargetMemoryId() != null
+                        && archivedTargetIds.contains(
+                        candidate.getTargetMemoryId()
+                )) {
+                    continue;
+                }
                 MemoryWriteRequest request = toWriteRequest(
                         candidate,
                         conversationId,
+                        projectScopeId,
                         sourceMessageId,
                         claimedTargetIds
                 );
@@ -84,9 +132,14 @@ public class MemoryExtractionCoordinator {
     private MemoryWriteRequest toWriteRequest(
             AgentMemoryCandidate candidate,
             String conversationId,
+            String projectScopeId,
             String sourceMessageId,
             Set<String> claimedTargetIds
     ) throws JsonProcessingException {
+        if (!"UPSERT".equals(candidate.getAction())
+                || !"MEMORY".equals(candidate.getStorage())) {
+            throw new IllegalArgumentException("未知记忆候选操作");
+        }
         boolean shortTerm = "SHORT_TERM".equals(candidate.getRetention());
         boolean longTerm = "LONG_TERM".equals(candidate.getRetention());
         if (!shortTerm && !longTerm) {
@@ -105,9 +158,12 @@ public class MemoryExtractionCoordinator {
         MemoryScopeType scopeType = MemoryScopeType.valueOf(
                 requireText(candidate.getScope(), "记忆范围")
         );
+        if (shortTerm && scopeType != MemoryScopeType.CONVERSATION) {
+            throw new IllegalArgumentException("短期记忆只能属于当前会话");
+        }
         if (scopeType == MemoryScopeType.PROJECT
-                || shortTerm && scopeType != MemoryScopeType.CONVERSATION) {
-            throw new IllegalArgumentException("当前阶段不支持该记忆范围");
+                && (projectScopeId == null || projectScopeId.isBlank())) {
+            throw new IllegalArgumentException("项目记忆缺少工作区范围");
         }
         MemoryType memoryType = MemoryType.valueOf(
                 requireText(candidate.getType(), "记忆类型")
@@ -124,7 +180,11 @@ public class MemoryExtractionCoordinator {
         }
         return new MemoryWriteRequest(
                 scopeType,
-                scopeType == MemoryScopeType.USER ? null : conversationId,
+                switch (scopeType) {
+                    case USER -> null;
+                    case PROJECT -> projectScopeId;
+                    case CONVERSATION -> conversationId;
+                },
                 memoryType,
                 content,
                 requireText(candidate.getDedupeKey(), "记忆去重键"),
@@ -134,9 +194,110 @@ public class MemoryExtractionCoordinator {
                 targetMemoryId,
                 objectMapper.writeValueAsString(candidate.getStructuredData()),
                 candidate.getConfidence(),
+                candidate.getImportance(),
+                "CONVERSATION_EXTRACTION",
+                conversationId + ":" + sourceMessageId,
                 sourceMessageId,
                 expiresAt
         );
+    }
+
+    private boolean applyProjectInstruction(
+            AgentMemoryCandidate candidate,
+            String projectScopeId
+    ) {
+        if (!"LONG_TERM".equals(candidate.getRetention())
+                || !"PROJECT".equals(candidate.getScope())
+                || !("CONSTRAINT".equals(candidate.getType())
+                || "DECISION".equals(candidate.getType()))) {
+            throw new IllegalArgumentException("项目指令候选的范围或类型无效");
+        }
+        if (candidate.getConfidence() < LONG_TERM_CONFIDENCE) {
+            return false;
+        }
+        String content = requireText(candidate.getContent(), "项目指令内容");
+        if (SECRET_ASSIGNMENT.matcher(content).find()) {
+            throw new IllegalArgumentException("项目指令候选包含认证秘密");
+        }
+        return projectInstructionService.apply(
+                requireText(projectScopeId, "项目指令工作区"),
+                requireAction(candidate.getAction()),
+                requireText(candidate.getDedupeKey(), "项目指令去重键"),
+                content
+        );
+    }
+
+    private boolean archiveMemory(
+            AgentMemoryCandidate candidate,
+            String conversationId,
+            String projectScopeId,
+            Set<String> claimedTargetIds,
+            Set<String> archivedTargetIds,
+            Set<String> allowedTargetIds
+    ) {
+        if (!"ARCHIVE".equals(candidate.getAction())) {
+            return false;
+        }
+        if (!"MEMORY".equals(candidate.getStorage())) {
+            throw new IllegalArgumentException("未知记忆归档存储类型");
+        }
+        boolean shortTerm = "SHORT_TERM".equals(candidate.getRetention());
+        boolean longTerm = "LONG_TERM".equals(candidate.getRetention());
+        if (!shortTerm && !longTerm) {
+            throw new IllegalArgumentException("未知记忆保留策略");
+        }
+        double threshold = shortTerm
+                ? SHORT_TERM_CONFIDENCE
+                : LONG_TERM_CONFIDENCE;
+        if (candidate.getConfidence() < threshold) {
+            return false;
+        }
+        MemoryScopeType scopeType = MemoryScopeType.valueOf(
+                requireText(candidate.getScope(), "记忆范围")
+        );
+        if (shortTerm && scopeType != MemoryScopeType.CONVERSATION) {
+            throw new IllegalArgumentException("短期记忆只能属于当前会话");
+        }
+        String targetMemoryId = requireText(
+                candidate.getTargetMemoryId(), "待归档记忆 ID"
+        );
+        if (!claimedTargetIds.add(targetMemoryId)) {
+            throw new IllegalArgumentException("同一记忆被重复操作");
+        }
+        if (!allowedTargetIds.contains(targetMemoryId)) {
+            throw new IllegalArgumentException("待归档记忆不在当前提取上下文");
+        }
+        String scopeId = switch (scopeType) {
+            case USER -> null;
+            case PROJECT -> requireText(projectScopeId, "项目记忆工作区");
+            case CONVERSATION -> conversationId;
+        };
+        memoryService.archive(
+                targetMemoryId,
+                scopeType,
+                scopeId
+        );
+        archivedTargetIds.add(targetMemoryId);
+        return true;
+    }
+
+    private static Set<String> existingMemoryIds(String context) {
+        if (context == null || context.isBlank()) {
+            return Set.of();
+        }
+        Set<String> ids = new HashSet<>();
+        var matcher = EXISTING_MEMORY_ID.matcher(context);
+        while (matcher.find()) {
+            ids.add(matcher.group(1));
+        }
+        return Set.copyOf(ids);
+    }
+
+    private static String requireAction(String value) {
+        if (!"UPSERT".equals(value) && !"ARCHIVE".equals(value)) {
+            throw new IllegalArgumentException("未知候选操作");
+        }
+        return value;
     }
 
     private long resolveTtl(AgentMemoryCandidate candidate) {

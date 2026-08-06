@@ -11,4 +11,8 @@ class PromptContext:
     available_tools: tuple[str, ...] = ()
     tool_definitions: tuple[dict[str, Any], ...] = ()
     memory_summary: str | None = None
+    user_memory: tuple[str, ...] = ()
+    project_memory: tuple[str, ...] = ()
+    conversation_memory: tuple[str, ...] = ()
+    selected_memory_ids: tuple[str, ...] = ()
     conversation_summary: str | None = None

@@ -295,6 +295,7 @@ class HttpAgentRuntimeClientTest {
                           "userMessage": "以后回答简洁一点",
                           "assistantMessage": "好的",
                           "existingMemorySummary": null,
+                          "workspacePath": "F:/project/test",
                           "connection": {
                             "apiKey": "provider-secret"
                           }
@@ -322,6 +323,7 @@ class HttpAgentRuntimeClientTest {
                 "以后回答简洁一点",
                 "好的",
                 null,
+                "F:/project/test",
                 CONNECTION,
                 "correlation-123"
         );
@@ -329,6 +331,8 @@ class HttpAgentRuntimeClientTest {
         assertEquals(1, candidates.size());
         assertEquals("PREFERENCE", candidates.get(0).getType());
         assertEquals("user.response.style", candidates.get(0).getDedupeKey());
+        assertEquals("UPSERT", candidates.get(0).getAction());
+        assertEquals("MEMORY", candidates.get(0).getStorage());
         assertEquals("concise", candidates.get(0)
                 .getStructuredData().get("style"));
         server.verify();

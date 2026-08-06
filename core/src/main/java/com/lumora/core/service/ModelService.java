@@ -7,6 +7,7 @@ import com.lumora.core.model.ModelSettings;
 import com.lumora.core.model.ModelProvider;
 import com.lumora.core.model.ProviderModel;
 import com.lumora.core.model.ContextCompaction;
+import com.lumora.core.model.MemoryContextItem;
 import com.lumora.core.agent.model.AgentMemoryCandidate;
 
 import java.util.List;
@@ -68,6 +69,17 @@ public interface ModelService {
             String existingMemorySummary,
             String correlationId
     );
+
+    default List<AgentMemoryCandidate> extractMemories(
+            String userMessage,
+            String assistantMessage,
+            String existingMemorySummary,
+            String workspacePath,
+            String correlationId
+    ) {
+        return extractMemories(userMessage, assistantMessage,
+                existingMemorySummary, correlationId);
+    }
 
     /**
      * 获取可安全返回给前端的模型配置。
@@ -178,5 +190,23 @@ public interface ModelService {
     ) {
         streamChat(messages, correlationId, model, reasoningEffort,
                 memorySummary, workspacePath, permissionMode, eventConsumer);
+    }
+
+    default void streamChat(
+            List<ChatMessage> messages,
+            String correlationId,
+            String model,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<MemoryContextItem> memoryCandidates,
+            Consumer<ChatStreamEvent> eventConsumer
+    ) {
+        streamChat(messages, correlationId, model, reasoningEffort,
+                memorySummary, workspacePath, permissionMode, taskId,
+                conversationSummary, eventConsumer);
     }
 }

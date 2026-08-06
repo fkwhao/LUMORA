@@ -25,6 +25,16 @@ public class MemoryItem {
     private String structuredDataJson;
     @TableField("confidence")
     private double confidence;
+    @TableField("importance")
+    private double importance;
+    @TableField("usage_count")
+    private int usageCount;
+    @TableField(value = "last_used_at", typeHandler = SqliteInstantTypeHandler.class)
+    private Instant lastUsedAt;
+    @TableField("source_type")
+    private String sourceType;
+    @TableField("source_reference")
+    private String sourceReference;
     @TableField("source_message_id")
     private String sourceMessageId;
     @TableField("content_hash")
@@ -59,6 +69,11 @@ public class MemoryItem {
             String content,
             String structuredDataJson,
             double confidence,
+            double importance,
+            int usageCount,
+            Instant lastUsedAt,
+            String sourceType,
+            String sourceReference,
             String sourceMessageId,
             String contentHash,
             String dedupeKey,
@@ -78,6 +93,11 @@ public class MemoryItem {
         this.content = content;
         this.structuredDataJson = structuredDataJson;
         this.confidence = confidence;
+        this.importance = importance;
+        this.usageCount = usageCount;
+        this.lastUsedAt = lastUsedAt;
+        this.sourceType = sourceType;
+        this.sourceReference = sourceReference;
         this.sourceMessageId = sourceMessageId;
         this.contentHash = contentHash;
         this.dedupeKey = dedupeKey;
@@ -89,6 +109,33 @@ public class MemoryItem {
         this.expiresAt = expiresAt;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
+    }
+
+    public MemoryItem(
+            String memoryId,
+            MemoryScopeType scopeType,
+            String scopeId,
+            MemoryType memoryType,
+            String content,
+            String structuredDataJson,
+            double confidence,
+            String sourceMessageId,
+            String contentHash,
+            String dedupeKey,
+            String subject,
+            String predicate,
+            String value,
+            int version,
+            MemoryStatus status,
+            Instant expiresAt,
+            Instant createdAt,
+            Instant updatedAt
+    ) {
+        this(memoryId, scopeType, scopeId, memoryType, content,
+                structuredDataJson, confidence, 0.5, 0, null, "LEGACY",
+                sourceMessageId, sourceMessageId, contentHash, dedupeKey,
+                subject, predicate, value, version, status, expiresAt,
+                createdAt, updatedAt);
     }
 
     public String getMemoryId() { return memoryId; }
@@ -105,6 +152,16 @@ public class MemoryItem {
     public void setStructuredDataJson(String structuredDataJson) { this.structuredDataJson = structuredDataJson; }
     public double getConfidence() { return confidence; }
     public void setConfidence(double confidence) { this.confidence = confidence; }
+    public double getImportance() { return importance; }
+    public void setImportance(double importance) { this.importance = importance; }
+    public int getUsageCount() { return usageCount; }
+    public void setUsageCount(int usageCount) { this.usageCount = usageCount; }
+    public Instant getLastUsedAt() { return lastUsedAt; }
+    public void setLastUsedAt(Instant lastUsedAt) { this.lastUsedAt = lastUsedAt; }
+    public String getSourceType() { return sourceType; }
+    public void setSourceType(String sourceType) { this.sourceType = sourceType; }
+    public String getSourceReference() { return sourceReference; }
+    public void setSourceReference(String sourceReference) { this.sourceReference = sourceReference; }
     public String getSourceMessageId() { return sourceMessageId; }
     public void setSourceMessageId(String sourceMessageId) { this.sourceMessageId = sourceMessageId; }
     public String getContentHash() { return contentHash; }

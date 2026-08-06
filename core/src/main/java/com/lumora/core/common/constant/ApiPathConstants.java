@@ -11,6 +11,7 @@ public final class ApiPathConstants {
     public static final String TASKS = API_PREFIX + "/tasks";
     public static final String MODEL_SETTINGS =
             API_PREFIX + "/model/settings";
+    public static final String MEMORY = API_PREFIX + "/memory";
     public static final String MODEL_LIST = "/models";
     public static final String CHAT_COMPLETIONS =
             API_PREFIX + "/chat/completions";

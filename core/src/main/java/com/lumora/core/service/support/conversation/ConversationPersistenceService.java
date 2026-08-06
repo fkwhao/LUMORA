@@ -53,9 +53,19 @@ public class ConversationPersistenceService {
             String taskId,
             String content
     ) {
+        return prepareNewMessage(taskId, content, null);
+    }
+
+    public ConversationRunContext prepareNewMessage(
+            String taskId,
+            String content,
+            String workspacePath
+    ) {
         // 用户消息和后续模型上下文必须在同一事务内生成，避免消息已落库但上下文不完整。
         ConversationRunContext context = transactionTemplate.execute(
-                status -> prepareNewMessageInTransaction(taskId, content)
+                status -> prepareNewMessageInTransaction(
+                        taskId, content, workspacePath
+                )
         );
         if (context == null) {
             throw new IllegalStateException("无法创建会话");
@@ -68,12 +78,22 @@ public class ConversationPersistenceService {
             String messageId,
             String content
     ) {
+        return prepareRegeneration(taskId, messageId, content, null);
+    }
+
+    public ConversationRunContext prepareRegeneration(
+            String taskId,
+            String messageId,
+            String content,
+            String workspacePath
+    ) {
         // 重新生成会删除旧回答，必须和用户消息更新保持原子性。
         ConversationRunContext context = transactionTemplate.execute(
                 status -> prepareRegenerationInTransaction(
                         taskId,
                         messageId,
-                        content
+                        content,
+                        workspacePath
                 )
         );
         if (context == null) {
@@ -164,7 +184,8 @@ public class ConversationPersistenceService {
      */
     private ConversationRunContext prepareNewMessageInTransaction(
             String taskId,
-            String content
+            String content,
+            String workspacePath
     ) {
         // 1. 确认任务存在，并取得任务唯一会话。
         taskService.getTask(taskId);
@@ -191,7 +212,8 @@ public class ConversationPersistenceService {
                 conversation.getConversationId(),
                 sequence + 1,
                 history,
-                userMessage
+                userMessage,
+                workspacePath
         );
     }
 
@@ -201,7 +223,8 @@ public class ConversationPersistenceService {
     private ConversationRunContext prepareRegenerationInTransaction(
             String taskId,
             String messageId,
-            String content
+            String content,
+            String workspacePath
     ) {
         // 1. 找到并校验允许编辑的最后一条用户消息。
         taskService.getTask(taskId);
@@ -229,7 +252,8 @@ public class ConversationPersistenceService {
                 conversation.getConversationId(),
                 target.getSequence() + 1,
                 precedingMessages,
-                target
+                target,
+                workspacePath
         );
     }
 
@@ -317,7 +341,8 @@ public class ConversationPersistenceService {
             String conversationId,
             int assistantSequence,
             List<ConversationMessage> history,
-            ConversationMessage currentUserMessage
+            ConversationMessage currentUserMessage,
+            String workspacePath
     ) {
         ConversationContextSummary summary = contextSummaryService.latest(
                 conversationId
@@ -346,6 +371,9 @@ public class ConversationPersistenceService {
                         .toList()
         );
         modelMessages.add(toModelMessage(currentUserMessage));
+        String projectScopeId = memoryService.resolveProjectScopeId(
+                workspacePath
+        );
         return new ConversationRunContext(
                 taskId,
                 conversationId,
@@ -354,8 +382,14 @@ public class ConversationPersistenceService {
                 currentUserMessage.getMessageId(),
                 currentUserMessage.getContent(),
                 memoryService.buildPromptSummary(conversationId),
-                memoryService.buildExtractionContext(conversationId),
+                memoryService.buildExtractionContext(
+                        conversationId, workspacePath
+                ),
                 summary == null ? null : summary.getSummaryText(),
+                memoryService.buildPromptCandidates(
+                        conversationId, workspacePath
+                ),
+                projectScopeId,
                 System.nanoTime()
         );
     }

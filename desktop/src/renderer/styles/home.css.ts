@@ -1,4 +1,12 @@
-import { globalStyle } from "@vanilla-extract/css";
+import { globalStyle, keyframes } from "@vanilla-extract/css";
+
+const composerFromBottom = keyframes({
+  from: {
+    opacity: "0.82",
+    transform: "translateY(32vh) scaleX(0.94) scaleY(0.82)",
+  },
+  to: { opacity: "1", transform: "translateY(0) scale(1)" },
+});
 
 globalStyle(".home-layout", {
   display: "grid",
@@ -7,7 +15,7 @@ globalStyle(".home-layout", {
 
 globalStyle(".home-content", {
   display: "flex",
-  width: "min(calc(100% - 64px), 920px)",
+  width: "min(calc(100% - 64px), 777px)",
   height: "100%",
   margin: "0 auto",
   padding: "clamp(72px, 14vh, 148px) 0 42px",
@@ -60,11 +68,18 @@ globalStyle(".home-composer-stack", {
 globalStyle(".goal-composer", {
   position: "relative",
   zIndex: "2",
-  padding: "0 16px 13px",
+  padding: "0 14px 11px",
   border: "1px solid var(--line-strong)",
-  borderRadius: "22px",
-  background: "var(--surface-soft)",
+  borderRadius: "20px",
+  background: "color-mix(in srgb, var(--surface-soft) 88%, transparent)",
+  backdropFilter: "blur(12px)",
   boxShadow: "0 18px 50px rgb(20 25 32 / 8%)",
+});
+
+globalStyle(".home-layout.composer-enter-from-bottom .goal-composer", {
+  animation: `${composerFromBottom} 520ms cubic-bezier(0.22, 1, 0.36, 1) both`,
+  transformOrigin: "bottom center",
+  willChange: "transform, opacity",
 });
 
 globalStyle(".visually-hidden", {
@@ -163,7 +178,7 @@ globalStyle(".goal-composer textarea,\n.follow-up-composer textarea", {
 });
 
 globalStyle(".goal-composer textarea", {
-  minHeight: "92px",
+  minHeight: "80px",
   maxHeight: "220px",
   padding: "15px 2px 8px",
   fontSize: "13px",
@@ -219,8 +234,8 @@ globalStyle(".context-actions button:first-child", {
 
 globalStyle(".submit-task,\n.send-follow-up", {
   display: "grid",
-  width: "36px",
-  height: "36px",
+  width: "32px",
+  height: "32px",
   flex: "0 0 auto",
   padding: "0",
   placeItems: "center",

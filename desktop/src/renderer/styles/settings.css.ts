@@ -902,3 +902,197 @@ globalStyle(".model-config-dialog > p", { margin: "14px 0 0", color: "#fa423e", 
 globalStyle(".model-config-dialog > footer", { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "23px", paddingTop: "18px", borderTop: "1px solid var(--line)" });
 globalStyle(".model-config-dialog > footer button", { minHeight: "34px", padding: "0 13px", color: "var(--ink)", border: "1px solid var(--line-strong)", borderRadius: "8px", background: "transparent", cursor: "pointer", fontSize: "10px" });
 globalStyle(".model-config-dialog > footer button.primary", { color: "var(--surface)", borderColor: "var(--ink)", background: "var(--ink)" });
+
+globalStyle(".personalization-settings", {
+  display: "grid",
+  gridAutoRows: "max-content",
+  width: "min(900px, 100%)",
+  alignContent: "start",
+  rowGap: "42px",
+  padding: "46px clamp(28px, 5vw, 64px) 64px",
+  boxSizing: "border-box",
+});
+
+globalStyle(".personalization-header", {
+  display: "grid",
+  minWidth: "0",
+  gap: "8px",
+});
+
+globalStyle(".personalization-header h1", {
+  margin: "0",
+  color: "var(--ink)",
+  fontSize: "24px",
+  fontWeight: "680",
+  letterSpacing: "-0.035em",
+});
+
+globalStyle(".personalization-header p", {
+  maxWidth: "620px",
+  margin: "0",
+  color: "var(--muted)",
+  fontSize: "11px",
+  lineHeight: "1.65",
+});
+
+globalStyle(".memory-settings-section", {
+  display: "grid",
+  minWidth: "0",
+  gap: "16px",
+});
+
+globalStyle(".memory-settings-heading", {
+  display: "flex",
+  minWidth: "0",
+  alignItems: "center",
+  gap: "11px",
+});
+
+globalStyle(".memory-settings-heading > span", {
+  display: "grid",
+  width: "34px",
+  height: "34px",
+  placeItems: "center",
+  color: "var(--ink)",
+  border: "1px solid var(--line-strong)",
+  borderRadius: "10px",
+  background: "color-mix(in srgb, var(--ink) 4%, transparent)",
+});
+
+globalStyle(".memory-settings-heading h2", {
+  margin: "0",
+  color: "var(--ink)",
+  fontSize: "15px",
+  fontWeight: "670",
+  letterSpacing: "-0.02em",
+});
+
+globalStyle(".memory-settings-heading p", {
+  margin: "4px 0 0",
+  color: "var(--muted)",
+  fontSize: "10px",
+  lineHeight: "1.5",
+});
+
+globalStyle(".memory-settings-card", {
+  overflow: "hidden",
+  border: "1px solid var(--line-strong)",
+  borderRadius: "15px",
+  background: "color-mix(in srgb, var(--surface) 96%, var(--ink) 4%)",
+  boxShadow: "0 14px 38px rgb(0 0 0 / 5%)",
+});
+
+globalStyle(".memory-settings-row", {
+  display: "flex",
+  minHeight: "82px",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "28px",
+  padding: "18px 24px",
+  borderBottom: "1px solid var(--line)",
+});
+
+globalStyle(".memory-settings-row:last-child", {
+  borderBottom: "0",
+});
+
+globalStyle(".memory-settings-row > div", {
+  display: "grid",
+  minWidth: "0",
+  gap: "5px",
+});
+
+globalStyle(".memory-settings-row strong", {
+  color: "var(--ink)",
+  fontSize: "12px",
+  fontWeight: "650",
+});
+
+globalStyle(".memory-settings-row small", {
+  color: "var(--muted)",
+  fontSize: "10px",
+  lineHeight: "1.5",
+});
+
+globalStyle(".memory-switch", {
+  position: "relative",
+  flex: "0 0 auto",
+  width: "44px",
+  height: "25px",
+  padding: "0",
+  border: "0",
+  borderRadius: "999px",
+  background: "color-mix(in srgb, var(--ink) 18%, transparent)",
+  cursor: "pointer",
+  transition: "background 160ms ease, opacity 160ms ease",
+});
+
+globalStyle(".memory-switch span", {
+  position: "absolute",
+  top: "3px",
+  left: "3px",
+  width: "19px",
+  height: "19px",
+  borderRadius: "50%",
+  background: "#f7f8fa",
+  boxShadow: "0 2px 7px rgb(0 0 0 / 25%)",
+  transition: "transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1)",
+});
+
+globalStyle(".memory-switch.enabled", {
+  background: "#2f7dd1",
+});
+
+globalStyle(".memory-switch.enabled span", {
+  transform: "translateX(19px)",
+});
+
+globalStyle(".memory-switch:focus-visible", {
+  outline: "2px solid color-mix(in srgb, #2f7dd1 72%, transparent)",
+  outlineOffset: "3px",
+});
+
+globalStyle(".memory-switch:disabled", {
+  cursor: "not-allowed",
+  opacity: "0.48",
+});
+
+globalStyle(".memory-reset-button", {
+  display: "inline-flex",
+  minHeight: "31px",
+  flex: "0 0 auto",
+  alignItems: "center",
+  gap: "6px",
+  padding: "0 11px",
+  color: "#d84945",
+  border: "1px solid color-mix(in srgb, #d84945 18%, transparent)",
+  borderRadius: "999px",
+  background: "color-mix(in srgb, #d84945 9%, transparent)",
+  cursor: "pointer",
+  fontSize: "10px",
+  fontWeight: "650",
+});
+
+globalStyle(".memory-reset-button:hover", {
+  borderColor: "color-mix(in srgb, #d84945 34%, transparent)",
+  background: "color-mix(in srgb, #d84945 14%, transparent)",
+});
+
+globalStyle(".memory-reset-button:disabled", {
+  cursor: "not-allowed",
+  opacity: "0.45",
+});
+
+globalStyle(".memory-settings-note,.memory-settings-error", {
+  margin: "0 3px",
+  fontSize: "9px",
+  lineHeight: "1.55",
+});
+
+globalStyle(".memory-settings-note", { color: "var(--subtle)" });
+globalStyle(".memory-settings-error", { color: "#d84945" });
+
+globalStyle(".memory-reset-dialog > span", {
+  color: "#d84945",
+  background: "color-mix(in srgb, #d84945 10%, transparent)",
+});

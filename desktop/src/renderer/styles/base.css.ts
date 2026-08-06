@@ -157,17 +157,21 @@ globalStyle(".sidebar-resize-handle", {
 
 globalStyle(".sidebar-resize-handle::after", {
   position: "absolute",
-  top: "0",
-  bottom: "0",
+  top: "50%",
+  bottom: "auto",
   left: "3px",
   width: "1px",
-  background: "transparent",
+  height: "min(62vh, 520px)",
+  background:
+    "linear-gradient(to bottom, transparent 0%, color-mix(in srgb, var(--muted) 18%, transparent) 18%, color-mix(in srgb, var(--muted) 72%, transparent) 48%, color-mix(in srgb, var(--muted) 72%, transparent) 52%, color-mix(in srgb, var(--muted) 18%, transparent) 82%, transparent 100%)",
   content: "\"\"",
-  transition: "background 120ms ease",
+  opacity: "0",
+  transform: "translateY(-50%)",
+  transition: "opacity 120ms ease",
 });
 
 globalStyle(".sidebar-resize-handle:hover::after,\n.resizing-sidebar .sidebar-resize-handle::after", {
-  background: "#aeb5be",
+  opacity: "1",
 });
 
 globalStyle("body.resizing-sidebar", {

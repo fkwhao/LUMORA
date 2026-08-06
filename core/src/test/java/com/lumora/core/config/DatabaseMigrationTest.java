@@ -53,6 +53,7 @@ class DatabaseMigrationTest {
                       'model_configuration',
                       'model_configuration_model',
                       'memory_item',
+                      'application_setting',
                       'conversation_context_summary',
                       'artifact'
                   )
@@ -64,20 +65,26 @@ class DatabaseMigrationTest {
                 Integer.class
         );
 
-        assertThat(businessTableCount).isEqualTo(10);
+        assertThat(businessTableCount).isEqualTo(11);
         assertThat(foreignKeysEnabled).isEqualTo(1);
-        assertThat(applicationChangeSetCount()).isEqualTo(14);
+        assertThat(applicationChangeSetCount()).isEqualTo(18);
         assertThat(taskPlanStepPrimaryKeyColumns())
                 .containsExactly("plan_step_id");
         assertThat(modelConfigurationColumns())
                 .contains("api_format", "is_active");
         assertThat(providerModelColumns())
                 .contains("model_id", "context_window", "max_output_tokens");
+        assertThat(memoryItemColumns()).contains(
+                "importance", "usage_count", "last_used_at",
+                "source_type", "source_reference"
+        );
+        assertThat(memoryEnabledSetting()).isEqualTo("true");
+        assertThat(memoryEnabledCreatedAt()).contains("T").endsWith("Z");
 
         // 对同一数据库重复执行迁移，必须只校验历史而不能再次建表。
         liquibase.afterPropertiesSet();
 
-        assertThat(applicationChangeSetCount()).isEqualTo(14);
+        assertThat(applicationChangeSetCount()).isEqualTo(18);
     }
 
     private Integer applicationChangeSetCount() {
@@ -99,7 +106,11 @@ class DatabaseMigrationTest {
                     '011-conversation-work-log',
                     '012-model-provider',
                     '013-provider-model',
-                    '014-context-compaction-and-artifact'
+                    '014-context-compaction-and-artifact',
+                    '015-active-context-tokens',
+                    '016-memory-lifecycle-and-ranking',
+                    '017-application-setting',
+                    '018-normalize-application-setting-timestamps'
                 )
                 AND AUTHOR = 'lumora'
                 """,
@@ -118,6 +129,35 @@ class DatabaseMigrationTest {
         return jdbcTemplate.query(
                 "PRAGMA table_info(model_configuration_model)",
                 (resultSet, rowNumber) -> resultSet.getString("name")
+        );
+    }
+
+    private java.util.List<String> memoryItemColumns() {
+        return jdbcTemplate.query(
+                "PRAGMA table_info(memory_item)",
+                (resultSet, rowNumber) -> resultSet.getString("name")
+        );
+    }
+
+    private String memoryEnabledSetting() {
+        return jdbcTemplate.queryForObject(
+                """
+                SELECT setting_value
+                FROM application_setting
+                WHERE setting_key = 'memory.enabled'
+                """,
+                String.class
+        );
+    }
+
+    private String memoryEnabledCreatedAt() {
+        return jdbcTemplate.queryForObject(
+                """
+                SELECT created_at
+                FROM application_setting
+                WHERE setting_key = 'memory.enabled'
+                """,
+                String.class
         );
     }
 

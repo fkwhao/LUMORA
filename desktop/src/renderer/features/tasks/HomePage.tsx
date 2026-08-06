@@ -25,6 +25,7 @@ import type { TaskStore } from "./task-store";
 
 interface HomePageProps {
   store: TaskStore;
+  composerMotion?: "from-bottom";
   notify(message: string, tone?: "info" | "success"): void;
 }
 
@@ -35,7 +36,7 @@ const contextActions = [
   { icon: Laptop, label: "应用" },
 ];
 
-export function HomePage({ store, notify }: HomePageProps) {
+export function HomePage({ store, composerMotion, notify }: HomePageProps) {
   const [goal, setGoal] = useState("");
   const [contexts, setContexts] = useState<string[]>([]);
   const [project, setProject] = useState<ProjectDirectory | undefined>(
@@ -93,7 +94,9 @@ export function HomePage({ store, notify }: HomePageProps) {
   }
 
   return (
-    <main className="home-layout">
+    <main
+      className={`home-layout${composerMotion ? ` composer-enter-${composerMotion}` : ""}`}
+    >
       <section className="home-content">
         <header className="home-hero">
           <span className="home-hero-mark" aria-hidden="true">
@@ -209,7 +212,7 @@ export function HomePage({ store, notify }: HomePageProps) {
                 aria-label="开始任务"
                 disabled={!goal.trim() || isCreating}
               >
-                <ArrowUp size={19} strokeWidth={2.2} />
+                <ArrowUp size={17} strokeWidth={2.1} />
               </button>
             </div>
             {contexts.length > 0 && (

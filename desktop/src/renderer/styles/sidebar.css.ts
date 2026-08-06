@@ -7,8 +7,37 @@ const historyTitleMarquee = keyframes({
   },
 });
 
-const historyProcessingSpin = keyframes({
-  to: { transform: "translateY(-50%) rotate(360deg)" },
+const historyPixelDense = keyframes({
+  "0%, 100%": { opacity: "0.72", filter: "brightness(0.92)" },
+  "27%": { opacity: "0.94", filter: "brightness(1.08)" },
+  "61%": { opacity: "0.8", filter: "brightness(0.98)" },
+  "83%": { opacity: "1", filter: "brightness(1.14)" },
+});
+
+const historyPixelHigh = keyframes({
+  "0%, 100%": { opacity: "0.08", transform: "scale(0.82)" },
+  "12%": { opacity: "0.7", transform: "scale(0.96)" },
+  "67%": { opacity: "0.84", transform: "scale(1)" },
+  "84%": { opacity: "0.12", transform: "scale(0.86)" },
+});
+
+const historyPixelMedium = keyframes({
+  "0%, 24%, 100%": { opacity: "0.05", transform: "scale(0.78)" },
+  "34%": { opacity: "0.76", transform: "scale(1)" },
+  "64%": { opacity: "0.58", transform: "scale(0.94)" },
+  "76%": { opacity: "0.07", transform: "scale(0.8)" },
+});
+
+const historyPixelLow = keyframes({
+  "0%, 37%, 100%": { opacity: "0.03", transform: "scale(0.72)" },
+  "46%": { opacity: "0.72", transform: "scale(1)" },
+  "59%": { opacity: "0.1", transform: "scale(0.8)" },
+});
+
+const historyPixelTrace = keyframes({
+  "0%, 45%, 100%": { opacity: "0.02", transform: "scale(0.68)" },
+  "51%": { opacity: "0.66", transform: "scale(1)" },
+  "58%": { opacity: "0.04", transform: "scale(0.74)" },
 });
 
 globalStyle(".sidebar", {
@@ -287,10 +316,138 @@ globalStyle(".history-label", {
   alignItems: "center",
   gap: "6px",
   minHeight: "30px",
-  margin: "11px 8px 4px",
+  margin: "0",
   color: "#555c66",
   fontSize: "14px",
   fontWeight: "500",
+});
+
+globalStyle(".project-group-heading", {
+  position: "relative",
+  display: "flex",
+  minHeight: "30px",
+  alignItems: "center",
+  margin: "11px 4px 4px 8px",
+  borderRadius: "7px",
+});
+
+globalStyle(".project-group-heading .history-label", {
+  minWidth: "0",
+  flex: "1 1 auto",
+  paddingRight: "30px",
+});
+
+globalStyle(".project-group-toggle", {
+  justifyContent: "flex-start",
+  padding: "0 30px 0 0",
+  textAlign: "left",
+  border: "0",
+  background: "transparent",
+  cursor: "pointer",
+});
+
+globalStyle(".project-group-toggle:hover", {
+  color: "var(--ink)",
+});
+
+globalStyle(".project-folder-icon", {
+  flex: "0 0 auto",
+  transition: "color 120ms ease, fill 120ms ease",
+});
+
+globalStyle(".project-folder-icon.is-open", {
+  color: "color-mix(in srgb, var(--ink) 76%, #5f8fcf)",
+  fill: "color-mix(in srgb, #7aa7df 16%, transparent)",
+});
+
+globalStyle(".project-folder-icon.is-closed", {
+  color: "var(--muted)",
+  fill: "none",
+});
+
+globalStyle(".project-task-group.is-collapsed .project-group-heading", {
+  marginBottom: "1px",
+});
+
+globalStyle(".project-task-list", {
+  display: "grid",
+  gridTemplateRows: "0fr",
+  opacity: "0",
+  visibility: "hidden",
+  transform: "translateY(-4px)",
+  transformOrigin: "top",
+  transition:
+    "grid-template-rows 280ms cubic-bezier(0.22, 1, 0.36, 1), opacity 150ms ease, transform 280ms cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 280ms",
+});
+
+globalStyle(".project-task-list-inner", {
+  minHeight: "0",
+  overflow: "hidden",
+});
+
+globalStyle(".project-task-group.is-expanded .project-task-list", {
+  gridTemplateRows: "1fr",
+  opacity: "1",
+  visibility: "visible",
+  transform: "translateY(0)",
+  transitionDelay: "0s",
+});
+
+globalStyle(".sidebar-section-list", {
+  display: "grid",
+  gridTemplateRows: "0fr",
+  opacity: "0",
+  visibility: "hidden",
+  transform: "translateY(-5px)",
+  transformOrigin: "top",
+  transition:
+    "grid-template-rows 300ms cubic-bezier(0.22, 1, 0.36, 1), opacity 170ms ease, transform 300ms cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 300ms",
+});
+
+globalStyle(".sidebar-section-list-inner", {
+  minHeight: "0",
+  overflow: "hidden",
+});
+
+globalStyle(".sidebar-section-list.is-expanded", {
+  gridTemplateRows: "1fr",
+  opacity: "1",
+  visibility: "visible",
+  transform: "translateY(0)",
+  transitionDelay: "0s",
+});
+
+globalStyle(".project-new-conversation-action", {
+  position: "absolute",
+  top: "50%",
+  right: "0",
+  display: "grid",
+  width: "25px",
+  height: "25px",
+  padding: "0",
+  placeItems: "center",
+  color: "var(--muted)",
+  border: "0",
+  borderRadius: "0",
+  background: "transparent",
+  cursor: "pointer",
+  opacity: "0",
+  pointerEvents: "none",
+  transform: "translateY(-50%)",
+  transition: "opacity 120ms ease, color 120ms ease, background 120ms ease",
+});
+
+globalStyle(
+  ".project-group-heading:hover .project-new-conversation-action,\n.project-group-heading:focus-within .project-new-conversation-action",
+  {
+    opacity: "1",
+    pointerEvents: "auto",
+  },
+);
+
+globalStyle(".project-new-conversation-action:hover", {
+  color: "var(--ink)",
+  background: "transparent",
 });
 
 globalStyle(".history-label span", {
@@ -319,6 +476,8 @@ globalStyle(".history-search:focus", {
 });
 
 globalStyle(".history-item", {
+  position: "relative",
+  zIndex: "2",
   flex: "0 0 auto",
   minHeight: "34px",
   padding: "0 9px",
@@ -338,16 +497,69 @@ globalStyle(".history-row", {
   contain: "layout paint",
 });
 
+globalStyle(".history-processing-pixels", {
+  position: "absolute",
+  zIndex: "1",
+  top: "1px",
+  right: "28px",
+  bottom: "1px",
+  left: "2px",
+  display: "grid",
+  gridTemplateColumns: "repeat(40, 4px)",
+  gridTemplateRows: "repeat(6, 4px)",
+  gap: "1px",
+  alignContent: "center",
+  justifyContent: "start",
+  overflow: "hidden",
+  borderRadius: "7px",
+  pointerEvents: "none",
+});
+
+globalStyle(".history-processing-pixels i", {
+  display: "block",
+  width: "4px",
+  height: "4px",
+  borderRadius: "0.8px",
+  background: "#9168d4",
+  boxShadow: "0 0 4px rgb(145 104 212 / 38%)",
+  animationFillMode: "backwards",
+  willChange: "transform, opacity",
+});
+
+globalStyle(".history-processing-pixels i.density-dense", {
+  animation: `${historyPixelDense} 1280ms ease-in-out infinite`,
+});
+
+globalStyle(".history-processing-pixels i.density-high", {
+  animation: `${historyPixelHigh} 1280ms ease-in-out infinite`,
+});
+
+globalStyle(".history-processing-pixels i.density-medium", {
+  animation: `${historyPixelMedium} 1280ms ease-in-out infinite`,
+});
+
+globalStyle(".history-processing-pixels i.density-low", {
+  animation: `${historyPixelLow} 1280ms ease-in-out infinite`,
+});
+
+globalStyle(".history-processing-pixels i.density-trace", {
+  animation: `${historyPixelTrace} 1280ms ease-in-out infinite`,
+});
+
 globalStyle(".project-task-group .history-row", {
   marginLeft: "1px",
 });
 
 globalStyle(".project-task-group .history-row .history-item", {
-  paddingLeft: "33px",
+  paddingLeft: "29px",
 });
 
 globalStyle(".recent-task-group", {
   marginTop: "16px",
+});
+
+globalStyle(".recent-task-group .history-row .history-item", {
+  paddingLeft: "7px",
 });
 
 globalStyle(".history-row:hover,\n.history-row.current", {
@@ -365,15 +577,9 @@ globalStyle(".history-row .history-item", {
   paddingRight: "11px",
 });
 
-globalStyle(
-  ".history-row.processing .history-item",
-  {
-    paddingRight: "34px",
-  },
-);
-
 globalStyle(".history-archive-action", {
   position: "absolute",
+  zIndex: "3",
   top: "50%",
   right: "5px",
   display: "grid",
@@ -421,31 +627,14 @@ globalStyle(".history-title-viewport", {
   whiteSpace: "nowrap",
 });
 
-globalStyle(".history-processing-indicator", {
-  position: "absolute",
-  top: "50%",
-  right: "11px",
-  width: "14px",
-  height: "14px",
-  border: "2px solid color-mix(in srgb, var(--subtle) 38%, transparent)",
-  borderTopColor: "var(--muted)",
-  borderRadius: "50%",
-  animation: `${historyProcessingSpin} 850ms linear infinite`,
-  pointerEvents: "none",
-  transform: "translateY(-50%)",
-});
-
-globalStyle(
-  ".history-row:hover .history-processing-indicator,\n.history-row:focus-within .history-processing-indicator",
-  {
-    opacity: "0",
-  },
-);
-
 globalStyle(".history-title-text", {
   display: "inline-block",
   minWidth: "max-content",
   whiteSpace: "nowrap",
+});
+
+globalStyle(".history-row.processing .history-title-text", {
+  textShadow: "0 1px 2px var(--canvas), 0 0 7px var(--canvas)",
 });
 
 globalStyle(".history-row:hover .history-title-viewport.is-overflowing", {
@@ -458,7 +647,7 @@ globalStyle(".history-row:hover .history-title-viewport.is-overflowing", {
 globalStyle(
   ".history-row:hover .history-title-viewport.is-overflowing .history-title-text",
   {
-    animation: `${historyTitleMarquee} 18s 700ms linear infinite alternate`,
+    animation: `${historyTitleMarquee} var(--history-title-duration, 4s) 420ms linear infinite alternate`,
     willChange: "transform",
   },
 );

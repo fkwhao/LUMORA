@@ -4,6 +4,8 @@ import java.util.Map;
 
 public class AgentMemoryCandidateResponse {
 
+    private String action = "UPSERT";
+    private String storage = "MEMORY";
     private String scope;
     private String type;
     private String retention;
@@ -15,11 +17,16 @@ public class AgentMemoryCandidateResponse {
     private String targetMemoryId;
     private Map<String, Object> structuredData;
     private double confidence;
+    private double importance = 0.5;
     private Long ttlSeconds;
 
     public AgentMemoryCandidateResponse() {
     }
 
+    public String getAction() { return action; }
+    public void setAction(String action) { this.action = action; }
+    public String getStorage() { return storage; }
+    public void setStorage(String storage) { this.storage = storage; }
     public String getScope() { return scope; }
     public void setScope(String scope) { this.scope = scope; }
     public String getType() { return type; }
@@ -42,6 +49,8 @@ public class AgentMemoryCandidateResponse {
     public void setStructuredData(Map<String, Object> structuredData) { this.structuredData = structuredData; }
     public double getConfidence() { return confidence; }
     public void setConfidence(double confidence) { this.confidence = confidence; }
+    public double getImportance() { return importance; }
+    public void setImportance(double importance) { this.importance = importance; }
     public Long getTtlSeconds() { return ttlSeconds; }
     public void setTtlSeconds(Long ttlSeconds) { this.ttlSeconds = ttlSeconds; }
 }

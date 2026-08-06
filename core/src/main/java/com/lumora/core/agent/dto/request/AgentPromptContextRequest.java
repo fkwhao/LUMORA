@@ -14,6 +14,7 @@ public class AgentPromptContextRequest {
     private final List<String> projectInstructions;
     private final List<String> availableTools;
     private final String memorySummary;
+    private final List<AgentMemoryContextRequest> memoryCandidates;
     private final String permissionMode;
     private final String taskId;
     private final String conversationSummary;
@@ -55,10 +56,26 @@ public class AgentPromptContextRequest {
             String taskId,
             String conversationSummary
     ) {
+        this(workspacePath, projectInstructions, availableTools,
+                memorySummary, permissionMode, taskId, conversationSummary,
+                List.of());
+    }
+
+    public AgentPromptContextRequest(
+            String workspacePath,
+            List<String> projectInstructions,
+            List<String> availableTools,
+            String memorySummary,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<AgentMemoryContextRequest> memoryCandidates
+    ) {
         this.workspacePath = workspacePath;
         this.projectInstructions = List.copyOf(projectInstructions);
         this.availableTools = List.copyOf(availableTools);
         this.memorySummary = memorySummary;
+        this.memoryCandidates = List.copyOf(memoryCandidates);
         this.permissionMode = normalizePermissionMode(permissionMode);
         this.taskId = taskId;
         this.conversationSummary = conversationSummary;
@@ -129,6 +146,18 @@ public class AgentPromptContextRequest {
             String taskId,
             String conversationSummary
     ) {
+        return forWorkspace(memorySummary, workspacePath, permissionMode,
+                taskId, conversationSummary, List.of());
+    }
+
+    public static AgentPromptContextRequest forWorkspace(
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<AgentMemoryContextRequest> memoryCandidates
+    ) {
         AgentPromptContextRequest base = forWorkspace(
                 memorySummary, workspacePath, permissionMode
         );
@@ -139,7 +168,8 @@ public class AgentPromptContextRequest {
                 memorySummary,
                 permissionMode,
                 taskId,
-                conversationSummary
+                conversationSummary,
+                memoryCandidates
         );
     }
 
@@ -157,6 +187,10 @@ public class AgentPromptContextRequest {
 
     public String getMemorySummary() {
         return memorySummary;
+    }
+
+    public List<AgentMemoryContextRequest> getMemoryCandidates() {
+        return memoryCandidates;
     }
 
     public String getPermissionMode() {

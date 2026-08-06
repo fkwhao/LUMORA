@@ -11,6 +11,7 @@ import {
   EyeOff,
   LockKeyhole,
   Palette,
+  Sparkles,
   Pencil,
   Plus,
   RefreshCw,
@@ -28,11 +29,14 @@ import type {
   ProviderModel,
   SaveProviderModelInput,
 } from "../../../shared/model-contract";
+import type { LumoraMemoryApi } from "../../../shared/memory-contract";
 import type { TaskSummary } from "../../../shared/task-contract";
 import { AppearancePage } from "./AppearancePage";
+import { PersonalizationPage } from "./PersonalizationPage";
 
 interface SettingsPageProps {
   api?: LumoraModelApi;
+  memoryApi?: LumoraMemoryApi;
   archivedTasks: TaskSummary[];
   onBack(): void;
   onRestoreTask(taskId: string): void;
@@ -50,10 +54,15 @@ const apiFormatOptions: Array<{
   { value: "responses", label: "Responses (/responses)" },
 ];
 
-type SettingsSection = "model" | "appearance" | "archived";
+type SettingsSection =
+  | "model"
+  | "personalization"
+  | "appearance"
+  | "archived";
 
 export function SettingsPage({
   api,
+  memoryApi,
   archivedTasks,
   onBack,
   onRestoreTask,
@@ -70,6 +79,9 @@ export function SettingsPage({
     normalizedSettingsQuery,
   );
   const showAppearance = "外观 主题 颜色 字体".includes(
+    normalizedSettingsQuery,
+  );
+  const showPersonalization = "个性化 记忆 重置记忆".includes(
     normalizedSettingsQuery,
   );
   const showArchived = "已归档任务".includes(normalizedSettingsQuery);
@@ -121,6 +133,14 @@ export function SettingsPage({
               onClick={() => setSection("model")}
             />
           )}
+          {showPersonalization && (
+            <SettingsNavItem
+              active={section === "personalization"}
+              icon={Sparkles}
+              label="个性化"
+              onClick={() => setSection("personalization")}
+            />
+          )}
           {showAppearance && (
             <SettingsNavItem
               active={section === "appearance"}
@@ -138,7 +158,8 @@ export function SettingsPage({
               onClick={() => setSection("archived")}
             />
           )}
-          {!showModel && !showAppearance && !showArchived && (
+          {!showModel && !showPersonalization && !showAppearance
+            && !showArchived && (
             <p className="settings-search-empty">没有匹配的设置</p>
           )}
         </nav>
@@ -158,6 +179,8 @@ export function SettingsPage({
               </div>
             </main>
           )
+        ) : section === "personalization" ? (
+          <PersonalizationPage api={memoryApi} notify={notify} />
         ) : section === "appearance" ? (
           <AppearancePage />
         ) : (

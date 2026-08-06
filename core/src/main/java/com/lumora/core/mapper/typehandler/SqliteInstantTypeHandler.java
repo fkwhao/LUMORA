@@ -8,11 +8,17 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 
 /**
  * 以 ISO-8601 字符串读写 SQLite TEXT 时间列，避免驱动混用毫秒值和日期格式。
  */
 public class SqliteInstantTypeHandler extends BaseTypeHandler<Instant> {
+
+    private static final DateTimeFormatter SQLITE_TIMESTAMP =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     @Override
     public void setNonNullParameter(
@@ -56,7 +62,13 @@ public class SqliteInstantTypeHandler extends BaseTypeHandler<Instant> {
             // 兼容旧版默认处理器写入 SQLite TEXT 列的 epoch 毫秒值。
             return Instant.ofEpochMilli(Long.parseLong(value));
         } catch (NumberFormatException ignored) {
-            return Instant.parse(value);
+            try {
+                return Instant.parse(value);
+            } catch (java.time.format.DateTimeParseException exception) {
+                // SQLite CURRENT_TIMESTAMP 使用 UTC 的 yyyy-MM-dd HH:mm:ss。
+                return LocalDateTime.parse(value, SQLITE_TIMESTAMP)
+                        .toInstant(ZoneOffset.UTC);
+            }
         }
     }
 }
