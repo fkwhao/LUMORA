@@ -60,6 +60,10 @@ export interface ListModelsInput {
 export interface ChatMessage {
   messageId?: string;
   sequence?: number;
+  parentMessageId?: string;
+  messageDepth?: number;
+  activePath?: boolean;
+  threadMessages?: ChatMessage[];
   role: "user" | "assistant";
   content: string;
   model?: string;
@@ -209,6 +213,7 @@ export interface LumoraModelApi {
   listModels(input: ListModelsInput): Promise<string[]>;
   complete(messages: ChatMessage[]): Promise<ChatCompletion>;
   listMessages(taskId: string): Promise<ChatMessage[]>;
+  activateMessageBranch?(taskId: string, messageId: string): Promise<void>;
   compactContext(taskId: string, model?: string): Promise<ContextCompactionResult>;
   readArtifact(
     taskId: string,

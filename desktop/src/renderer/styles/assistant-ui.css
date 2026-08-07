@@ -1,0 +1,241 @@
+@layer theme, base, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+
+@custom-variant dark (&:is([data-theme="dark"] *));
+
+@theme inline {
+  --color-background: var(--aui-background);
+  --color-foreground: var(--aui-foreground);
+  --color-card: var(--aui-card);
+  --color-card-foreground: var(--aui-card-foreground);
+  --color-popover: var(--aui-popover);
+  --color-popover-foreground: var(--aui-popover-foreground);
+  --color-primary: var(--aui-primary);
+  --color-primary-foreground: var(--aui-primary-foreground);
+  --color-secondary: var(--aui-secondary);
+  --color-secondary-foreground: var(--aui-secondary-foreground);
+  --color-muted: var(--aui-muted);
+  --color-muted-foreground: var(--aui-muted-foreground);
+  --color-accent: var(--aui-accent);
+  --color-accent-foreground: var(--aui-accent-foreground);
+  --color-destructive: var(--aui-destructive);
+  --color-border: var(--aui-border);
+  --color-input: var(--aui-input);
+  --color-ring: var(--aui-ring);
+  --radius-sm: calc(var(--aui-radius) - 4px);
+  --radius-md: calc(var(--aui-radius) - 2px);
+  --radius-lg: var(--aui-radius);
+  --radius-xl: calc(var(--aui-radius) + 4px);
+}
+
+:root {
+  --aui-background: #fbfbfa;
+  --aui-foreground: #1c1c1b;
+  --aui-card: #ffffff;
+  --aui-card-foreground: #1c1c1b;
+  --aui-popover: #ffffff;
+  --aui-popover-foreground: #1c1c1b;
+  --aui-primary: #1d1d1c;
+  --aui-primary-foreground: #fafaf8;
+  --aui-secondary: #f1f1ee;
+  --aui-secondary-foreground: #262624;
+  --aui-muted: #f2f2ef;
+  --aui-muted-foreground: #74746f;
+  --aui-accent: #ecece8;
+  --aui-accent-foreground: #20201e;
+  --aui-destructive: #d73a49;
+  --aui-border: #deded9;
+  --aui-input: #d7d7d1;
+  --aui-ring: #8d8d86;
+  --aui-radius: 0.875rem;
+}
+
+[data-theme="dark"] {
+  --aui-background: #181818;
+  --aui-foreground: #f2f2ef;
+  --aui-card: #20201f;
+  --aui-card-foreground: #f2f2ef;
+  --aui-popover: #252523;
+  --aui-popover-foreground: #f2f2ef;
+  --aui-primary: #efefe9;
+  --aui-primary-foreground: #1b1b1a;
+  --aui-secondary: #2b2b29;
+  --aui-secondary-foreground: #efefe9;
+  --aui-muted: #282826;
+  --aui-muted-foreground: #a4a49d;
+  --aui-accent: #32322f;
+  --aui-accent-foreground: #f5f5f0;
+  --aui-destructive: #ff707d;
+  --aui-border: #393936;
+  --aui-input: #41413d;
+  --aui-ring: #8c8c84;
+}
+
+.aui-official-thread-shell {
+  border-right: 0;
+  background: var(--aui-background);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.aui-official-thread-shell .aui-root {
+  isolation: isolate;
+}
+
+.aui-official-thread-shell .aui-root button:focus-visible,
+.aui-official-thread-shell .aui-root textarea:focus-visible {
+  outline: none;
+  outline-offset: 0;
+}
+
+.aui-official-thread-shell .aui-composer-input {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.aui-official-thread-shell .aui-composer-send {
+  color: var(--aui-primary-foreground);
+}
+
+.aui-official-thread-shell .aui-composer-send svg {
+  display: block;
+  color: currentColor;
+  opacity: 1;
+  stroke: currentColor;
+}
+
+.aui-official-thread-shell .aui-composer-cancel {
+  color: var(--aui-primary-foreground) !important;
+  background: var(--aui-primary) !important;
+}
+
+.aui-official-thread-shell .aui-composer-cancel-icon {
+  color: var(--aui-primary-foreground) !important;
+  fill: var(--aui-primary-foreground) !important;
+  stroke: var(--aui-primary-foreground) !important;
+}
+
+.aui-official-thread-shell .aui-edit-composer-submit {
+  color: var(--aui-primary-foreground) !important;
+  background: var(--aui-primary) !important;
+}
+
+.aui-official-thread-shell .aui-edit-composer-submit:hover {
+  background: color-mix(in srgb, var(--aui-primary) 86%, transparent) !important;
+}
+
+.aui-official-thread-shell
+  :is(
+    [data-slot="aui_assistant-message-footer"],
+    [data-slot="aui_user-message-footer"]
+  ) {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+.aui-official-thread-shell
+  :is(
+    [data-slot="aui_assistant-message-root"],
+    [data-slot="aui_user-message-root"]
+  ):is(:hover, :focus-within)
+  :is(
+    [data-slot="aui_assistant-message-footer"],
+    [data-slot="aui_user-message-footer"]
+  ) {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.aui-official-thread-shell [data-slot="aui_message-group"] {
+  gap: 18px;
+}
+
+.aui-official-thread-shell .aui-thread-viewport-footer {
+  z-index: 20;
+  padding-top: 12px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in oklab, var(--aui-background) 0%, transparent),
+    var(--aui-background) 20px
+  );
+}
+
+.permission-popover > button.is-selected:not(.is-dangerous),
+.model-picker-popover > button.is-selected {
+  background: var(--aui-accent);
+  color: var(--aui-accent-foreground);
+}
+
+.permission-popover > button.is-dangerous {
+  color: #d85f1b;
+}
+
+.permission-popover > button.is-dangerous.is-selected {
+  background: rgb(255 122 47 / 11%);
+  color: #c95110;
+}
+
+[data-theme="dark"] .permission-popover > button.is-dangerous {
+  color: #ff9a60;
+}
+
+[data-theme="dark"] .permission-popover > button.is-dangerous.is-selected {
+  background: rgb(255 122 47 / 14%);
+  color: #ffad7d;
+}
+
+.lumora-processing-shimmer {
+  display: inline-block;
+  background: linear-gradient(
+    100deg,
+    var(--aui-muted-foreground) 18%,
+    var(--aui-foreground) 46%,
+    var(--aui-muted-foreground) 74%
+  );
+  background-size: 220% 100%;
+  background-clip: text;
+  color: transparent;
+  font-size: 13px;
+  font-weight: 560;
+  animation: lumora-processing-sweep 1.35s linear infinite;
+}
+
+.lumora-processing-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--aui-muted-foreground);
+}
+
+.lumora-processing-loader {
+  flex: none;
+  animation: lumora-processing-spin 0.6s linear infinite;
+}
+
+@keyframes lumora-processing-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes lumora-processing-sweep {
+  to {
+    background-position: -220% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lumora-processing-shimmer {
+    color: var(--aui-muted-foreground);
+    animation: none;
+  }
+
+  .lumora-processing-loader {
+    animation: none;
+  }
+}

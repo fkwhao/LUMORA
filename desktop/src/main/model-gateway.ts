@@ -32,6 +32,7 @@ export interface ModelGateway {
   listModels(input: ListModelsInput): Promise<string[]>;
   complete(messages: ChatMessage[]): Promise<ChatCompletion>;
   listMessages(taskId: string): Promise<ChatMessage[]>;
+  activateMessageBranch(taskId: string, messageId: string): Promise<void>;
   compactContext(taskId: string, model?: string): Promise<ContextCompactionResult>;
   readArtifact(taskId: string, artifactId: string, offset?: number, limit?: number): Promise<ArtifactChunk>;
   decideToolApproval(

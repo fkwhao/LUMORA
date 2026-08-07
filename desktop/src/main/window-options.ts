@@ -18,11 +18,11 @@ export function createMainWindowOptions(
     minWidth: 1100,
     minHeight: 720,
     show: false,
-    backgroundColor: "#f1f2f4",
+    backgroundColor: "#ffffff",
     autoHideMenuBar: true,
     titleBarStyle: "hidden",
     titleBarOverlay: {
-      color: "#f1f2f4",
+      color: "#ffffff",
       symbolColor: "#555b64",
       height: 32,
     },

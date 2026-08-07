@@ -200,6 +200,73 @@ describe("Java REST model gateway", () => {
     expect(JSON.parse(receivedBody)).toEqual({ content: "更新后的问题" });
   });
 
+  it("returns the active path while retaining sibling branches for Previous", async () => {
+    const baseUrl = await listen(async () => [
+      {
+        messageId: "user-old",
+        sequence: 1,
+        messageDepth: 1,
+        activePath: false,
+        role: "user",
+        content: "old question",
+      },
+      {
+        messageId: "user-new",
+        sequence: 3,
+        messageDepth: 1,
+        activePath: true,
+        role: "user",
+        content: "new question",
+      },
+      {
+        messageId: "answer-new",
+        sequence: 4,
+        parentMessageId: "user-new",
+        messageDepth: 2,
+        activePath: true,
+        role: "assistant",
+        content: "new answer",
+      },
+    ]);
+    const gateway = new RestModelGateway({
+      baseUrl,
+      sessionToken: "test-token",
+    });
+
+    const messages = await gateway.listMessages("task-1");
+
+    expect(messages.map((message) => message.messageId)).toEqual([
+      "user-new",
+      "answer-new",
+    ]);
+    expect(messages[0]?.threadMessages?.map((message) => message.messageId)).toEqual([
+      "user-old",
+      "user-new",
+      "answer-new",
+    ]);
+  });
+
+  it("activates a persisted Previous branch through Java Core", async () => {
+    let receivedPath = "";
+    let receivedMethod = "";
+    const baseUrl = await listen(async (request) => {
+      receivedPath = request.url ?? "";
+      receivedMethod = request.method ?? "";
+      return { activated: true };
+    });
+    const gateway = new RestModelGateway({
+      baseUrl,
+      sessionToken: "test-token",
+    });
+
+    await gateway.activateMessageBranch("task/1", "message/2");
+
+    expect(receivedMethod).toBe("POST");
+    expect(receivedPath).toBe(
+      "/api/v1/tasks/task%2F1/messages/message%2F2/activate",
+    );
+  });
+
   it("notifies Java Core when a model stream is cancelled", async () => {
     let resolveCancelled!: (path: string) => void;
     const cancelled = new Promise<string>((resolve) => {

@@ -7,6 +7,7 @@ import {
   Minimize2,
   PackageOpen,
   TerminalSquare,
+  LoaderCircle,
 } from "lucide-react";
 
 import type { WorkLogItem } from "../../../shared/model-contract";
@@ -41,12 +42,18 @@ export const AgentRunSummary = memo(function AgentRunSummary({
   onOpenArtifact,
 }: AgentRunSummaryProps) {
   const [expanded, setExpanded] = useState(running);
-  const [elapsedMs, setElapsedMs] = useState(durationMs ?? 0);
+  const [elapsedMs, setElapsedMs] = useState(() =>
+    running && startedAt
+      ? Math.max(0, Date.now() - startedAt)
+      : durationMs ?? 0,
+  );
   const wasRunning = useRef(running);
   const phases = useMemo(
     () => buildWorkPhases(workLog.length > 0 ? workLog : taskEventsAsWorkLog(events)),
     [events, workLog],
   );
+  const hasDetails = phases.length > 0;
+  const label = summaryLabel(running, stopped, elapsedMs, durationMs);
 
   useEffect(() => {
     if (!running) {
@@ -54,7 +61,7 @@ export const AgentRunSummary = memo(function AgentRunSummary({
       return;
     }
     const started = startedAt ?? Date.now();
-    const updateElapsed = () => setElapsedMs(Date.now() - started);
+    const updateElapsed = () => setElapsedMs(Math.max(0, Date.now() - started));
     updateElapsed();
     const timer = window.setInterval(updateElapsed, 500);
     return () => window.clearInterval(timer);
@@ -72,17 +79,32 @@ export const AgentRunSummary = memo(function AgentRunSummary({
   return (
     <section className={`agent-run${expanded ? " expanded" : ""}`}>
       <div className="agent-run-heading">
-        <button
-          className={`agent-run-toggle${running ? " is-running" : ""}`}
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
-        >
-          <span>{summaryLabel(running, stopped, elapsedMs, durationMs)}</span>
-          <ChevronRight size={15} />
-        </button>
+        {running ? (
+          <div
+            aria-label={label}
+            className="agent-run-toggle is-running is-static"
+            role="status"
+          >
+            <LoaderCircle aria-hidden className="agent-run-loader" size={13} />
+            <span>{label}</span>
+          </div>
+        ) : hasDetails ? (
+          <button
+            className="agent-run-toggle"
+            type="button"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((current) => !current)}
+          >
+            <span>{label}</span>
+            <ChevronRight className="agent-run-chevron" size={15} />
+          </button>
+        ) : (
+          <div className="agent-run-toggle is-static">
+            <span>{label}</span>
+          </div>
+        )}
       </div>
-      <div className="agent-run-events" aria-hidden={!expanded}>
+      {hasDetails && <div className="agent-run-events" aria-hidden={!expanded}>
         <div className="agent-run-events-inner">
           {phases.map((phase, index) => (
             <WorkPhaseEntry
@@ -93,13 +115,8 @@ export const AgentRunSummary = memo(function AgentRunSummary({
               phase={phase}
             />
           ))}
-          {phases.length === 0 && (
-            <p className={`work-log-placeholder${running ? " shimmer-text" : ""}`}>
-              {running ? "正在准备工作环境" : stopped ? "已停止生成" : "回答生成完成"}
-            </p>
-          )}
         </div>
-      </div>
+      </div>}
     </section>
   );
 });
@@ -367,10 +384,14 @@ function stringMetadata(item: WorkLogItem, key: string) {
 
 function formatDuration(durationMs: number, minimumOne = true): string {
   if (durationMs < 60_000) {
-    const seconds = Math.round(durationMs / 1000);
+    const seconds = minimumOne
+      ? Math.round(durationMs / 1000)
+      : Math.floor(durationMs / 1000);
     return `${minimumOne ? Math.max(1, seconds) : Math.max(0, seconds)}s`;
   }
   const minutes = Math.floor(durationMs / 60_000);
-  const seconds = Math.round((durationMs % 60_000) / 1000);
+  const seconds = minimumOne
+    ? Math.round((durationMs % 60_000) / 1000)
+    : Math.floor((durationMs % 60_000) / 1000);
   return `${minutes}m ${seconds}s`;
 }

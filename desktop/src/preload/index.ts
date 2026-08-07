@@ -85,6 +85,12 @@ const api: LumoraApi = {
       ipcRenderer.invoke("model:complete", messages),
     listMessages: (taskId) =>
       ipcRenderer.invoke("model:list-messages", validateTaskId(taskId)),
+    activateMessageBranch: (taskId, messageId) =>
+      ipcRenderer.invoke(
+        "model:activate-message-branch",
+        validateTaskId(taskId),
+        validateMessageId(messageId),
+      ),
     compactContext: (taskId, model) =>
       ipcRenderer.invoke(
         "model:compact-context",

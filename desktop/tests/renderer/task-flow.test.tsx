@@ -1,4 +1,10 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { App } from "../../src/renderer/App";
@@ -104,14 +110,32 @@ describe("visible task flow", () => {
       /背景信息窗口：约 0% 已用已用约 \d+ 标记，共 128k/,
     );
     const followUpInput = screen.getByRole("textbox", { name: "继续任务" });
-    fireEvent.click(screen.getByRole("button", { name: "选择权限模式" }));
-    expect(screen.getByText("应如何批准 LUMORA 操作？")).toBeVisible();
+    const permissionTrigger = screen.getByRole("button", {
+      name: "选择权限模式",
+    });
+    fireEvent.click(permissionTrigger);
+    await waitFor(() =>
+      expect(screen.getByText("应如何批准 LUMORA 操作？")).toBeVisible(),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitemradio", { name: /替我审批/ }),
+    );
+    await waitFor(() => expect(permissionTrigger).toHaveTextContent("替我审批"));
+    expect(
+      screen.queryByText("应如何批准 LUMORA 操作？"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(permissionTrigger);
+    await waitFor(() =>
+      expect(screen.getByText("应如何批准 LUMORA 操作？")).toBeVisible(),
+    );
     fireEvent.pointerDown(followUpInput);
     expect(
       screen.queryByText("应如何批准 LUMORA 操作？"),
     ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "添加上下文" }));
-    expect(screen.getByText("设置要持续追求的目标")).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByText("设置要持续追求的目标")).toBeVisible(),
+    );
     fireEvent.pointerDown(followUpInput);
     expect(
       screen.queryByText("设置要持续追求的目标"),

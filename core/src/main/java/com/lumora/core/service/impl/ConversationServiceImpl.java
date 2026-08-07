@@ -63,6 +63,14 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     @Override
+    public void activateBranch(String taskId, String messageId) {
+        if (activeRuns.containsKey(taskId)) {
+            throw new IllegalStateException("生成回复时不能切换分支");
+        }
+        persistenceService.activateBranch(taskId, messageId);
+    }
+
+    @Override
     public void streamMessage(
             String taskId,
             String content,

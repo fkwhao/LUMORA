@@ -60,15 +60,14 @@ export function WindowChrome({
           <ArrowRight size={17} strokeWidth={1.8} />
         </button>
       </div>
-      {!sidebarCollapsed && (
-        <div
-          className="sidebar-resize-handle"
-          role="separator"
-          aria-label="调整侧边栏宽度"
-          aria-orientation="vertical"
-          onPointerDown={onResizeStart}
-        />
-      )}
+      <div
+        aria-hidden={sidebarCollapsed || undefined}
+        aria-label={sidebarCollapsed ? undefined : "调整侧边栏宽度"}
+        aria-orientation={sidebarCollapsed ? undefined : "vertical"}
+        className="sidebar-resize-handle"
+        role={sidebarCollapsed ? undefined : "separator"}
+        onPointerDown={onResizeStart}
+      />
     </>
   );
 }

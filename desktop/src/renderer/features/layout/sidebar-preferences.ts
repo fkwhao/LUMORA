@@ -2,6 +2,7 @@ import {
   DEFAULT_SIDEBAR_WIDTH,
   MAX_SIDEBAR_WIDTH,
   MIN_SIDEBAR_WIDTH,
+  SIDEBAR_COLLAPSE_DRAG_THRESHOLD,
 } from "../../constants/layout";
 import {
   SIDEBAR_COLLAPSED_STORAGE_KEY,
@@ -59,4 +60,8 @@ export function clampSidebarWidth(width: number): number {
     MAX_SIDEBAR_WIDTH,
     Math.max(MIN_SIDEBAR_WIDTH, Math.round(width)),
   );
+}
+
+export function shouldCollapseSidebarOnDrag(width: number): boolean {
+  return width <= SIDEBAR_COLLAPSE_DRAG_THRESHOLD;
 }

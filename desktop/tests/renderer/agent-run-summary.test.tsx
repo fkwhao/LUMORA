@@ -1,7 +1,12 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentRunSummary } from "../../src/renderer/features/tasks/AgentRunSummary";
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe("AgentRunSummary", () => {
   it("reveals a semantic phase and its shell script on demand", () => {
@@ -64,6 +69,11 @@ describe("AgentRunSummary", () => {
       />,
     );
 
+    expect(screen.getByRole("status", { name: /正在处理/ })).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: /正在处理/ }),
+    ).not.toBeInTheDocument();
+
     expect(screen.getByRole("button", { name: /正在搜索 \*\*\/\*/ })).toBeInTheDocument();
     expect(screen.getByText("调用参数").closest(".tool-call-detail-region"))
       .toHaveAttribute("aria-hidden", "true");
@@ -71,6 +81,41 @@ describe("AgentRunSummary", () => {
     fireEvent.click(screen.getByRole("button", { name: /正在搜索 \*\*\/\*/ }));
     expect(screen.getByText("调用参数").closest(".tool-call-detail-region"))
       .toHaveAttribute("aria-hidden", "false");
+  });
+
+  it("shows a direct answer duration without an empty disclosure", () => {
+    render(
+      <AgentRunSummary
+        durationMs={1_500}
+        running={false}
+        workLog={[]}
+      />,
+    );
+
+    expect(screen.getByText(/已处理 2s/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: /已处理/ })).not.toBeInTheDocument();
+  });
+
+  it("starts from the real elapsed time and does not round a running second up", () => {
+    vi.spyOn(Date, "now").mockReturnValue(10_000);
+
+    render(
+      <AgentRunSummary
+        running
+        startedAt={4_100}
+        workLog={[
+          {
+            itemId: "tool-running-timer",
+            kind: "tool",
+            status: "running",
+            toolName: "list_files",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("status", { name: /正在处理 5s/ })).toBeVisible();
+    expect(screen.queryByText(/正在处理 0s/)).not.toBeInTheDocument();
   });
 
   it("presents large-file search and patch calls as file work", () => {

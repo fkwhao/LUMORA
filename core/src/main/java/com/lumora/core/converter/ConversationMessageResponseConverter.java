@@ -15,6 +15,9 @@ public class ConversationMessageResponseConverter {
         return new ConversationMessageResponse(
                 message.getMessageId(),
                 message.getSequence(),
+                message.getParentMessageId(),
+                message.getMessageDepth(),
+                message.isActivePath(),
                 message.getRole().name().toLowerCase(),
                 message.getContent(),
                 message.getModel(),

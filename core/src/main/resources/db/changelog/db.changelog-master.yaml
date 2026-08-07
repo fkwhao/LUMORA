@@ -163,3 +163,12 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 019-conversation-message-branches
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V19__conversation_message_branches.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

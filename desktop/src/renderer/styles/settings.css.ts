@@ -11,14 +11,13 @@ globalStyle(".settings-shell", {
   width: "100%",
   height: "100%",
   minWidth: "980px",
-  paddingTop: "32px",
+  paddingTop: "33px",
   overflow: "hidden",
   background: "var(--canvas)",
-  transition: "grid-template-columns 220ms cubic-bezier(0.2, 0.75, 0.25, 1)",
 });
 
 globalStyle(".sidebar-collapsed .settings-shell", {
-  gridTemplateColumns: "0 minmax(0, 1fr)",
+  gridTemplateColumns: "var(--sidebar-width) minmax(0, 1fr)",
 });
 
 globalStyle(".settings-sidebar", {

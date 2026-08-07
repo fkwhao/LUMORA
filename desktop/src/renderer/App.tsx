@@ -37,6 +37,7 @@ import {
   loadSidebarWidth,
   saveSidebarCollapsed,
   saveSidebarWidth,
+  shouldCollapseSidebarOnDrag,
 } from "./features/layout/sidebar-preferences";
 
 interface AppProps {
@@ -268,14 +269,29 @@ function ConnectedApp({
     const startX = event.clientX;
     const startWidth = sidebarWidth;
     let currentWidth = sidebarWidth;
+    let dragCollapsed = sidebarCollapsed;
+    let resizing = true;
     let resizeFrame: number | undefined;
     const shell = shellRef.current;
 
     document.body.classList.add("resizing-sidebar");
-    const handleMove = (moveEvent: PointerEvent) => {
-      currentWidth = clampSidebarWidth(
-        startWidth + moveEvent.clientX - startX,
-      );
+    function handleMove(moveEvent: PointerEvent) {
+      const requestedWidth = startWidth + moveEvent.clientX - startX;
+      currentWidth = clampSidebarWidth(requestedWidth);
+      const nextCollapsed = shouldCollapseSidebarOnDrag(requestedWidth);
+      if (nextCollapsed !== dragCollapsed) {
+        dragCollapsed = nextCollapsed;
+        setSidebarCollapsed(nextCollapsed);
+        saveSidebarCollapsed(nextCollapsed);
+      }
+      if (nextCollapsed) {
+        if (resizeFrame !== undefined) {
+          window.cancelAnimationFrame(resizeFrame);
+          resizeFrame = undefined;
+        }
+        shell?.style.setProperty("--sidebar-width", `${currentWidth}px`);
+        return;
+      }
       if (resizeFrame !== undefined) {
         return;
       }
@@ -283,8 +299,13 @@ function ConnectedApp({
         resizeFrame = undefined;
         shell?.style.setProperty("--sidebar-width", `${currentWidth}px`);
       });
-    };
-    const stopResize = () => {
+    }
+    function stopResize() {
+      finishResize();
+    }
+    function finishResize() {
+      if (!resizing) return;
+      resizing = false;
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", stopResize);
       window.removeEventListener("pointercancel", stopResize);
@@ -296,7 +317,7 @@ function ConnectedApp({
       setSidebarWidth(currentWidth);
       saveSidebarWidth(currentWidth);
       stopSidebarResizeRef.current = () => undefined;
-    };
+    }
     stopSidebarResizeRef.current = stopResize;
     window.addEventListener("pointermove", handleMove);
     window.addEventListener("pointerup", stopResize);

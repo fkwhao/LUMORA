@@ -7,6 +7,7 @@ import {
   loadAppearancePreferences,
   watchSystemTheme,
 } from "./features/appearance/appearance-preferences";
+import "./styles/assistant-ui.css";
 import "./styles";
 
 // 在 React 首次绘制前应用本地外观，避免启动时先闪出默认浅色主题。

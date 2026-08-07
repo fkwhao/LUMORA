@@ -57,6 +57,7 @@ export interface TaskState {
     content: string,
     options?: ChatRequestOptions,
   ): Promise<void>;
+  switchMessageBranch(messageId: string): Promise<void>;
   decideApproval(decision: ApprovalDecision): Promise<TaskSnapshot>;
   decideToolApproval(decision: ToolApprovalDecision): Promise<void>;
   archiveTask(taskId: string): void;
@@ -457,6 +458,14 @@ export function createTaskStore(
       unsubscribeChat?.();
       unsubscribeChat = undefined;
       await get().loadRecentTasks();
+    },
+
+    async switchMessageBranch(messageId) {
+      const taskId = get().activeTask?.taskId;
+      if (!taskId || !modelApi?.activateMessageBranch) return;
+      await modelApi.activateMessageBranch(taskId, messageId);
+      const messages = await modelApi.listMessages(taskId);
+      set({ messages });
     },
 
     async decideApproval(decision) {

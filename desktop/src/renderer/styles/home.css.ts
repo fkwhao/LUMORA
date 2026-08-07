@@ -8,6 +8,42 @@ const composerFromBottom = keyframes({
   to: { opacity: "1", transform: "translateY(0) scale(1)" },
 });
 
+const homePixelTrack = keyframes({
+  from: { transform: "translateX(0)" },
+  to: { transform: "translateX(-1440px)" },
+});
+
+const homePixelClouds = keyframes({
+  from: { transform: "translateX(0)" },
+  to: { transform: "translateX(-1440px)" },
+});
+
+const homePixelScenery = keyframes({
+  from: { transform: "translateX(0)" },
+  to: { transform: "translateX(-1440px)" },
+});
+
+const homePixelBlob = keyframes({
+  "0%, 100%": { transform: "scale(1, 1) translateY(0)" },
+  "50%": { transform: "scale(1.035, 0.965) translateY(1px)" },
+});
+
+const homePixelStatus = keyframes({
+  "0%, 49%": { opacity: "1" },
+  "50%, 100%": { opacity: "0.38" },
+});
+
+const homePixelJump = keyframes({
+  "0%": { transform: "translateY(0) scale(1, 1)" },
+  "12%": { transform: "translateY(3px) scale(1.2, 0.72)" },
+  "28%": { transform: "translateY(-20px) scale(0.76, 1.34)" },
+  "48%": { transform: "translateY(-50px) scale(0.86, 1.18)" },
+  "62%": { transform: "translateY(-44px) scale(1.04, 0.94)" },
+  "78%": { transform: "translateY(-18px) scale(0.9, 1.12)" },
+  "90%": { transform: "translateY(2px) scale(1.22, 0.7)" },
+  "100%": { transform: "translateY(0) scale(1, 1)" },
+});
+
 globalStyle(".home-layout", {
   display: "grid",
   overflow: "hidden",
@@ -15,10 +51,10 @@ globalStyle(".home-layout", {
 
 globalStyle(".home-content", {
   display: "flex",
-  width: "min(calc(100% - 64px), 777px)",
+  width: "min(calc(100% - 64px), 860px)",
   height: "100%",
   margin: "0 auto",
-  padding: "clamp(72px, 14vh, 148px) 0 42px",
+  padding: "clamp(34px, 7vh, 74px) 0 42px",
   flexDirection: "column",
   alignItems: "stretch",
   overflow: "auto",
@@ -30,16 +66,102 @@ globalStyle(".home-hero", {
   textAlign: "center",
 });
 
-globalStyle(".home-hero-mark", {
-  display: "grid",
-  width: "50px",
-  height: "50px",
-  marginBottom: "22px",
-  placeItems: "center",
+globalStyle(".home-pixel-panel", {
+  position: "relative",
+  width: "100%",
+  height: "clamp(154px, 23vh, 208px)",
+  marginBottom: "30px",
+  padding: "0",
+  overflow: "hidden",
+  color: "var(--ink)",
+  border: "0",
+  borderRadius: "0",
+  background: "transparent",
+  boxShadow: "none",
+  cursor: "pointer",
+  font: "inherit",
+  textAlign: "left",
+  WebkitMaskImage:
+    "linear-gradient(90deg, transparent 0%, #000 7%, #000 93%, transparent 100%)",
+  maskImage:
+    "linear-gradient(90deg, transparent 0%, #000 7%, #000 93%, transparent 100%)",
+});
+
+globalStyle(".home-pixel-panel::after", {
+  display: "none",
+});
+
+globalStyle(".home-pixel-panel:focus-visible", {
+  outline: "1px dashed var(--muted)",
+  outlineOffset: "5px",
+});
+
+globalStyle(".home-pixel-panel-heading", {
+  position: "absolute",
+  zIndex: "2",
+  top: "14px",
+  right: "18px",
+  left: "18px",
+  display: "flex",
+  justifyContent: "space-between",
   color: "var(--muted)",
-  border: "1px solid var(--line)",
-  borderRadius: "18px",
-  background: "var(--surface-soft)",
+  fontFamily: "var(--code-font, ui-monospace, monospace)",
+  fontSize: "9px",
+  fontWeight: "650",
+  letterSpacing: "0.08em",
+});
+
+globalStyle(".home-pixel-run-status::before", {
+  display: "inline-block",
+  width: "5px",
+  height: "5px",
+  marginRight: "6px",
+  background: "currentColor",
+  content: '\"\"',
+  animation: `${homePixelStatus} 800ms steps(1, end) infinite`,
+});
+
+globalStyle(".home-pixel-artwork", {
+  position: "absolute",
+  right: "14px",
+  bottom: "9px",
+  left: "14px",
+  width: "calc(100% - 28px)",
+  height: "calc(100% - 46px)",
+});
+
+globalStyle(".home-pixel-bands", {
+  opacity: "0.22",
+});
+
+globalStyle(".home-pixel-clouds", {
+  animation: `${homePixelClouds} 36s linear infinite`,
+});
+
+globalStyle(".home-pixel-scenery", {
+  animation: `${homePixelScenery} 24s linear infinite`,
+});
+
+globalStyle(".home-pixel-track", {
+  animation: `${homePixelTrack} 12.8s linear infinite`,
+});
+
+globalStyle(".home-pixel-blob", {
+  animation: `${homePixelBlob} 720ms steps(2, end) infinite`,
+  transformBox: "fill-box",
+  transformOrigin: "center bottom",
+});
+
+globalStyle(".home-pixel-panel.is-jumping .home-pixel-blob", {
+  animation: `${homePixelJump} 820ms steps(1, end) 1`,
+});
+
+globalStyle(".home-pixel-blob-trail > rect", {
+  animation: `${homePixelStatus} 560ms steps(1, end) infinite`,
+});
+
+globalStyle(".home-pixel-blob-trail .trail-two", {
+  animationDelay: "-280ms",
 });
 
 globalStyle(".home-hero h1", {
@@ -62,7 +184,7 @@ globalStyle(".home-hero p", {
 
 globalStyle(".home-composer-stack", {
   position: "relative",
-  marginTop: "clamp(54px, 10vh, 92px)",
+  marginTop: "clamp(34px, 6vh, 54px)",
 });
 
 globalStyle(".goal-composer", {
@@ -297,4 +419,25 @@ globalStyle(".home-privacy-note", {
   color: "var(--subtle)",
   fontSize: "9px",
   textAlign: "center",
+});
+
+globalStyle(".home-pixel-panel", {
+  "@media": {
+    "(max-width: 720px)": {
+      height: "132px",
+      marginBottom: "24px",
+      borderRadius: "0",
+    },
+    "(prefers-reduced-motion: reduce)": {
+      animation: "none",
+    },
+  },
+});
+
+globalStyle(".home-pixel-clouds, .home-pixel-scenery, .home-pixel-track, .home-pixel-blob, .home-pixel-blob-trail > rect, .home-pixel-run-status::before", {
+  "@media": {
+    "(prefers-reduced-motion: reduce)": {
+      animation: "none",
+    },
+  },
 });

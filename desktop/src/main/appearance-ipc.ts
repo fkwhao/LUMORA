@@ -27,9 +27,9 @@ function applyNativeAppearance(
     return;
   }
   const dark = theme === "dark";
-  window.setBackgroundColor(dark ? "#18191b" : "#f1f2f4");
+  window.setBackgroundColor(dark ? "#181818" : "#ffffff");
   window.setTitleBarOverlay({
-    color: dark ? "#18191b" : "#f1f2f4",
+    color: dark ? "#181818" : "#ffffff",
     symbolColor: dark ? "#c4c8ce" : "#555b64",
     height: 32,
   });

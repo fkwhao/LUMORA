@@ -148,7 +148,22 @@ export class RestModelGateway implements ModelGateway {
     const messages = await this.request<ChatMessage[]>(
       `/api/v1/tasks/${encodeURIComponent(taskId)}/messages`,
     );
-    return messages.map(hydrateWorkLog);
+    const threadMessages = messages.map(hydrateWorkLog);
+    return threadMessages
+      .filter((message) => message.activePath !== false)
+      .sort(
+        (left, right) =>
+          (left.messageDepth ?? left.sequence ?? 0) -
+          (right.messageDepth ?? right.sequence ?? 0),
+      )
+      .map((message) => ({ ...message, threadMessages }));
+  }
+
+  async activateMessageBranch(taskId: string, messageId: string): Promise<void> {
+    await this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/messages/${encodeURIComponent(messageId)}/activate`,
+      { method: "POST" },
+    );
   }
 
   compactContext(taskId: string, model?: string): Promise<ContextCompactionResult> {

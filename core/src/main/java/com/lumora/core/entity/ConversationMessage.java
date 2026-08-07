@@ -17,6 +17,12 @@ public class ConversationMessage {
     private String conversationId;
     @TableField("sequence")
     private int sequence;
+    @TableField("parent_message_id")
+    private String parentMessageId;
+    @TableField("message_depth")
+    private int messageDepth;
+    @TableField("active_path")
+    private boolean activePath;
     @TableField("role")
     private ChatMessageRole role;
     @TableField("content")
@@ -120,6 +126,19 @@ public class ConversationMessage {
 
     public void setSequence(int sequence) {
         this.sequence = sequence;
+    }
+
+    public String getParentMessageId() { return parentMessageId; }
+    public void setParentMessageId(String parentMessageId) {
+        this.parentMessageId = parentMessageId;
+    }
+    public int getMessageDepth() { return messageDepth; }
+    public void setMessageDepth(int messageDepth) {
+        this.messageDepth = messageDepth;
+    }
+    public boolean isActivePath() { return activePath; }
+    public void setActivePath(boolean activePath) {
+        this.activePath = activePath;
     }
 
     public ChatMessageRole getRole() {

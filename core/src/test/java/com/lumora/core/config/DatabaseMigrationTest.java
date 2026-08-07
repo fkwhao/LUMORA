@@ -67,7 +67,10 @@ class DatabaseMigrationTest {
 
         assertThat(businessTableCount).isEqualTo(11);
         assertThat(foreignKeysEnabled).isEqualTo(1);
-        assertThat(applicationChangeSetCount()).isEqualTo(18);
+        assertThat(applicationChangeSetCount()).isEqualTo(19);
+        assertThat(conversationMessageColumns()).contains(
+                "parent_message_id", "message_depth", "active_path"
+        );
         assertThat(taskPlanStepPrimaryKeyColumns())
                 .containsExactly("plan_step_id");
         assertThat(modelConfigurationColumns())
@@ -84,7 +87,7 @@ class DatabaseMigrationTest {
         // 对同一数据库重复执行迁移，必须只校验历史而不能再次建表。
         liquibase.afterPropertiesSet();
 
-        assertThat(applicationChangeSetCount()).isEqualTo(18);
+        assertThat(applicationChangeSetCount()).isEqualTo(19);
     }
 
     private Integer applicationChangeSetCount() {
@@ -110,7 +113,8 @@ class DatabaseMigrationTest {
                     '015-active-context-tokens',
                     '016-memory-lifecycle-and-ranking',
                     '017-application-setting',
-                    '018-normalize-application-setting-timestamps'
+                    '018-normalize-application-setting-timestamps',
+                    '019-conversation-message-branches'
                 )
                 AND AUTHOR = 'lumora'
                 """,
@@ -121,6 +125,13 @@ class DatabaseMigrationTest {
     private java.util.List<String> modelConfigurationColumns() {
         return jdbcTemplate.query(
                 "PRAGMA table_info(model_configuration)",
+                (resultSet, rowNumber) -> resultSet.getString("name")
+        );
+    }
+
+    private java.util.List<String> conversationMessageColumns() {
+        return jdbcTemplate.query(
+                "PRAGMA table_info(conversation_message)",
                 (resultSet, rowNumber) -> resultSet.getString("name")
         );
     }

@@ -60,10 +60,9 @@ globalStyle(".app-shell", {
   gridTemplateColumns: "var(--sidebar-width) minmax(0, 1fr)",
   width: "100%",
   height: "100%",
-  paddingTop: "32px",
+  paddingTop: "33px",
   overflow: "hidden",
   background: "var(--canvas)",
-  transition: "grid-template-columns 220ms cubic-bezier(0.2, 0.75, 0.25, 1)",
 });
 
 globalStyle(".settings-window-shell", {
@@ -74,14 +73,11 @@ globalStyle(".settings-window-shell", {
 });
 
 globalStyle(".app-shell.sidebar-collapsed", {
-  gridTemplateColumns: "0 minmax(0, 1fr)",
+  gridTemplateColumns: "var(--sidebar-width) minmax(0, 1fr)",
 });
 
 globalStyle(".sidebar-collapsed .sidebar,\n.sidebar-collapsed .settings-sidebar", {
-  visibility: "hidden",
-  opacity: "0",
   pointerEvents: "none",
-  transform: "translateX(-14px)",
 });
 
 globalStyle(".app-shell > .home-layout,\n.app-shell > .task-layout,\n.app-shell > .prototype-layout", {
@@ -144,15 +140,25 @@ globalStyle(".window-navigation button:disabled", {
 globalStyle(".sidebar-resize-handle", {
   position: "fixed",
   zIndex: "1001",
-  top: "32px",
+  top: "33px",
   bottom: "0",
   left: "calc(var(--sidebar-width) - 3px)",
   width: "7px",
   cursor: "col-resize",
+  opacity: "1",
+  transform: "translateX(0)",
+  transition:
+    "transform 420ms cubic-bezier(0.22, 0.82, 0.24, 1), opacity 160ms ease",
   touchAction: "none",
   // 拖拽分隔线不能被窗口拖拽区域接管。
   // @ts-expect-error Electron 使用 Chromium 私有属性。
   WebkitAppRegion: "no-drag",
+});
+
+globalStyle(".sidebar-collapsed .sidebar-resize-handle", {
+  opacity: "0",
+  pointerEvents: "none",
+  transform: "translateX(calc(-1 * var(--sidebar-width)))",
 });
 
 globalStyle(".sidebar-resize-handle::after", {
@@ -178,3 +184,10 @@ globalStyle("body.resizing-sidebar", {
   cursor: "col-resize",
   userSelect: "none",
 });
+
+globalStyle(
+  "body.resizing-sidebar .app-shell,\nbody.resizing-sidebar .settings-shell",
+  {
+    transition: "none",
+  },
+);

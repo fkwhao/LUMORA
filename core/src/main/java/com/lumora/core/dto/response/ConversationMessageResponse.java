@@ -6,6 +6,9 @@ public class ConversationMessageResponse {
 
     private final String messageId;
     private final int sequence;
+    private final String parentMessageId;
+    private final int messageDepth;
+    private final boolean activePath;
     private final String role;
     private final String content;
     private final String model;
@@ -18,6 +21,9 @@ public class ConversationMessageResponse {
     public ConversationMessageResponse(
             String messageId,
             int sequence,
+            String parentMessageId,
+            int messageDepth,
+            boolean activePath,
             String role,
             String content,
             String model,
@@ -29,6 +35,9 @@ public class ConversationMessageResponse {
     ) {
         this.messageId = messageId;
         this.sequence = sequence;
+        this.parentMessageId = parentMessageId;
+        this.messageDepth = messageDepth;
+        this.activePath = activePath;
         this.role = role;
         this.content = content;
         this.model = model;
@@ -46,6 +55,10 @@ public class ConversationMessageResponse {
     public int getSequence() {
         return sequence;
     }
+
+    public String getParentMessageId() { return parentMessageId; }
+    public int getMessageDepth() { return messageDepth; }
+    public boolean isActivePath() { return activePath; }
 
     public String getRole() {
         return role;

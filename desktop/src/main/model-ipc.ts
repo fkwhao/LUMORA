@@ -29,6 +29,7 @@ export const modelIpcChannels = {
   listModels: "model:list-models",
   complete: "model:complete",
   listMessages: "model:list-messages",
+  activateMessageBranch: "model:activate-message-branch",
   decideToolApproval: "model:decide-tool-approval",
   compactContext: "model:compact-context",
   readArtifact: "model:read-artifact",
@@ -78,6 +79,14 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
   );
   ipcMain.handle(modelIpcChannels.listMessages, (_event, taskId: string) =>
     gateway.listMessages(requireText(taskId, "任务 ID")),
+  );
+  ipcMain.handle(
+    modelIpcChannels.activateMessageBranch,
+    (_event, taskId: string, messageId: string) =>
+      gateway.activateMessageBranch(
+        requireText(taskId, "任务 ID"),
+        requireText(messageId, "消息 ID"),
+      ),
   );
   ipcMain.handle(
     modelIpcChannels.compactContext,
@@ -186,6 +195,7 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
     ipcMain.removeHandler(modelIpcChannels.listModels);
     ipcMain.removeHandler(modelIpcChannels.complete);
     ipcMain.removeHandler(modelIpcChannels.listMessages);
+    ipcMain.removeHandler(modelIpcChannels.activateMessageBranch);
     ipcMain.removeHandler(modelIpcChannels.decideToolApproval);
     ipcMain.removeHandler(modelIpcChannels.compactContext);
     ipcMain.removeHandler(modelIpcChannels.readArtifact);

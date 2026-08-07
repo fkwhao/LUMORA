@@ -388,41 +388,90 @@ globalStyle('[data-theme="dark"] .markdown-code-toolbar button.is-copied', {
 
 globalStyle(
   '[data-theme="dark"] .markdown-body .hljs-comment,\n[data-theme="dark"] .markdown-body .hljs-quote',
-  { color: "#8b949e" },
+  { color: "#7e858d" },
 );
 
 globalStyle(
-  '[data-theme="dark"] .markdown-body .hljs-keyword,\n[data-theme="dark"] .markdown-body .hljs-selector-tag,\n[data-theme="dark"] .markdown-body .hljs-literal,\n[data-theme="dark"] .markdown-body .hljs-type',
-  { color: "#ff7b72" },
+  '[data-theme="dark"] .markdown-body .hljs-keyword,\n[data-theme="dark"] .markdown-body .hljs-selector-tag,\n[data-theme="dark"] .markdown-body .hljs-literal,\n[data-theme="dark"] .markdown-body .hljs-type,\n[data-theme="dark"] .markdown-body .hljs-name,\n[data-theme="dark"] .markdown-body .hljs-tag',
+  { color: "#c38f9a" },
 );
 
 globalStyle(
-  '[data-theme="dark"] .markdown-body .hljs-string,\n[data-theme="dark"] .markdown-body .hljs-regexp,\n[data-theme="dark"] .markdown-body .hljs-addition,\n[data-theme="dark"] .markdown-body .hljs-attribute',
-  { color: "#a5d6ff" },
+  '[data-theme="dark"] .markdown-body .hljs-string,\n[data-theme="dark"] .markdown-body .hljs-regexp,\n[data-theme="dark"] .markdown-body .hljs-addition,\n[data-theme="dark"] .markdown-body .hljs-attribute,\n[data-theme="dark"] .markdown-body .hljs-template-tag',
+  { color: "#99ae9f" },
 );
 
 globalStyle(
-  '[data-theme="dark"] .markdown-body .hljs-number,\n[data-theme="dark"] .markdown-body .hljs-symbol,\n[data-theme="dark"] .markdown-body .hljs-bullet',
-  { color: "#79c0ff" },
+  '[data-theme="dark"] .markdown-body .hljs-number,\n[data-theme="dark"] .markdown-body .hljs-symbol,\n[data-theme="dark"] .markdown-body .hljs-bullet,\n[data-theme="dark"] .markdown-body .hljs-link',
+  { color: "#91a7bc" },
 );
 
 globalStyle(
-  '[data-theme="dark"] .markdown-body .hljs-title,\n[data-theme="dark"] .markdown-body .hljs-section,\n[data-theme="dark"] .markdown-body .hljs-function',
-  { color: "#d2a8ff" },
+  '[data-theme="dark"] .markdown-body .hljs-title,\n[data-theme="dark"] .markdown-body .hljs-section,\n[data-theme="dark"] .markdown-body .hljs-function,\n[data-theme="dark"] .markdown-body .hljs-selector-class,\n[data-theme="dark"] .markdown-body .hljs-selector-id',
+  { color: "#aa9db9" },
 );
 
 globalStyle(
-  '[data-theme="dark"] .markdown-body .hljs-variable,\n[data-theme="dark"] .markdown-body .hljs-template-variable,\n[data-theme="dark"] .markdown-body .hljs-params',
-  { color: "#ffa657" },
+  '[data-theme="dark"] .markdown-body .hljs-variable,\n[data-theme="dark"] .markdown-body .hljs-template-variable,\n[data-theme="dark"] .markdown-body .hljs-params,\n[data-theme="dark"] .markdown-body .hljs-attr,\n[data-theme="dark"] .markdown-body .hljs-property',
+  { color: "#b09b84" },
+);
+
+globalStyle(
+  '[data-theme="dark"] .markdown-body .hljs-built_in,\n[data-theme="dark"] .markdown-body .hljs-meta,\n[data-theme="dark"] .markdown-body .hljs-class .hljs-title,\n[data-theme="dark"] .markdown-body .hljs-doctag',
+  { color: "#8ea9aa" },
 );
 
 globalStyle('[data-theme="dark"] .markdown-body .hljs-deletion', {
-  color: "#ffdcd7",
-  background: "#67060c",
+  color: "#c7a0a3",
+  background: "#3f3033",
 });
 
 globalStyle('[data-theme="dark"] .markdown-body pre code.language-diff', {
   color: "#e6edf3",
+});
+
+globalStyle('[data-theme="dark"] .aui-md .hljs', {
+  color: "#c8ccd1",
+});
+
+globalStyle(
+  '[data-theme="dark"] .aui-md .hljs-comment,\n[data-theme="dark"] .aui-md .hljs-quote',
+  { color: "#7e858d", fontStyle: "italic" },
+);
+
+globalStyle(
+  '[data-theme="dark"] .aui-md .hljs-keyword,\n[data-theme="dark"] .aui-md .hljs-selector-tag,\n[data-theme="dark"] .aui-md .hljs-literal,\n[data-theme="dark"] .aui-md .hljs-type,\n[data-theme="dark"] .aui-md .hljs-name,\n[data-theme="dark"] .aui-md .hljs-tag',
+  { color: "#c38f9a" },
+);
+
+globalStyle(
+  '[data-theme="dark"] .aui-md .hljs-string,\n[data-theme="dark"] .aui-md .hljs-regexp,\n[data-theme="dark"] .aui-md .hljs-addition,\n[data-theme="dark"] .aui-md .hljs-attribute,\n[data-theme="dark"] .aui-md .hljs-template-tag',
+  { color: "#99ae9f" },
+);
+
+globalStyle(
+  '[data-theme="dark"] .aui-md .hljs-number,\n[data-theme="dark"] .aui-md .hljs-symbol,\n[data-theme="dark"] .aui-md .hljs-bullet,\n[data-theme="dark"] .aui-md .hljs-link',
+  { color: "#91a7bc" },
+);
+
+globalStyle(
+  '[data-theme="dark"] .aui-md .hljs-title,\n[data-theme="dark"] .aui-md .hljs-section,\n[data-theme="dark"] .aui-md .hljs-function,\n[data-theme="dark"] .aui-md .hljs-selector-class,\n[data-theme="dark"] .aui-md .hljs-selector-id',
+  { color: "#aa9db9" },
+);
+
+globalStyle(
+  '[data-theme="dark"] .aui-md .hljs-variable,\n[data-theme="dark"] .aui-md .hljs-template-variable,\n[data-theme="dark"] .aui-md .hljs-params,\n[data-theme="dark"] .aui-md .hljs-attr,\n[data-theme="dark"] .aui-md .hljs-property',
+  { color: "#b09b84" },
+);
+
+globalStyle(
+  '[data-theme="dark"] .aui-md .hljs-built_in,\n[data-theme="dark"] .aui-md .hljs-meta,\n[data-theme="dark"] .aui-md .hljs-class .hljs-title,\n[data-theme="dark"] .aui-md .hljs-doctag',
+  { color: "#8ea9aa" },
+);
+
+globalStyle('[data-theme="dark"] .aui-md .hljs-deletion', {
+  color: "#c7a0a3",
+  background: "#3f3033",
 });
 
 globalStyle('[data-theme="dark"] .markdown-table-scroll', {
@@ -464,6 +513,31 @@ globalStyle('[data-theme="dark"] .question-rail-tooltip', {
   background: "rgb(43 43 43)",
   backdropFilter: "none",
   boxShadow: "0 18px 48px rgb(0 0 0 / 42%)",
+});
+
+globalStyle('[data-theme="dark"] .question-rail-tooltip strong', {
+  color: "#f2f3f5",
+});
+
+globalStyle('[data-theme="dark"] .question-rail-result', {
+  color: "#a6a9af",
+});
+
+globalStyle('[data-theme="dark"] .context-usage-tooltip', {
+  color: "#f2f2f2",
+  borderColor: "#414141",
+  background: "rgb(44 44 44 / 96%)",
+  boxShadow:
+    "inset 0 1px 0 rgb(255 255 255 / 8%), 0 12px 30px rgb(0 0 0 / 22%)",
+});
+
+globalStyle(
+  '[data-theme="dark"] .context-usage-tooltip > span, [data-theme="dark"] .context-usage-tooltip strong',
+  { color: "#a7a7a7" },
+);
+
+globalStyle('[data-theme="dark"] .context-usage-tooltip b', {
+  color: "#f4f4f4",
 });
 
 globalStyle('[data-theme="dark"] .follow-up-composer', {

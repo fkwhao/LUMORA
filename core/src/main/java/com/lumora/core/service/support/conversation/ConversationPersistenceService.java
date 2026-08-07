@@ -46,7 +46,13 @@ public class ConversationPersistenceService {
         Conversation conversation = findConversation(taskId);
         return conversation == null
                 ? List.of()
-                : loadMessages(conversation.getConversationId());
+                : loadAllMessages(conversation.getConversationId());
+    }
+
+    public void activateBranch(String taskId, String messageId) {
+        transactionTemplate.executeWithoutResult(
+                status -> activateBranchInTransaction(taskId, messageId)
+        );
     }
 
     public ConversationRunContext prepareNewMessage(
@@ -157,7 +163,7 @@ public class ConversationPersistenceService {
         ConversationMessage activity = new ConversationMessage(
                 UUID.randomUUID().toString(),
                 conversation.getConversationId(),
-                history.size() + 1,
+                nextSequence(conversation.getConversationId()),
                 ChatMessageRole.ASSISTANT,
                 "",
                 event.getModel(),
@@ -167,6 +173,15 @@ public class ConversationPersistenceService {
                 0L,
                 now
         );
+        ConversationMessage parent = history.isEmpty()
+                ? null : history.get(history.size() - 1);
+        activity.setParentMessageId(
+                parent == null ? null : parent.getMessageId()
+        );
+        activity.setMessageDepth(
+                parent == null ? 1 : parent.getMessageDepth() + 1
+        );
+        activity.setActivePath(true);
         try {
             activity.setWorkLogJson(objectMapper.writeValueAsString(
                     List.of(WorkLogEventProjector.project(event))
@@ -195,11 +210,14 @@ public class ConversationPersistenceService {
         List<ConversationMessage> history = loadMessages(
                 conversation.getConversationId()
         );
-        int sequence = history.size() + 1;
+        int sequence = nextSequence(conversation.getConversationId());
         Instant now = clock.instant();
         ConversationMessage userMessage = newUserMessage(
                 conversation.getConversationId(),
                 sequence,
+                history.isEmpty() ? null : history.get(history.size() - 1)
+                        .getMessageId(),
+                history.size() + 1,
                 content,
                 now
         );
@@ -237,22 +255,36 @@ public class ConversationPersistenceService {
                 messageId
         );
 
-        // 2. 删除旧回答，再用新内容覆盖目标消息。
-        deleteMessagesAfter(conversation.getConversationId(), target);
+        // 2. 保留旧路径作为历史分支，并激活新路径。
         Instant now = clock.instant();
-        updateUserMessage(target, content, now);
+        deactivateAfter(conversation.getConversationId(), target);
+        ConversationMessage currentUser = target;
+        if (!target.getContent().equals(content)) {
+            target.setActivePath(false);
+            messageMapper.updateById(target);
+            currentUser = newUserMessage(
+                    conversation.getConversationId(),
+                    nextSequence(conversation.getConversationId()),
+                    target.getParentMessageId(),
+                    target.getMessageDepth(),
+                    content,
+                    now
+            );
+            messageMapper.insert(currentUser);
+        }
         touchConversation(conversation, taskId, now);
 
         // 3. 使用编辑点之前的历史重新构造模型上下文。
         List<ConversationMessage> precedingMessages = history.stream()
-                .filter(message -> message.getSequence() < target.getSequence())
+                .filter(message -> message.getMessageDepth()
+                        < target.getMessageDepth())
                 .toList();
         return createRunContext(
                 taskId,
                 conversation.getConversationId(),
-                target.getSequence() + 1,
+                nextSequence(conversation.getConversationId()),
                 precedingMessages,
-                target,
+                currentUser,
                 workspacePath
         );
     }
@@ -287,6 +319,12 @@ public class ConversationPersistenceService {
                 now
         );
         assistantMessage.setWorkLogJson(serializeWorkLog(accumulator));
+        ConversationMessage parent = messageMapper.selectById(
+                context.getCurrentUserMessageId()
+        );
+        assistantMessage.setParentMessageId(context.getCurrentUserMessageId());
+        assistantMessage.setMessageDepth(parent.getMessageDepth() + 1);
+        assistantMessage.setActivePath(true);
         assistantMessage.setActiveContextTokens(
                 accumulator.getActiveContextTokens()
         );
@@ -309,31 +347,17 @@ public class ConversationPersistenceService {
         }
     }
 
-    private void deleteMessagesAfter(
+    private void deactivateAfter(
             String conversationId,
             ConversationMessage target
     ) {
-        messageMapper.delete(
-                Wrappers.<ConversationMessage>lambdaQuery()
-                        .eq(
-                                ConversationMessage::getConversationId,
-                                conversationId
-                        )
-                        .gt(
-                                ConversationMessage::getSequence,
-                                target.getSequence()
-                        )
-        );
-    }
-
-    private void updateUserMessage(
-            ConversationMessage message,
-            String content,
-            Instant updatedAt
-    ) {
-        message.setContent(content);
-        message.setCreatedAt(updatedAt);
-        messageMapper.updateById(message);
+        loadMessages(conversationId).stream()
+                .filter(message -> message.getMessageDepth()
+                        > target.getMessageDepth())
+                .forEach(message -> {
+                    message.setActivePath(false);
+                    messageMapper.updateById(message);
+                });
     }
 
     private ConversationRunContext createRunContext(
@@ -444,10 +468,12 @@ public class ConversationPersistenceService {
     private ConversationMessage newUserMessage(
             String conversationId,
             int sequence,
+            String parentMessageId,
+            int messageDepth,
             String content,
             Instant now
     ) {
-        return new ConversationMessage(
+        ConversationMessage message = new ConversationMessage(
                 UUID.randomUUID().toString(),
                 conversationId,
                 sequence,
@@ -459,6 +485,10 @@ public class ConversationPersistenceService {
                 0,
                 now
         );
+        message.setParentMessageId(parentMessageId);
+        message.setMessageDepth(messageDepth);
+        message.setActivePath(true);
+        return message;
     }
 
     private void touchConversation(
@@ -485,8 +515,67 @@ public class ConversationPersistenceService {
                                 ConversationMessage::getConversationId,
                                 conversationId
                         )
+                        .eq(ConversationMessage::isActivePath, true)
+                        .orderByAsc(ConversationMessage::getMessageDepth)
+        );
+    }
+
+    private List<ConversationMessage> loadAllMessages(String conversationId) {
+        return messageMapper.selectList(
+                Wrappers.<ConversationMessage>lambdaQuery()
+                        .eq(ConversationMessage::getConversationId,
+                                conversationId)
                         .orderByAsc(ConversationMessage::getSequence)
         );
+    }
+
+    private int nextSequence(String conversationId) {
+        return loadAllMessages(conversationId).stream()
+                .mapToInt(ConversationMessage::getSequence)
+                .max()
+                .orElse(0) + 1;
+    }
+
+    private void activateBranchInTransaction(String taskId, String messageId) {
+        taskService.getTask(taskId);
+        Conversation conversation = requireConversation(taskId);
+        List<ConversationMessage> all = loadAllMessages(
+                conversation.getConversationId()
+        );
+        java.util.Map<String, ConversationMessage> byId = all.stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        ConversationMessage::getMessageId,
+                        message -> message
+                ));
+        ConversationMessage cursor = byId.get(messageId);
+        if (cursor == null) throw new IllegalArgumentException("回复分支不存在");
+        ConversationMessage child;
+        do {
+            String parentId = cursor.getMessageId();
+            child = all.stream()
+                    .filter(message -> parentId.equals(
+                            message.getParentMessageId()
+                    ))
+                    .max(java.util.Comparator.comparingInt(
+                            ConversationMessage::getSequence
+                    ))
+                    .orElse(null);
+            if (child != null) cursor = child;
+        } while (child != null);
+        java.util.Set<String> activeIds = new java.util.HashSet<>();
+        while (cursor != null) {
+            activeIds.add(cursor.getMessageId());
+            cursor = cursor.getParentMessageId() == null
+                    ? null : byId.get(cursor.getParentMessageId());
+        }
+        all.forEach(message -> {
+            boolean active = activeIds.contains(message.getMessageId());
+            if (message.isActivePath() != active) {
+                message.setActivePath(active);
+                messageMapper.updateById(message);
+            }
+        });
+        touchConversation(conversation, taskId, clock.instant());
     }
 
     private ChatMessage toModelMessage(ConversationMessage message) {

@@ -20,6 +20,8 @@ public interface ConversationService {
      */
     List<ConversationMessage> listMessages(String taskId);
 
+    void activateBranch(String taskId, String messageId);
+
     /**
      * 保存新的用户消息，并异步流式生成助手回答。
      *

@@ -52,6 +52,15 @@ public class ConversationController {
                 .toList();
     }
 
+    @PostMapping(ApiPathConstants.TASK_MESSAGE_BRANCH)
+    public java.util.Map<String, Boolean> activateMessageBranch(
+            @PathVariable String taskId,
+            @PathVariable String messageId
+    ) {
+        conversationService.activateBranch(taskId, messageId);
+        return java.util.Map.of("activated", true);
+    }
+
     @PostMapping(
             value = ApiPathConstants.TASK_MESSAGE_STREAM,
             produces = MediaType.TEXT_EVENT_STREAM_VALUE
