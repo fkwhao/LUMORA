@@ -2,7 +2,7 @@ package com.lumora.core.agent.dto.response;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.lumora.core.model.ChatStreamEventType;
+import com.lumora.core.conversation.domain.model.ChatStreamEventType;
 
 import java.util.Map;
 

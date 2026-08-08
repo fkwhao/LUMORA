@@ -1,6 +1,6 @@
 package com.lumora.core.agent.dto.request;
 
-import com.lumora.core.model.MemoryContextItem;
+import com.lumora.core.memory.domain.model.MemoryContextItem;
 
 import java.time.Instant;
 

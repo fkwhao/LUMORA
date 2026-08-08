@@ -1,6 +1,6 @@
 package com.lumora.core.agent.dto.request;
 
-import com.lumora.core.model.ModelConnection;
+import com.lumora.core.model.domain.model.ModelConnection;
 
 public class AgentModelConnectionRequest {
 

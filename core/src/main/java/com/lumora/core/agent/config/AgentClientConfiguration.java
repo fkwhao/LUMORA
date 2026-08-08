@@ -2,8 +2,8 @@ package com.lumora.core.agent.config;
 
 import com.lumora.core.agent.client.http.AgentRuntimeHttpApi;
 import com.lumora.core.agent.constant.AgentClientConstants;
-import com.lumora.core.common.constant.HttpContractConstants;
-import com.lumora.core.config.CoreProperties;
+import com.lumora.core.shared.api.constant.HttpContractConstants;
+import com.lumora.core.shared.config.CoreProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;

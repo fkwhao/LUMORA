@@ -11,7 +11,7 @@ import com.lumora.core.agent.dto.response.AgentContextCompactionResponse;
 import com.lumora.core.agent.dto.response.AgentPlanTaskResponse;
 import com.lumora.core.agent.dto.response.AgentModelListResponse;
 import com.lumora.core.agent.dto.response.AgentMemoryExtractionResponse;
-import com.lumora.core.common.constant.HttpContractConstants;
+import com.lumora.core.shared.api.constant.HttpContractConstants;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;

@@ -15,12 +15,12 @@ import com.lumora.core.agent.dto.response.AgentPlanTaskResponse;
 import com.lumora.core.agent.dto.response.AgentModelListResponse;
 import com.lumora.core.agent.model.AgentPlanStep;
 import com.lumora.core.agent.model.AgentMemoryCandidate;
-import com.lumora.core.model.ChatCompletion;
-import com.lumora.core.model.ChatMessage;
-import com.lumora.core.model.ChatStreamEvent;
-import com.lumora.core.model.ContextCompaction;
-import com.lumora.core.model.ModelConnection;
-import com.lumora.core.model.MemoryContextItem;
+import com.lumora.core.conversation.domain.model.ChatCompletion;
+import com.lumora.core.conversation.domain.model.ChatMessage;
+import com.lumora.core.conversation.domain.model.ChatStreamEvent;
+import com.lumora.core.conversation.domain.model.ContextCompaction;
+import com.lumora.core.model.domain.model.ModelConnection;
+import com.lumora.core.memory.domain.model.MemoryContextItem;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
