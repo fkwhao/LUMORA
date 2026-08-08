@@ -43,6 +43,11 @@ describe("visible task flow", () => {
       create: vi.fn(async () => createdTask),
       list: vi.fn(async () => []),
       get: vi.fn(async () => createdTask),
+      updatePreferences: vi.fn(async (input) => ({
+        ...createdTask,
+        selectedModel: input.model,
+        selectedReasoningEffort: input.reasoningEffort,
+      })),
       subscribe: vi.fn((_taskId, listener) => {
         onEvent = listener;
         return () => undefined;

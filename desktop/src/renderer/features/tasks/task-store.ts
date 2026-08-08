@@ -34,6 +34,8 @@ export interface TaskState {
   deletedTaskIds: string[];
   isCreating: boolean;
   isLoadingHistory: boolean;
+  isHydratingHistory: boolean;
+  historyHydrationProgress: number;
   isChatting: boolean;
   isCompacting: boolean;
   chatWasStopped: boolean;
@@ -50,6 +52,10 @@ export interface TaskState {
   openTask(taskId: string): Promise<void>;
   createTask(goal: string, projectPath?: string): Promise<TaskSnapshot>;
   sendMessage(content: string, options?: ChatRequestOptions): Promise<void>;
+  updateComposerPreferences(
+    model: string,
+    reasoningEffort: string,
+  ): Promise<void>;
   compactContext(model?: string): Promise<void>;
   stopChat(): void;
   regenerateMessage(
@@ -70,6 +76,38 @@ export interface TaskState {
 
 export type TaskStore = ReturnType<typeof createTaskStore>;
 
+const HISTORY_INITIAL_MESSAGE_COUNT = 18;
+const HISTORY_MIN_CHUNK_SIZE = 32;
+const HISTORY_MAX_RENDER_PASSES = 12;
+
+function findHistoryChunkStart(messages: ChatMessage[], candidate: number) {
+  let startIndex = candidate;
+  while (startIndex > 0 && messages[startIndex]?.role !== "user") {
+    startIndex -= 1;
+  }
+  return startIndex;
+}
+
+function getInitialHistoryWindow(messages: ChatMessage[]) {
+  const candidate = Math.max(0, messages.length - HISTORY_INITIAL_MESSAGE_COUNT);
+  const startIndex = findHistoryChunkStart(messages, candidate);
+  return {
+    messages: messages.slice(startIndex),
+    startIndex,
+    hasEarlierMessages: startIndex > 0,
+    progress:
+      messages.length === 0
+        ? 1
+        : (messages.length - startIndex) / messages.length,
+  };
+}
+
+function waitForHistoryRenderFrame() {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, 18);
+  });
+}
+
 export function createTaskStore(
   api: LumoraTaskApi,
   modelApi?: LumoraModelApi,
@@ -77,6 +115,14 @@ export function createTaskStore(
   let unsubscribe: (() => void) | undefined;
   let unsubscribeChat: (() => void) | undefined;
   let resolveChat: (() => void) | undefined;
+  let openTaskRequest = 0;
+  let preferenceUpdateQueue = Promise.resolve<TaskSnapshot | undefined>(
+    undefined,
+  );
+  const conversationCache = new Map<
+    string,
+    { task: TaskSnapshot; messages: ChatMessage[] }
+  >();
 
   return createStore<TaskState>((set, get) => ({
     activeTask: undefined,
@@ -85,6 +131,8 @@ export function createTaskStore(
     deletedTaskIds: loadDeletedTaskIds(),
     isCreating: false,
     isLoadingHistory: false,
+    isHydratingHistory: false,
+    historyHydrationProgress: 1,
     isChatting: false,
     isCompacting: false,
     chatWasStopped: false,
@@ -114,29 +162,150 @@ export function createTaskStore(
       }
     },
 
+    async updateComposerPreferences(model, reasoningEffort) {
+      const taskId = get().activeTask?.taskId;
+      if (!taskId) return;
+      const update = preferenceUpdateQueue.then(() =>
+        api.updatePreferences({ taskId, model, reasoningEffort }),
+      );
+      preferenceUpdateQueue = update.catch(() => undefined);
+      const updated = await update;
+      if (get().activeTask?.taskId === taskId) {
+        set((state) => ({
+          activeTask: {
+            ...state.activeTask!,
+            selectedModel: updated.selectedModel,
+            selectedReasoningEffort: updated.selectedReasoningEffort,
+            updatedAt: updated.updatedAt ?? state.activeTask?.updatedAt,
+          },
+        }));
+      }
+      const cached = conversationCache.get(taskId);
+      if (cached) {
+        conversationCache.set(taskId, {
+          ...cached,
+          task: {
+            ...cached.task,
+            selectedModel: updated.selectedModel,
+            selectedReasoningEffort: updated.selectedReasoningEffort,
+          },
+        });
+      }
+    },
+
     async openTask(taskId) {
+      const requestId = ++openTaskRequest;
+      const current = get();
+      if (current.activeTask) {
+        const currentCached = conversationCache.get(current.activeTask.taskId);
+        conversationCache.set(current.activeTask.taskId, {
+          task: current.activeTask,
+          messages: current.isHydratingHistory
+            ? (currentCached?.messages ?? current.messages)
+            : current.messages,
+        });
+      }
       unsubscribeChat?.();
       unsubscribeChat = undefined;
       resolveChat?.();
       resolveChat = undefined;
+      unsubscribe?.();
+      unsubscribe = undefined;
+      const cached = conversationCache.get(taskId);
+      const summary = current.recentTasks.find(
+        (task) => task.taskId === taskId,
+      );
+      const optimisticTask = cached?.task ??
+        (summary ? snapshotFromSummary(summary) : undefined);
+      const cachedWindow = cached
+        ? getInitialHistoryWindow(cached.messages)
+        : undefined;
+      if (optimisticTask) {
+        unsubscribe = api.subscribe(taskId, (event) => {
+          applyEvent(event, get, set);
+        });
+      }
       set({
-        isLoadingHistory: true,
+        activeTask: optimisticTask ?? current.activeTask,
+        messages: cachedWindow?.messages ?? [],
+        taskEvents: [],
+        isLoadingHistory: !cached,
+        isHydratingHistory: Boolean(cachedWindow?.hasEarlierMessages),
+        historyHydrationProgress: cachedWindow?.progress ?? 0,
+        isChatting: false,
+        isCompacting: false,
+        chatWasStopped: false,
+        chatStartedAt: undefined,
+        lastChatDurationMs: undefined,
         chatError: undefined,
+        pendingToolApproval: undefined,
+        isDecidingToolApproval: false,
       });
+      const hydrateHistory = async (
+        allMessages: ChatMessage[],
+        initialStartIndex: number,
+      ) => {
+        let startIndex = initialStartIndex;
+        if (startIndex <= 0) {
+          if (requestId === openTaskRequest) {
+            set({
+              messages: allMessages,
+              isHydratingHistory: false,
+              historyHydrationProgress: 1,
+            });
+          }
+          return;
+        }
+
+        const chunkSize = Math.max(
+          HISTORY_MIN_CHUNK_SIZE,
+          Math.ceil(allMessages.length / HISTORY_MAX_RENDER_PASSES),
+        );
+        while (startIndex > 0) {
+          await waitForHistoryRenderFrame();
+          if (requestId !== openTaskRequest) return;
+
+          startIndex = findHistoryChunkStart(
+            allMessages,
+            Math.max(0, startIndex - chunkSize),
+          );
+          set({
+            messages: allMessages.slice(startIndex),
+            isHydratingHistory: startIndex > 0,
+            historyHydrationProgress:
+              allMessages.length === 0
+                ? 1
+                : (allMessages.length - startIndex) / allMessages.length,
+          });
+        }
+      };
+      const cachedHydration = cached && cachedWindow
+        ? hydrateHistory(cached.messages, cachedWindow.startIndex)
+        : Promise.resolve();
       try {
         const [task, messages] = await Promise.all([
           api.get(taskId),
           modelApi?.listMessages(taskId) ?? Promise.resolve([]),
         ]);
+        conversationCache.set(taskId, { task, messages });
+        await cachedHydration;
+        if (requestId !== openTaskRequest) {
+          return;
+        }
         unsubscribe?.();
         unsubscribe = api.subscribe(task.taskId, (event) => {
           applyEvent(event, get, set);
         });
+        const historyWindow = cached
+          ? { messages, startIndex: 0, hasEarlierMessages: false, progress: 1 }
+          : getInitialHistoryWindow(messages);
         set({
           activeTask: task,
-          messages,
+          messages: historyWindow.messages,
           taskEvents: [],
           isLoadingHistory: false,
+          isHydratingHistory: historyWindow.hasEarlierMessages,
+          historyHydrationProgress: historyWindow.progress,
           isChatting: false,
           isCompacting: false,
           chatWasStopped: false,
@@ -145,15 +314,24 @@ export function createTaskStore(
           pendingToolApproval: undefined,
           isDecidingToolApproval: false,
         });
+        if (!cached) {
+          await hydrateHistory(messages, historyWindow.startIndex);
+        }
       } catch (error) {
+        if (requestId !== openTaskRequest) {
+          return;
+        }
         set({
           isLoadingHistory: false,
+          isHydratingHistory: false,
+          historyHydrationProgress: 1,
           error: toErrorMessage(error),
         });
       }
     },
 
     async createTask(goal, projectPath) {
+      openTaskRequest += 1;
       const normalizedGoal = goal.trim();
       if (!normalizedGoal) {
         throw new Error("任务目标不能为空");
@@ -170,6 +348,9 @@ export function createTaskStore(
           activeTask: task,
           isCreating: false,
           messages: [],
+          isLoadingHistory: false,
+          isHydratingHistory: false,
+          historyHydrationProgress: 1,
           taskEvents: [],
           archivedTaskIds: get().archivedTaskIds.filter(
             (taskId) => taskId !== task.taskId,
@@ -602,6 +783,7 @@ export function createTaskStore(
     },
 
     clearActiveTask() {
+      openTaskRequest += 1;
       unsubscribe?.();
       unsubscribe = undefined;
       unsubscribeChat?.();
@@ -614,6 +796,9 @@ export function createTaskStore(
         chatError: undefined,
         messages: [],
         taskEvents: [],
+        isLoadingHistory: false,
+        isHydratingHistory: false,
+        historyHydrationProgress: 1,
         isChatting: false,
         isCompacting: false,
         chatWasStopped: false,
@@ -628,6 +813,19 @@ export function createTaskStore(
       set({ error: undefined });
     },
   }));
+}
+
+function snapshotFromSummary(summary: TaskSummary): TaskSnapshot {
+  return {
+    taskId: summary.taskId,
+    goal: summary.goal,
+    status: summary.status,
+    lastEventSequence: 0,
+    activeStep: "",
+    resultSummary: "",
+    planSteps: [],
+    updatedAt: summary.updatedAt,
+  };
 }
 
 function applyEvent(

@@ -24,6 +24,7 @@ import {
 } from "./features/prototype/PrototypePage";
 import { SettingsPage } from "./features/settings/SettingsPage";
 import { HomePage } from "./features/tasks/HomePage";
+import { ConversationHubPage } from "./features/tasks/ConversationHubPage";
 import {
   loadProjectNames,
   saveActiveProject,
@@ -46,7 +47,7 @@ interface AppProps {
   memoryApi?: LumoraMemoryApi;
 }
 
-type AppView = "work" | "settings" | PrototypeView;
+type AppView = "work" | "conversationHub" | "settings" | PrototypeView;
 type ComposerMotion = "to-task" | "to-home";
 
 interface AppLocation {
@@ -108,6 +109,8 @@ function ConnectedApp({
   const [homeRevision, setHomeRevision] = useState(0);
   const [composerMotion, setComposerMotion] = useState<ComposerMotion>();
   const [projectNames, setProjectNames] = useState(loadProjectNames);
+  const [openTabIds, setOpenTabIds] = useState<string[]>([]);
+  const [selectedTabId, setSelectedTabId] = useState<string>();
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     loadSidebarCollapsed,
@@ -133,15 +136,57 @@ function ConnectedApp({
       ? activeTask
         ? "task"
         : "home"
-      : view;
+      : view === "conversationHub"
+        ? "home"
+        : view;
+  const activeTasks = useMemo(() => {
+    const archivedTaskIdSet = new Set(archivedTaskIds);
+    return recentTasks.filter((task) => !archivedTaskIdSet.has(task.taskId));
+  }, [archivedTaskIds, recentTasks]);
+  const conversationTabs = useMemo(
+    () =>
+      openTabIds.flatMap((taskId) => {
+        const task =
+          activeTasks.find((item) => item.taskId === taskId) ??
+          (activeTask?.taskId === taskId
+            ? { taskId, goal: activeTask.goal }
+            : undefined);
+        if (!task) return [];
+        const projectPath = taskProjectPaths[taskId];
+        return [
+          {
+            taskId,
+            title: task.goal,
+            projectName: projectPath ? projectNames[projectPath] : undefined,
+          },
+        ];
+      }),
+    [activeTask, activeTasks, openTabIds, projectNames, taskProjectPaths],
+  );
   const currentLocation: AppLocation =
     view === "work"
-      ? { view, taskId: activeTask?.taskId }
+      ? { view, taskId: selectedTabId }
       : { view };
 
   useEffect(() => {
     void store.getState().loadRecentTasks();
   }, [store]);
+
+  useEffect(() => {
+    if (!activeTask) return;
+    setOpenTabIds((taskIds) =>
+      taskIds.includes(activeTask.taskId)
+        ? taskIds
+        : [...taskIds, activeTask.taskId],
+    );
+    setSelectedTabId((taskId) => taskId ?? activeTask.taskId);
+  }, [activeTask]);
+
+  useEffect(() => {
+    if (view === "work" && !activeTask && !isLoadingHistory) {
+      setSelectedTabId(undefined);
+    }
+  }, [activeTask, isLoadingHistory, view]);
 
   useEffect(() => {
     if (!notice) {
@@ -189,6 +234,7 @@ function ConnectedApp({
     if (location.view !== "work") {
       return;
     }
+    setSelectedTabId(location.taskId);
     if (location.taskId) {
       if (activeTask?.taskId !== location.taskId) {
         void store.getState().openTask(location.taskId);
@@ -241,8 +287,31 @@ function ConnectedApp({
 
   function openBlankConversation() {
     saveActiveProject(undefined);
+    setSelectedTabId(undefined);
     setHomeRevision((revision) => revision + 1);
     navigateTo({ view: "work" });
+  }
+
+  function openTaskInTab(taskId: string) {
+    setSelectedTabId(taskId);
+    setOpenTabIds((taskIds) =>
+      taskIds.includes(taskId) ? taskIds : [...taskIds, taskId],
+    );
+    navigateTo({ view: "work", taskId });
+  }
+
+  function closeConversationTab(taskId: string) {
+    const closingIndex = openTabIds.indexOf(taskId);
+    const nextTabIds = openTabIds.filter((item) => item !== taskId);
+    setOpenTabIds(nextTabIds);
+    if (view !== "work" || selectedTabId !== taskId) return;
+    const nextTaskId =
+      nextTabIds[Math.min(Math.max(closingIndex, 0), nextTabIds.length - 1)];
+    if (nextTaskId) {
+      navigateTo({ view: "work", taskId: nextTaskId });
+    } else {
+      openBlankConversation();
+    }
   }
 
   function openNewProjectConversation(project: ProjectDirectory) {
@@ -329,8 +398,15 @@ function ConnectedApp({
       canGoBack={navigation.index > 0}
       canGoForward={navigation.index < navigation.entries.length - 1}
       sidebarCollapsed={sidebarCollapsed}
+      activeTaskId={view === "work" ? selectedTabId : undefined}
+      conversationHubActive={view === "conversationHub"}
+      conversationTabs={conversationTabs}
       onGoBack={() => moveInHistory(-1)}
       onGoForward={() => moveInHistory(1)}
+      onShowConversationHub={() => navigateTo({ view: "conversationHub" })}
+      onNewConversation={openBlankConversation}
+      onOpenTab={openTaskInTab}
+      onCloseTab={closeConversationTab}
       onResizeStart={startSidebarResize}
       onToggleSidebar={toggleSidebar}
     />
@@ -399,13 +475,24 @@ function ConnectedApp({
         notify={notify}
         onNewTask={openBlankConversation}
         onSettings={() => navigateTo({ view: "settings" })}
-        onOpenTask={(taskId) => {
-          navigateTo({ view: "work", taskId });
-        }}
+        onOpenTask={openTaskInTab}
       />
       {view === "automations" ||
         view === "skills" ? (
         <PrototypePage view={view} notify={notify} />
+      ) : view === "conversationHub" ? (
+        <ConversationHubPage
+          tasks={activeTasks}
+          taskProjectPaths={taskProjectPaths}
+          projectNames={projectNames}
+          onNewProject={openNewProjectConversation}
+          onNewConversation={(project) =>
+            project
+              ? openConversationInProject(project)
+              : openBlankConversation()
+          }
+          onOpenTask={openTaskInTab}
+        />
       ) : activeTask ? (
         <TaskPage
           store={store}

@@ -48,6 +48,8 @@ export interface TaskSnapshot {
   updatedAt?: string;
   approval?: ApprovalRequest;
   errorMessage?: string;
+  selectedModel?: string;
+  selectedReasoningEffort?: string;
 }
 
 export interface TaskSummary {
@@ -74,11 +76,18 @@ export interface ApprovalDecisionInput {
   decision: ApprovalDecision;
 }
 
+export interface TaskPreferencesInput {
+  taskId: string;
+  model: string;
+  reasoningEffort: string;
+}
+
 // 这是 Renderer 能看到的完整能力面，不能加入通用 invoke 或任意 channel。
 export interface LumoraTaskApi {
   create(goal: string): Promise<TaskSnapshot>;
   list(): Promise<TaskSummary[]>;
   get(taskId: string): Promise<TaskSnapshot>;
+  updatePreferences(input: TaskPreferencesInput): Promise<TaskSnapshot>;
   subscribe(
     taskId: string,
     onEvent: (event: TaskEvent) => void,

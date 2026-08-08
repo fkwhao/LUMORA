@@ -654,19 +654,28 @@ globalStyle(".archive-empty.compact", {
   minHeight: "150px",
 });
 
-globalStyle(".settings-dialog-backdrop", {
-  position: "fixed",
+globalStyle('[data-slot="dialog-overlay"].settings-dialog-overlay', {
   zIndex: "100",
-  inset: "0",
-  display: "grid",
-  placeItems: "center",
-  padding: "24px",
   background: "rgb(18 22 28 / 32%)",
   backdropFilter: "blur(3px)",
 });
 
+globalStyle('[data-slot="dialog-content"].settings-dialog-frame', {
+  zIndex: "101",
+  display: "block",
+  width: "min(390px, calc(100vw - 48px))",
+  maxWidth: "none",
+  padding: "0",
+  gap: "0",
+  border: "0",
+  borderRadius: "15px",
+  outline: "0",
+  background: "transparent",
+  boxShadow: "none",
+});
+
 globalStyle(".settings-dialog", {
-  width: "min(390px, 100%)",
+  width: "100%",
   padding: "21px",
   border: "1px solid #dfe3e8",
   borderRadius: "15px",
@@ -842,17 +851,17 @@ globalStyle(".provider-header-actions button.danger:hover", { color: "#fa423e" }
 
 globalStyle(".model-provider-fields", { display: "grid", alignContent: "start", gap: "17px" });
 globalStyle(".provider-field", { display: "grid", gap: "7px", color: "var(--muted)", fontSize: "10px" });
-globalStyle(".provider-field > input,.provider-secret-input,.api-format-trigger", { minHeight: "43px", border: "1px solid var(--line-strong)", borderRadius: "10px", background: "transparent" });
+globalStyle(".provider-field > input,.provider-secret-input", { minHeight: "43px", border: "1px solid var(--line-strong)", borderRadius: "10px", background: "transparent" });
 globalStyle(".provider-field > input,.provider-secret-input input", { width: "100%", padding: "0 13px", color: "var(--ink)", outline: "0", font: "inherit", fontSize: "11px" });
 globalStyle(".provider-secret-input", { display: "grid", gridTemplateColumns: "1fr auto", alignItems: "center" });
 globalStyle(".provider-secret-input input", { height: "41px", border: "0", background: "transparent" });
 globalStyle(".provider-field small", { color: "var(--subtle)", fontSize: "9px" });
 
-globalStyle(".api-format-select", { position: "relative" });
-globalStyle(".api-format-trigger", { display: "flex", width: "100%", alignItems: "center", justifyContent: "space-between", padding: "0 13px", color: "var(--ink)", cursor: "pointer", fontSize: "11px" });
-globalStyle(".api-format-menu", { position: "absolute", zIndex: "10", top: "calc(100% + 5px)", right: "0", left: "0", overflow: "hidden", padding: "5px", border: "1px solid var(--line-strong)", borderRadius: "11px", background: "var(--surface)", boxShadow: "0 18px 48px rgb(0 0 0 / 18%)" });
-globalStyle(".api-format-menu button", { display: "flex", width: "100%", minHeight: "36px", alignItems: "center", justifyContent: "space-between", padding: "0 10px", color: "var(--muted)", border: "0", borderRadius: "7px", background: "transparent", cursor: "pointer", fontSize: "10px" });
-globalStyle(".api-format-menu button:hover,.api-format-menu button.selected", { color: "var(--ink)", background: "color-mix(in srgb, var(--ink) 6%, transparent)" });
+globalStyle('.provider-field [data-slot="select-trigger"].api-format-trigger', { display: "flex", width: "100%", minHeight: "43px", height: "43px", alignItems: "center", justifyContent: "space-between", padding: "0 13px", color: "var(--ink)", border: "1px solid var(--line-strong)", borderRadius: "10px", outline: "0", background: "transparent", boxShadow: "none", cursor: "pointer", fontSize: "11px" });
+globalStyle('.provider-field [data-slot="select-trigger"].api-format-trigger:focus-visible', { borderColor: "color-mix(in srgb, var(--accent) 46%, var(--line-strong))", boxShadow: "0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent)" });
+globalStyle('[data-slot="select-content"].api-format-content', { minWidth: "var(--anchor-width)", padding: "5px", border: "1px solid var(--line-strong)", borderRadius: "11px", background: "var(--surface)", boxShadow: "0 18px 48px rgb(0 0 0 / 18%)" });
+globalStyle('[data-slot="select-item"].api-format-option', { minHeight: "36px", padding: "0 30px 0 10px", color: "var(--muted)", borderRadius: "7px", fontSize: "10px" });
+globalStyle('[data-slot="select-item"].api-format-option:hover, [data-slot="select-item"].api-format-option[data-highlighted]', { color: "var(--ink)", background: "color-mix(in srgb, var(--ink) 9%, transparent)" });
 
 globalStyle(".provider-models-section", { marginTop: "3px" });
 globalStyle(".provider-models-section > header,.provider-model-controls,.model-provider-actions", { display: "flex", alignItems: "center", justifyContent: "space-between" });
@@ -885,8 +894,9 @@ globalStyle(".model-provider-actions p", { display: "flex", alignItems: "center"
 globalStyle(".model-provider-actions > button", { minHeight: "35px", padding: "0 15px", color: "var(--surface)", border: "0", borderRadius: "9px", background: "var(--ink)", cursor: "pointer", fontSize: "10px", fontWeight: "650" });
 globalStyle(".provider-error", { margin: "0", color: "#fa423e", fontSize: "9px" });
 
-globalStyle(".model-config-dialog-backdrop", { position: "fixed", zIndex: "120", inset: "0", display: "grid", placeItems: "center", padding: "24px", background: "rgb(0 0 0 / 48%)", backdropFilter: "blur(5px)" });
-globalStyle(".model-config-dialog", { width: "min(620px, calc(100vw - 48px))", padding: "22px 24px 20px", color: "var(--ink)", border: "1px solid var(--line-strong)", borderRadius: "15px", background: "color-mix(in srgb, var(--surface) 94%, var(--ink) 6%)", boxShadow: "0 28px 90px rgb(0 0 0 / 35%)" });
+globalStyle('[data-slot="dialog-overlay"].model-config-dialog-overlay', { zIndex: "120", background: "rgb(0 0 0 / 48%)", backdropFilter: "blur(5px)" });
+globalStyle('[data-slot="dialog-content"].model-config-dialog-frame', { zIndex: "121", display: "block", width: "min(680px, calc(100vw - 48px))", maxWidth: "none", maxHeight: "calc(100vh - 48px)", padding: "0", gap: "0", overflow: "hidden", border: "0", borderRadius: "15px", outline: "0", background: "transparent", boxShadow: "none" });
+globalStyle(".model-config-dialog", { width: "100%", maxHeight: "calc(100vh - 48px)", overflowY: "auto", padding: "22px 24px 20px", color: "var(--ink)", border: "1px solid var(--line-strong)", borderRadius: "15px", background: "color-mix(in srgb, var(--surface) 94%, var(--ink) 6%)", boxShadow: "0 28px 90px rgb(0 0 0 / 35%)" });
 globalStyle(".model-config-dialog > header", { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "22px" });
 globalStyle(".model-config-dialog h2", { margin: "0", fontSize: "14px", fontWeight: "620", letterSpacing: "-0.02em" });
 globalStyle(".model-config-dialog > header button", { display: "grid", width: "30px", height: "30px", padding: "0", placeItems: "center", color: "var(--muted)", border: "0", borderRadius: "8px", background: "transparent", cursor: "pointer" });
@@ -897,6 +907,36 @@ globalStyle(".model-config-dialog > label input:focus", { borderColor: "color-mi
 globalStyle(".model-config-advanced-toggle", { display: "inline-flex", alignItems: "center", gap: "7px", marginTop: "17px", padding: "0", color: "var(--muted)", border: "0", background: "transparent", cursor: "pointer", fontSize: "10px" });
 globalStyle(".model-config-advanced-toggle svg", { transform: "rotate(-90deg)", transition: "transform 160ms ease" });
 globalStyle(".model-config-advanced-toggle.open svg", { transform: "rotate(0deg)" });
+globalStyle(".model-config-advanced-fields", { display: "grid", gap: "18px", marginTop: "17px" });
+globalStyle(".model-config-advanced-fields > label", { display: "grid", gap: "8px", color: "var(--muted)", fontSize: "10px" });
+globalStyle(".model-config-advanced-fields > label input", { width: "100%", height: "43px", padding: "0 13px", color: "var(--ink)", border: "1px solid var(--line-strong)", borderRadius: "9px", outline: "0", background: "transparent", font: "inherit", fontSize: "11px" });
+globalStyle(".reasoning-capability-editor", { overflow: "hidden", border: "1px solid var(--line-strong)", borderRadius: "12px", background: "color-mix(in srgb, var(--surface) 78%, transparent)" });
+globalStyle(".reasoning-capability-editor > header", { display: "flex", minHeight: "64px", alignItems: "center", justifyContent: "space-between", gap: "20px", padding: "13px 15px" });
+globalStyle(".reasoning-capability-editor > header > div", { display: "grid", gap: "4px" });
+globalStyle(".reasoning-capability-editor strong", { color: "var(--ink)", fontSize: "10px", fontWeight: "670" });
+globalStyle(".reasoning-capability-editor small", { color: "var(--subtle)", fontSize: "8.5px", lineHeight: "1.45" });
+globalStyle(".settings-switch-control", { position: "relative", display: "inline-flex", width: "44px", height: "25px", flex: "0 0 auto", alignItems: "center", padding: "0", border: "0", borderRadius: "999px", outline: "0", background: "color-mix(in srgb, var(--ink) 18%, transparent)", cursor: "pointer", transition: "background 150ms ease, opacity 150ms ease" });
+globalStyle(".settings-switch-thumb", { display: "block", width: "19px", height: "19px", marginLeft: "3px", borderRadius: "50%", background: "#f7f8fa", boxShadow: "0 2px 7px rgb(0 0 0 / 25%)", transition: "transform 180ms cubic-bezier(.2,.8,.2,1)" });
+globalStyle(".settings-switch-control[data-checked]", { background: "#2f7dd1" });
+globalStyle(".settings-switch-control[data-checked] .settings-switch-thumb", { transform: "translateX(19px)" });
+globalStyle(".settings-switch-control:focus-visible", { outline: "2px solid color-mix(in srgb, #2f7dd1 72%, transparent)", outlineOffset: "3px" });
+globalStyle(".settings-switch-control[data-disabled]", { cursor: "not-allowed", opacity: ".48" });
+globalStyle(".settings-switch-control.model-capability-switch", { width: "38px", height: "22px", background: "color-mix(in srgb, var(--ink) 16%, transparent)" });
+globalStyle(".settings-switch-control.model-capability-switch .settings-switch-thumb", { width: "16px", height: "16px", marginLeft: "3px", background: "var(--surface)", boxShadow: "0 1px 4px rgb(0 0 0 / 24%)" });
+globalStyle(".settings-switch-control.model-capability-switch[data-checked]", { background: "var(--accent)" });
+globalStyle(".settings-switch-control.model-capability-switch[data-checked] .settings-switch-thumb", { transform: "translateX(16px)" });
+globalStyle(".reasoning-effort-table", { borderTop: "1px solid var(--line)", background: "color-mix(in srgb, var(--ink) 1.5%, transparent)" });
+globalStyle(".reasoning-effort-table-head,.reasoning-effort-row", { display: "grid", gridTemplateColumns: "48px minmax(0, 1fr) 44px", alignItems: "center" });
+globalStyle(".reasoning-effort-table-head", { minHeight: "30px", padding: "0 9px", color: "var(--subtle)", borderBottom: "1px solid var(--line)", fontSize: "8px", textTransform: "uppercase", letterSpacing: ".08em" });
+globalStyle(".reasoning-effort-table-head span:last-child", { textAlign: "center" });
+globalStyle(".reasoning-effort-row", { minHeight: "42px", padding: "0 9px", borderBottom: "1px solid var(--line)" });
+globalStyle(".reasoning-effort-row > span", { color: "var(--subtle)", fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace", fontSize: "8px" });
+globalStyle(".reasoning-effort-row input", { width: "100%", height: "29px", padding: "0 9px", color: "var(--ink)", border: "1px solid transparent", borderRadius: "6px", outline: "0", background: "transparent", fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace", fontSize: "10px" });
+globalStyle(".reasoning-effort-row input:focus", { borderColor: "color-mix(in srgb, var(--accent) 42%, var(--line-strong))", background: "var(--surface)" });
+globalStyle(".reasoning-effort-row > button", { display: "grid", width: "28px", height: "28px", justifySelf: "center", padding: "0", placeItems: "center", color: "var(--subtle)", border: "0", borderRadius: "7px", background: "transparent", cursor: "pointer" });
+globalStyle(".reasoning-effort-row > button:hover", { color: "#d84945", background: "color-mix(in srgb, #d84945 9%, transparent)" });
+globalStyle(".reasoning-effort-add", { display: "inline-flex", minHeight: "34px", alignItems: "center", gap: "6px", margin: "8px 10px", padding: "0 9px", color: "var(--muted)", border: "1px dashed var(--line-strong)", borderRadius: "7px", background: "transparent", cursor: "pointer", fontSize: "9px" });
+globalStyle(".reasoning-effort-add:disabled", { cursor: "not-allowed", opacity: ".42" });
 globalStyle(".model-config-dialog > p", { margin: "14px 0 0", color: "#fa423e", fontSize: "9px" });
 globalStyle(".model-config-dialog > footer", { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "23px", paddingTop: "18px", borderTop: "1px solid var(--line)" });
 globalStyle(".model-config-dialog > footer button", { minHeight: "34px", padding: "0 13px", color: "var(--ink)", border: "1px solid var(--line-strong)", borderRadius: "8px", background: "transparent", cursor: "pointer", fontSize: "10px" });
@@ -1011,49 +1051,6 @@ globalStyle(".memory-settings-row small", {
   color: "var(--muted)",
   fontSize: "10px",
   lineHeight: "1.5",
-});
-
-globalStyle(".memory-switch", {
-  position: "relative",
-  flex: "0 0 auto",
-  width: "44px",
-  height: "25px",
-  padding: "0",
-  border: "0",
-  borderRadius: "999px",
-  background: "color-mix(in srgb, var(--ink) 18%, transparent)",
-  cursor: "pointer",
-  transition: "background 160ms ease, opacity 160ms ease",
-});
-
-globalStyle(".memory-switch span", {
-  position: "absolute",
-  top: "3px",
-  left: "3px",
-  width: "19px",
-  height: "19px",
-  borderRadius: "50%",
-  background: "#f7f8fa",
-  boxShadow: "0 2px 7px rgb(0 0 0 / 25%)",
-  transition: "transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1)",
-});
-
-globalStyle(".memory-switch.enabled", {
-  background: "#2f7dd1",
-});
-
-globalStyle(".memory-switch.enabled span", {
-  transform: "translateX(19px)",
-});
-
-globalStyle(".memory-switch:focus-visible", {
-  outline: "2px solid color-mix(in srgb, #2f7dd1 72%, transparent)",
-  outlineOffset: "3px",
-});
-
-globalStyle(".memory-switch:disabled", {
-  cursor: "not-allowed",
-  opacity: "0.48",
 });
 
 globalStyle(".memory-reset-button", {

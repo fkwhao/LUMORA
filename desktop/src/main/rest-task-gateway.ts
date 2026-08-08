@@ -9,11 +9,13 @@ import type {
   TaskEvent,
   TaskSnapshot,
   TaskSummary,
+  TaskPreferencesInput,
 } from "../shared/task-contract";
 import {
   validateApprovalDecisionInput,
   validateGoal,
   validateTaskId,
+  validateTaskPreferencesInput,
 } from "../shared/validation";
 
 type JavaError = {
@@ -51,6 +53,17 @@ export class RestTaskGateway implements TaskGateway {
   get(taskId: string): Promise<TaskSnapshot> {
     const validatedTaskId = validateTaskId(taskId);
     return this.request(`/api/v1/tasks/${validatedTaskId}`);
+  }
+
+  updatePreferences(input: TaskPreferencesInput): Promise<TaskSnapshot> {
+    const preferences = validateTaskPreferencesInput(input);
+    return this.request(`/api/v1/tasks/${preferences.taskId}/preferences`, {
+      method: "PUT",
+      body: JSON.stringify({
+        model: preferences.model,
+        reasoningEffort: preferences.reasoningEffort,
+      }),
+    });
   }
 
   subscribe(

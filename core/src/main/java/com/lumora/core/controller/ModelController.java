@@ -120,7 +120,8 @@ public class ModelController {
     ) {
         return ProviderModelResponse.fromModel(modelService.createProviderModel(
                 providerId, request.getModelId(), request.getContextWindow(),
-                request.getMaxOutputTokens(), correlationId));
+                request.getMaxOutputTokens(), request.getReasoningEfforts(),
+                correlationId));
     }
 
     @PutMapping("/providers/{providerId}/model-configurations/{modelConfigurationId}")
@@ -134,7 +135,7 @@ public class ModelController {
         return ProviderModelResponse.fromModel(modelService.updateProviderModel(
                 providerId, modelConfigurationId, request.getModelId(),
                 request.getContextWindow(), request.getMaxOutputTokens(),
-                correlationId));
+                request.getReasoningEfforts(), correlationId));
     }
 
     @DeleteMapping("/providers/{providerId}/model-configurations/{modelConfigurationId}")

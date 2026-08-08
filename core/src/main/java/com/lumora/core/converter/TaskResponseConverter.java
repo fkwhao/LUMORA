@@ -20,6 +20,8 @@ public class TaskResponseConverter {
         response.setActiveStep(task.getActiveStep());
         response.setResultSummary(task.getResultSummary());
         response.setFailureReason(task.getFailureReason());
+        response.setSelectedModel(task.getSelectedModel());
+        response.setSelectedReasoningEffort(task.getSelectedReasoningEffort());
         response.setCreatedAt(task.getCreatedAt());
         response.setUpdatedAt(task.getUpdatedAt());
         return response;

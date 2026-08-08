@@ -8,6 +8,13 @@ class TestResizeObserver implements ResizeObserver {
 
 globalThis.ResizeObserver = TestResizeObserver;
 
+if (
+  typeof globalThis.PointerEvent === "undefined" &&
+  typeof globalThis.MouseEvent !== "undefined"
+) {
+  globalThis.PointerEvent = MouseEvent as typeof PointerEvent;
+}
+
 if (typeof HTMLElement !== "undefined") {
   Object.defineProperty(HTMLElement.prototype, "scrollTo", {
     configurable: true,

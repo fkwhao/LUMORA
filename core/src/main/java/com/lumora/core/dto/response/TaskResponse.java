@@ -12,6 +12,8 @@ public class TaskResponse {
     private String activeStep;
     private String resultSummary;
     private String failureReason;
+    private String selectedModel;
+    private String selectedReasoningEffort;
     private List<TaskPlanStepResponse> planSteps = List.of();
     private Instant createdAt;
     private Instant updatedAt;
@@ -73,6 +75,22 @@ public class TaskResponse {
 
     public void setFailureReason(String failureReason) {
         this.failureReason = failureReason;
+    }
+
+    public String getSelectedModel() {
+        return selectedModel;
+    }
+
+    public void setSelectedModel(String selectedModel) {
+        this.selectedModel = selectedModel;
+    }
+
+    public String getSelectedReasoningEffort() {
+        return selectedReasoningEffort;
+    }
+
+    public void setSelectedReasoningEffort(String selectedReasoningEffort) {
+        this.selectedReasoningEffort = selectedReasoningEffort;
     }
 
     public List<TaskPlanStepResponse> getPlanSteps() {

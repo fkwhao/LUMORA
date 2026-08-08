@@ -229,7 +229,39 @@ function validateProviderModel(input: SaveProviderModelInput): SaveProviderModel
   if (!Number.isInteger(maxOutputTokens) || maxOutputTokens < 1 || maxOutputTokens > 10_000_000) {
     throw new TypeError("最大输出 Token 必须在 1 到 10000000 之间");
   }
-  return { modelId: requireText(input.modelId, "模型 ID"), contextWindow, maxOutputTokens };
+  const reasoningEfforts = validateReasoningEfforts(input.reasoningEfforts);
+  return {
+    modelId: requireText(input.modelId, "模型 ID"),
+    contextWindow,
+    maxOutputTokens,
+    reasoningEfforts,
+  };
+}
+
+function validateReasoningEfforts(values: unknown): string[] {
+  if (values === undefined) {
+    return [];
+  }
+  if (!Array.isArray(values)) {
+    throw new TypeError("推理档位格式无效");
+  }
+  if (values.length > 16) {
+    throw new TypeError("推理档位最多可配置 16 个");
+  }
+  const normalized = values.map((value) => {
+    if (typeof value !== "string") {
+      throw new TypeError("推理档位必须是字符串");
+    }
+    const field = value.trim();
+    if (!field || field.length > 64 || !/^[A-Za-z0-9._-]+$/.test(field)) {
+      throw new TypeError("推理档位只能包含字母、数字、点、下划线和连字符");
+    }
+    return field;
+  });
+  if (new Set(normalized).size !== normalized.length) {
+    throw new TypeError("推理档位不能重复");
+  }
+  return normalized;
 }
 
 interface StreamStartInput {
@@ -281,14 +313,11 @@ function validateChatRequestOptions(
     return undefined;
   }
   const model = options.model?.trim() || undefined;
-  const allowed = new Set([
-    "none",
-    "low",
-    "high",
-    "max",
-  ]);
-  const reasoningEffort = options.reasoningEffort;
-  if (reasoningEffort && !allowed.has(reasoningEffort)) {
+  const reasoningEffort = options.reasoningEffort?.trim() || undefined;
+  if (
+    reasoningEffort &&
+    (reasoningEffort.length > 64 || !/^[A-Za-z0-9._-]+$/.test(reasoningEffort))
+  ) {
     throw new TypeError("推理强度无效");
   }
   const workspacePath = options.workspacePath?.trim() || undefined;

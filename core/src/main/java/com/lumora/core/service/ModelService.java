@@ -38,11 +38,12 @@ public interface ModelService {
             String correlationId);
 
     ProviderModel createProviderModel(String providerId, String modelId,
-            int contextWindow, int maxOutputTokens, String correlationId);
+            int contextWindow, int maxOutputTokens,
+            List<String> reasoningEfforts, String correlationId);
 
     ProviderModel updateProviderModel(String providerId, String modelConfigurationId,
             String modelId, int contextWindow, int maxOutputTokens,
-            String correlationId);
+            List<String> reasoningEfforts, String correlationId);
 
     void deleteProviderModel(String providerId, String modelConfigurationId,
             String correlationId);

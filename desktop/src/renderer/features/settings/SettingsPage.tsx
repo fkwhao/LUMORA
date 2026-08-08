@@ -4,7 +4,6 @@ import {
   Bot,
   Box,
   Cable,
-  Check,
   ChevronDown,
   CircleCheck,
   Eye,
@@ -16,11 +15,10 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
-  Search,
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import type {
   ApiFormat,
@@ -31,8 +29,25 @@ import type {
 } from "../../../shared/model-contract";
 import type { LumoraMemoryApi } from "../../../shared/memory-contract";
 import type { TaskSummary } from "../../../shared/task-contract";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "../../components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../../components/ui/select";
+import { Switch } from "../../components/ui/switch";
 import { AppearancePage } from "./AppearancePage";
 import { PersonalizationPage } from "./PersonalizationPage";
+import {
+  SettingsConfirmDialog,
+  SettingsSearchInput,
+} from "./SettingsControls";
 
 interface SettingsPageProps {
   api?: LumoraModelApi;
@@ -115,15 +130,13 @@ export function SettingsPage({
           <strong>设置</strong>
           <small>LUMORA 本地偏好</small>
         </div>
-        <label className="settings-search">
-          <Search size={15} />
-          <input
-            aria-label="搜索设置"
-            placeholder="搜索设置"
-            value={settingsQuery}
-            onChange={(event) => setSettingsQuery(event.target.value)}
-          />
-        </label>
+        <SettingsSearchInput
+          ariaLabel="搜索设置"
+          className="settings-search"
+          placeholder="搜索设置"
+          value={settingsQuery}
+          onChange={setSettingsQuery}
+        />
         <nav>
           {showModel && (
             <SettingsNavItem
@@ -199,35 +212,15 @@ export function SettingsPage({
         )}
       </section>
 
-      {pendingDelete && (
-        <div className="settings-dialog-backdrop" role="presentation">
-          <section
-            className="settings-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="delete-dialog-title"
-          >
-            <span><Trash2 size={18} /></span>
-            <h2 id="delete-dialog-title">
-              {pendingDelete === "all" ? "删除全部归档任务？" : "删除归档任务？"}
-            </h2>
-            <p>
-              此操作会从当前客户端的任务列表移除记录，之后不能在界面中恢复。
-            </p>
-            <div>
-              <button
-                type="button"
-                onClick={() => setPendingDelete(undefined)}
-              >
-                取消
-              </button>
-              <button className="danger" type="button" onClick={confirmDelete}>
-                确认删除
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
+      <SettingsConfirmDialog
+        open={Boolean(pendingDelete)}
+        icon={Trash2}
+        title={pendingDelete === "all" ? "删除全部归档任务？" : "删除归档任务？"}
+        description="此操作会从当前客户端的任务列表移除记录，之后不能在界面中恢复。"
+        confirmLabel="确认删除"
+        onCancel={() => setPendingDelete(undefined)}
+        onConfirm={confirmDelete}
+      />
     </div>
   );
 }
@@ -299,15 +292,13 @@ function ArchivedTasksPanel({
       </header>
 
       <section className="archive-manager">
-        <label className="archive-search">
-          <Search size={16} />
-          <input
-            aria-label="搜索已归档任务"
-            placeholder="搜索已归档任务"
-            value={query}
-            onChange={(event) => onQueryChange(event.target.value)}
-          />
-        </label>
+        <SettingsSearchInput
+          ariaLabel="搜索已归档任务"
+          className="archive-search"
+          placeholder="搜索已归档任务"
+          value={query}
+          onChange={onQueryChange}
+        />
 
         {totalCount === 0 ? (
           <div className="archive-empty">
@@ -755,6 +746,9 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
                         <small>
                           {formatContextWindow(providerModel.contextWindow)} 上下文
                           · {formatContextWindow(providerModel.maxOutputTokens)} 输出
+                          {(providerModel.reasoningEfforts ?? []).length > 0
+                            ? ` · 推理 ${providerModel.reasoningEfforts.join(" / ")}`
+                            : " · 无推理选项"}
                         </small>
                       </div>
                       <div className="provider-model-actions">
@@ -866,17 +860,15 @@ function ModelConfigurationDialog({
   const [maxOutputTokens, setMaxOutputTokens] = useState(
     String(model?.maxOutputTokens ?? 8192),
   );
+  const [supportsReasoning, setSupportsReasoning] = useState(
+    Boolean(model?.reasoningEfforts?.length),
+  );
+  const [reasoningEfforts, setReasoningEfforts] = useState<string[]>(
+    model?.reasoningEfforts ?? [],
+  );
   const [advancedOpen, setAdvancedOpen] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dialogError, setDialogError] = useState<string>();
-
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -893,6 +885,29 @@ function ModelConfigurationDialog({
       setDialogError(parsedMaxOutputTokens);
       return;
     }
+    const normalizedReasoningEfforts = supportsReasoning
+      ? reasoningEfforts.map((effort) => effort.trim())
+      : [];
+    if (normalizedReasoningEfforts.some((effort) => !effort)) {
+      setDialogError("推理档位字段不能为空");
+      return;
+    }
+    if (
+      normalizedReasoningEfforts.some(
+        (effort) => effort.length > 64 || !/^[A-Za-z0-9._-]+$/.test(effort),
+      )
+    ) {
+      setDialogError("推理档位只能包含字母、数字、点、下划线和连字符");
+      return;
+    }
+    if (new Set(normalizedReasoningEfforts).size !== normalizedReasoningEfforts.length) {
+      setDialogError("推理档位不能重复");
+      return;
+    }
+    if (supportsReasoning && normalizedReasoningEfforts.length === 0) {
+      setDialogError("请至少添加一个推理档位");
+      return;
+    }
     setSaving(true);
     setDialogError(undefined);
     try {
@@ -900,6 +915,7 @@ function ModelConfigurationDialog({
         modelId,
         contextWindow: parsedContextWindow,
         maxOutputTokens: parsedMaxOutputTokens,
+        reasoningEfforts: normalizedReasoningEfforts,
       });
     } catch (saveError) {
       setDialogError(toMessage(saveError));
@@ -908,24 +924,22 @@ function ModelConfigurationDialog({
   }
 
   return (
-    <div
-      className="model-config-dialog-backdrop"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !saving) onClose();
       }}
     >
-      <form
-        className="model-config-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="model-config-dialog-title"
-        onSubmit={submit}
+      <DialogContent
+        className="model-config-dialog-frame"
+        overlayClassName="model-config-dialog-overlay"
+        showCloseButton={false}
       >
+        <form className="model-config-dialog" onSubmit={submit}>
         <header>
-          <h2 id="model-config-dialog-title">
+          <DialogTitle>
             {model ? "编辑模型配置" : "添加模型配置"}
-          </h2>
+          </DialogTitle>
           <button type="button" aria-label="关闭" onClick={onClose}>
             <X size={16} />
           </button>
@@ -972,19 +986,88 @@ function ModelConfigurationDialog({
         </button>
 
         {advancedOpen && (
-          <label>
-            <span>最大输出 Token</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              value={maxOutputTokens}
-              onChange={(event) =>
-                setMaxOutputTokens(onlyDigits(event.target.value))
-              }
-              required
-            />
-          </label>
+          <div className="model-config-advanced-fields">
+            <label>
+              <span>最大输出 Token</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={maxOutputTokens}
+                onChange={(event) =>
+                  setMaxOutputTokens(onlyDigits(event.target.value))
+                }
+                required
+              />
+            </label>
+
+            <section className="reasoning-capability-editor">
+              <header>
+                <div>
+                  <strong>推理选项</strong>
+                  <small>这些字段会原样发送给模型 API，请按供应商文档填写。</small>
+                </div>
+                <Switch
+                  className="model-capability-switch"
+                  aria-label="该模型支持推理选项"
+                  checked={supportsReasoning}
+                  onCheckedChange={(checked) => {
+                    setSupportsReasoning(checked);
+                    if (checked && reasoningEfforts.length === 0) {
+                      setReasoningEfforts(["none", "low", "high", "max"]);
+                    }
+                  }}
+                />
+              </header>
+
+              {supportsReasoning && (
+                <div className="reasoning-effort-table">
+                  <div className="reasoning-effort-table-head">
+                    <span>顺序</span>
+                    <span>API 字段值</span>
+                    <span>操作</span>
+                  </div>
+                  {reasoningEfforts.map((effort, index) => (
+                    <div className="reasoning-effort-row" key={index}>
+                      <span>{String(index + 1).padStart(2, "0")}</span>
+                      <input
+                        aria-label={`第 ${index + 1} 个推理档位`}
+                        value={effort}
+                        placeholder="例如 high"
+                        onChange={(event) =>
+                          setReasoningEfforts((values) =>
+                            values.map((value, valueIndex) =>
+                              valueIndex === index ? event.target.value : value,
+                            ),
+                          )
+                        }
+                      />
+                      <button
+                        type="button"
+                        aria-label={`删除推理档位 ${effort || index + 1}`}
+                        onClick={() =>
+                          setReasoningEfforts((values) =>
+                            values.filter((_, valueIndex) => valueIndex !== index),
+                          )
+                        }
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    className="reasoning-effort-add"
+                    type="button"
+                    disabled={reasoningEfforts.length >= 16}
+                    onClick={() => setReasoningEfforts((values) => [...values, ""])}
+                  >
+                    <Plus size={14} />
+                    添加档位
+                  </button>
+                </div>
+              )}
+            </section>
+          </div>
         )}
 
         {dialogError && <p>{dialogError}</p>}
@@ -994,8 +1077,9 @@ function ModelConfigurationDialog({
             {saving ? "保存中…" : "保存"}
           </button>
         </footer>
-      </form>
-    </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1019,64 +1103,32 @@ function ApiFormatSelect({
   value: ApiFormat;
   onChange(value: ApiFormat): void;
 }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const selected = apiFormatOptions.find((option) => option.value === value);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", closeOnOutsidePointer);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsidePointer);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [open]);
-
   return (
-    <div className="api-format-select" ref={rootRef}>
-      <button
-        className="api-format-trigger"
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
+    <Select
+      value={value}
+      onValueChange={(nextValue) => {
+        if (nextValue) onChange(nextValue as ApiFormat);
+      }}
+    >
+      <SelectTrigger className="api-format-trigger">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent
+        className="api-format-content"
+        align="start"
+        alignItemWithTrigger={false}
       >
-        <span>{selected?.label}</span>
-        <ChevronDown size={16} />
-      </button>
-      {open && (
-        <div className="api-format-menu" role="menu">
-          {apiFormatOptions.map((option) => (
-            <button
-              className={option.value === value ? "selected" : undefined}
-              type="button"
-              role="menuitemradio"
-              aria-checked={option.value === value}
-              key={option.value}
-              onClick={() => {
-                onChange(option.value);
-                setOpen(false);
-              }}
-            >
-              <span>{option.label}</span>
-              {option.value === value && <Check size={16} />}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+        {apiFormatOptions.map((option) => (
+          <SelectItem
+            className="api-format-option"
+            value={option.value}
+            key={option.value}
+          >
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 

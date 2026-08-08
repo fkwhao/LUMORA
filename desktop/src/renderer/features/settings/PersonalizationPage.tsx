@@ -2,6 +2,8 @@ import { Brain, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import type { LumoraMemoryApi } from "../../../shared/memory-contract";
+import { Switch } from "../../components/ui/switch";
+import { SettingsConfirmDialog } from "./SettingsControls";
 
 interface PersonalizationPageProps {
   api?: LumoraMemoryApi;
@@ -99,17 +101,13 @@ export function PersonalizationPage({
               <strong>启用记忆</strong>
               <small>从聊天中生成新记忆，并将相关记忆带入后续对话</small>
             </div>
-            <button
-              className={`memory-switch${enabled ? " enabled" : ""}`}
-              type="button"
-              role="switch"
-              aria-checked={enabled}
+            <Switch
+              className="memory-switch"
               aria-label="启用记忆"
+              checked={enabled}
               disabled={!api || loading || saving}
-              onClick={() => void toggleMemory()}
-            >
-              <span />
-            </button>
+              onCheckedChange={() => void toggleMemory()}
+            />
           </div>
 
           <div className="memory-settings-row reset-row">
@@ -140,39 +138,17 @@ export function PersonalizationPage({
         </p>
       </section>
 
-      {confirmingReset && (
-        <div className="settings-dialog-backdrop" role="presentation">
-          <section
-            className="settings-dialog memory-reset-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="memory-reset-title"
-          >
-            <span><RotateCcw size={18} /></span>
-            <h2 id="memory-reset-title">重置全部记忆？</h2>
-            <p>
-              所有用户、项目和会话动态记忆都会被永久删除，之后无法恢复。
-            </p>
-            <div>
-              <button
-                type="button"
-                disabled={resetting}
-                onClick={() => setConfirmingReset(false)}
-              >
-                取消
-              </button>
-              <button
-                className="danger"
-                type="button"
-                disabled={resetting}
-                onClick={() => void resetMemory()}
-              >
-                {resetting ? "正在重置…" : "确认重置"}
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
+      <SettingsConfirmDialog
+        open={confirmingReset}
+        icon={RotateCcw}
+        title="重置全部记忆？"
+        description="所有用户、项目和会话动态记忆都会被永久删除，之后无法恢复。"
+        confirmLabel={resetting ? "正在重置…" : "确认重置"}
+        busy={resetting}
+        className="memory-reset-dialog"
+        onCancel={() => setConfirmingReset(false)}
+        onConfirm={() => void resetMemory()}
+      />
     </main>
   );
 }

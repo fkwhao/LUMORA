@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActionBarPrimitive,
   AssistantRuntimeProvider,
@@ -17,6 +24,7 @@ import {
   ArrowUp,
   Check,
   ChevronDown,
+  ChevronRight,
   Copy,
   Download,
   File,
@@ -56,13 +64,6 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "../../components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../../components/ui/select";
 import { MarkdownMessage } from "../../components/MarkdownMessage";
 import { ApprovalDock } from "./ApprovalDock";
 import { ToolApprovalDialog } from "./ToolApprovalDialog";
@@ -80,7 +81,7 @@ interface TaskPageProps {
 type ComposerReasoningEffort = ReasoningEffort;
 const EMPTY_TASK_EVENTS: TaskEvent[] = [];
 
-export function TaskPage({
+export const TaskPage = memo(function TaskPage({
   store,
   modelApi,
   composerMotion,
@@ -88,6 +89,18 @@ export function TaskPage({
 }: TaskPageProps) {
   const task = useStore(store, (state) => state.activeTask);
   const messages = useStore(store, (state) => state.messages);
+  const isLoadingHistory = useStore(
+    store,
+    (state) => state.isLoadingHistory,
+  );
+  const isHydratingHistory = useStore(
+    store,
+    (state) => state.isHydratingHistory,
+  );
+  const historyHydrationProgress = useStore(
+    store,
+    (state) => state.historyHydrationProgress,
+  );
   const isChatting = useStore(store, (state) => state.isChatting);
   const isCompacting = useStore(store, (state) => state.isCompacting);
   const chatWasStopped = useStore(store, (state) => state.chatWasStopped);
@@ -107,12 +120,15 @@ export function TaskPage({
   const [selectedModel, setSelectedModel] = useState("");
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [reasoningEffort, setReasoningEffort] =
-    useState<ComposerReasoningEffort>("high");
+    useState<ComposerReasoningEffort>("");
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(
     loadPermissionMode,
   );
   const [composerMenu, setComposerMenu] = useState<
     "context" | "command" | "permission" | "model" | "reasoning" | null
+  >(null);
+  const [modelPickerSection, setModelPickerSection] = useState<
+    "model" | "reasoning" | null
   >(null);
   const [artifact, setArtifact] = useState<ArtifactChunk>();
   const [artifactLoading, setArtifactLoading] = useState(false);
@@ -135,6 +151,7 @@ export function TaskPage({
   const railWasDraggedRef = useRef(false);
   const lastAutoScrolledQuestionRef = useRef<string | undefined>(undefined);
   const lastOpenedTaskRef = useRef<string | undefined>(undefined);
+  const stopOpeningScrollRef = useRef<() => void>(() => undefined);
   const openChangeReview = useCallback((item: WorkLogItem) => {
     setSelectedChangeId(item.itemId);
     setReviewOpen(true);
@@ -144,11 +161,26 @@ export function TaskPage({
     if (!modelApi) {
       return;
     }
+    let cancelled = false;
     void modelApi
       .getSettings()
       .then((settings) => {
+        if (cancelled) return;
+        const localPreference = task?.taskId
+          ? loadTaskComposerPreference(task.taskId)
+          : undefined;
+        const configuredModels = new Set([
+          settings.model,
+          ...settings.models.map((model) => model.modelId),
+        ]);
+        const nextModel =
+          task?.selectedModel && configuredModels.has(task.selectedModel)
+            ? task.selectedModel
+            : localPreference?.model && configuredModels.has(localPreference.model)
+              ? localPreference.model
+            : settings.model;
         setModelSettings(settings);
-        setSelectedModel(settings.model);
+        setSelectedModel(nextModel);
         if (settings.apiKeyConfigured) {
           void modelApi
             .listModels({
@@ -160,7 +192,95 @@ export function TaskPage({
         }
       })
       .catch(() => undefined);
-  }, [modelApi]);
+    return () => {
+      cancelled = true;
+    };
+  }, [modelApi, task?.taskId]);
+
+  const selectedModelConfiguration = modelSettings?.models.find(
+    (model) => model.modelId === selectedModel,
+  );
+  const reasoningEffortOptions = useMemo(
+    () =>
+      (selectedModelConfiguration?.reasoningEfforts ?? []).map((value) => ({
+        value,
+        ...reasoningEffortMetadata(value),
+      })),
+    [selectedModelConfiguration],
+  );
+
+  useEffect(() => {
+    const values = reasoningEffortOptions.map((option) => option.value);
+    if (values.length === 0) {
+      setReasoningEffort("");
+      setComposerMenu((menu) => (menu === "reasoning" ? null : menu));
+      return;
+    }
+    const databaseEffort =
+      task?.selectedModel === selectedModel
+        ? task.selectedReasoningEffort
+        : undefined;
+    const rememberedEffort =
+      databaseEffort ||
+      (task?.taskId
+        ? loadTaskComposerPreference(task.taskId)?.reasoningByModel?.[
+            selectedModel
+          ]
+        : undefined);
+    if (rememberedEffort && values.includes(rememberedEffort)) {
+      if (reasoningEffort !== rememberedEffort) {
+        setReasoningEffort(rememberedEffort);
+      }
+      return;
+    }
+    if (!values.includes(reasoningEffort)) {
+      setReasoningEffort(values[0] ?? "");
+    }
+  }, [reasoningEffort, reasoningEffortOptions, selectedModel, task?.taskId]);
+
+  const selectModel = useCallback(
+    (model: string) => {
+      const efforts =
+        modelSettings?.models.find((item) => item.modelId === model)
+          ?.reasoningEfforts ?? [];
+      const rememberedEffort = task?.taskId
+        ? loadTaskComposerPreference(task.taskId)?.reasoningByModel?.[model]
+        : undefined;
+      const nextEffort =
+        rememberedEffort && efforts.includes(rememberedEffort)
+          ? rememberedEffort
+          : (efforts[0] ?? "");
+      setSelectedModel(model);
+      setReasoningEffort(nextEffort);
+      if (task?.taskId) {
+        saveTaskComposerModel(task.taskId, model);
+        if (nextEffort) {
+          saveTaskComposerReasoning(task.taskId, model, nextEffort);
+        }
+      }
+      void store
+        .getState()
+        .updateComposerPreferences(model, nextEffort)
+        .catch(() => notify("会话模型偏好保存失败", "info"));
+    },
+    [modelSettings?.models, notify, store, task?.taskId],
+  );
+
+  const selectReasoningEffort = useCallback(
+    (effort: ComposerReasoningEffort) => {
+      setReasoningEffort(effort);
+      if (task?.taskId && selectedModel) {
+        saveTaskComposerReasoning(task.taskId, selectedModel, effort);
+      }
+      if (selectedModel) {
+        void store
+          .getState()
+          .updateComposerPreferences(selectedModel, effort)
+          .catch(() => notify("会话模型偏好保存失败", "info"));
+      }
+    },
+    [notify, selectedModel, store, task?.taskId],
+  );
 
   useEffect(() => {
     if (!composerMenu) return;
@@ -309,20 +429,65 @@ export function TaskPage({
   }, [isChatting, messages]);
 
   useEffect(() => {
-    if (!task || lastOpenedTaskRef.current === task.taskId) {
+    if (!task || isLoadingHistory) {
       return;
     }
-    lastOpenedTaskRef.current = task.taskId;
-    requestAnimationFrame(() => {
-      const questionCount =
-        conversationScrollRef.current?.querySelectorAll(
-          "[data-question-index]",
-        ).length ?? 0;
-      if (questionCount > 0) {
-        scrollToQuestion(questionCount - 1, "auto");
+    const latestQuestion = [...messages]
+      .reverse()
+      .find((message) => message.role === "user");
+    const openedContentKey = `${task.taskId}:${
+      latestQuestion?.messageId ??
+      latestQuestion?.createdAt ??
+      latestQuestion?.content ??
+      task.goal
+    }`;
+    if (lastOpenedTaskRef.current === openedContentKey) return;
+    lastOpenedTaskRef.current = openedContentKey;
+    let cancelled = false;
+    let frame: number | undefined;
+    const timers: number[] = [];
+    const scrollToLatestQuestion = () => {
+      if (cancelled) return;
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = undefined;
+        if (cancelled) return;
+        const scroll = conversationScrollRef.current;
+        if (!scroll) return;
+        const questions = scroll.querySelectorAll("[data-question-index]");
+        if (questions.length > 0) {
+          scrollToQuestion(questions.length - 1, "auto");
+        } else {
+          scroll.scrollTop = scroll.scrollHeight;
+        }
+      });
+    };
+    scrollToLatestQuestion();
+    timers.push(
+      window.setTimeout(scrollToLatestQuestion, 80),
+      window.setTimeout(scrollToLatestQuestion, 240),
+    );
+    const content = conversationContentRef.current;
+    const observer =
+      content && typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(scrollToLatestQuestion)
+        : undefined;
+    if (content) observer?.observe(content);
+    const stop = () => {
+      if (cancelled) return;
+      cancelled = true;
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      timers.forEach((timer) => window.clearTimeout(timer));
+      observer?.disconnect();
+      if (stopOpeningScrollRef.current === stop) {
+        stopOpeningScrollRef.current = () => undefined;
       }
-    });
-  }, [messages, task]);
+    };
+    stopOpeningScrollRef.current();
+    stopOpeningScrollRef.current = stop;
+    timers.push(window.setTimeout(stop, 520));
+    return stop;
+  }, [isLoadingHistory, messages, task]);
 
   useEffect(
     () => () => {
@@ -426,7 +591,7 @@ export function TaskPage({
       }
       await store.getState().sendMessage(content, {
         model: selectedModel || undefined,
-        reasoningEffort,
+        reasoningEffort: reasoningEffort || undefined,
         permissionMode,
       });
     },
@@ -461,7 +626,7 @@ export function TaskPage({
       try {
         await store.getState().regenerateMessage(target.messageId, content, {
           model: selectedModel || undefined,
-          reasoningEffort,
+          reasoningEffort: reasoningEffort || undefined,
           permissionMode,
         });
       } catch (error) {
@@ -499,7 +664,7 @@ export function TaskPage({
           .getState()
           .regenerateMessage(target.messageId, target.content, {
             model: selectedModel || undefined,
-            reasoningEffort,
+            reasoningEffort: reasoningEffort || undefined,
             permissionMode,
           });
       } catch (error) {
@@ -567,6 +732,7 @@ export function TaskPage({
   });
 
   function cancelConversationScrollAnimation() {
+    stopOpeningScrollRef.current();
     const scroll = conversationScrollRef.current;
     if (scroll) {
       if (typeof scroll.scrollTo === "function") {
@@ -759,6 +925,7 @@ export function TaskPage({
       [
         configuredModel,
         ...availableModels,
+        ...(modelSettings?.models.map((model) => model.modelId) ?? []),
         ...messages.map((message) => message.model ?? ""),
       ].filter(Boolean),
     ),
@@ -1427,7 +1594,7 @@ export function TaskPage({
                                   aria-checked={model === selectedModel}
                                   key={model}
                                   onClick={() => {
-                                    setSelectedModel(model);
+                                    selectModel(model);
                                     setComposerMenu(null);
                                   }}
                                 >
@@ -1445,61 +1612,63 @@ export function TaskPage({
                           )}
                         </span>
 
-                        <span className="composer-menu-anchor reasoning-anchor">
-                          <button
-                            className="composer-choice-button reasoning-choice-button"
-                            type="button"
-                            aria-label="选择推理强度"
-                            aria-expanded={composerMenu === "reasoning"}
-                            onClick={() =>
-                              setComposerMenu((open) =>
-                                open === "reasoning" ? null : "reasoning",
-                              )
-                            }
-                          >
-                            <span>{reasoningEffortLabel(reasoningEffort)}</span>
-                            <ChevronDown size={14} strokeWidth={1.7} />
-                          </button>
-                          {composerMenu === "reasoning" && (
-                            <span
-                              className="composer-popover reasoning-popover align-right"
-                              role="menu"
+                        {reasoningEffortOptions.length > 0 && (
+                          <span className="composer-menu-anchor reasoning-anchor">
+                            <button
+                              className="composer-choice-button reasoning-choice-button"
+                              type="button"
+                              aria-label="选择推理强度"
+                              aria-expanded={composerMenu === "reasoning"}
+                              onClick={() =>
+                                setComposerMenu((open) =>
+                                  open === "reasoning" ? null : "reasoning",
+                                )
+                              }
                             >
-                              <b>推理强度</b>
-                              {reasoningEffortOptions.map((option) => (
-                                <button
-                                  className={
-                                    option.value === reasoningEffort
-                                      ? "is-selected"
-                                      : undefined
-                                  }
-                                  type="button"
-                                  role="menuitemradio"
-                                  aria-checked={
-                                    option.value === reasoningEffort
-                                  }
-                                  key={option.value}
-                                  onClick={() => {
-                                    setReasoningEffort(option.value);
-                                    setComposerMenu(null);
-                                  }}
-                                >
-                                  <span className="composer-option-copy">
-                                    <strong>{option.label}</strong>
-                                    <small>{option.description}</small>
-                                  </span>
-                                  {option.value === reasoningEffort && (
-                                    <Check
-                                      className="composer-option-check"
-                                      size={16}
-                                      strokeWidth={1.8}
-                                    />
-                                  )}
-                                </button>
-                              ))}
-                            </span>
-                          )}
-                        </span>
+                              <span>{reasoningEffortLabel(reasoningEffort)}</span>
+                              <ChevronDown size={14} strokeWidth={1.7} />
+                            </button>
+                            {composerMenu === "reasoning" && (
+                              <span
+                                className="composer-popover reasoning-popover align-right"
+                                role="menu"
+                              >
+                                <b>推理强度</b>
+                                {reasoningEffortOptions.map((option) => (
+                                  <button
+                                    className={
+                                      option.value === reasoningEffort
+                                        ? "is-selected"
+                                        : undefined
+                                    }
+                                    type="button"
+                                    role="menuitemradio"
+                                    aria-checked={
+                                      option.value === reasoningEffort
+                                    }
+                                    key={option.value}
+                                    onClick={() => {
+                                      selectReasoningEffort(option.value);
+                                      setComposerMenu(null);
+                                    }}
+                                  >
+                                    <span className="composer-option-copy">
+                                      <strong>{option.label}</strong>
+                                      <small>{option.description}</small>
+                                    </span>
+                                    {option.value === reasoningEffort && (
+                                      <Check
+                                        className="composer-option-check"
+                                        size={16}
+                                        strokeWidth={1.8}
+                                      />
+                                    )}
+                                  </button>
+                                ))}
+                              </span>
+                            )}
+                          </span>
+                        )}
 
                         {isChatting ? (
                           <ComposerPrimitive.Cancel asChild>
@@ -1640,6 +1809,29 @@ export function TaskPage({
               event.target.value = "";
             }}
           />
+          {(isLoadingHistory || isHydratingHistory) && (
+            <div
+              className={
+                "history-hydration-status" +
+                (isLoadingHistory ? " is-indeterminate" : "")
+              }
+              role="status"
+              aria-live="polite"
+            >
+              <span className="history-hydration-label">
+                {isLoadingHistory ? "正在打开会话" : "正在补齐更早的对话"}
+              </span>
+              <span className="history-hydration-track" aria-hidden="true">
+                <i
+                  style={
+                    isLoadingHistory
+                      ? undefined
+                      : { width: `${historyHydrationProgress * 100}%` }
+                  }
+                />
+              </span>
+            </div>
+          )}
           <Thread
             components={{
               AssistantMessageBefore: AssistantMessageRunSummary,
@@ -1678,14 +1870,10 @@ export function TaskPage({
                     className={buttonVariants({
                       variant: "ghost",
                       size: "icon-xs",
+                      className: "composer-context-trigger",
                     })}
                     aria-label="添加上下文"
                     title="添加上下文"
-                    onClick={() => {
-                      if (composerMenu !== "context") {
-                        queueMicrotask(() => setComposerMenu("context"));
-                      }
-                    }}
                   >
                     <Plus />
                   </PopoverTrigger>
@@ -1693,7 +1881,7 @@ export function TaskPage({
                     side="top"
                     align="start"
                     sideOffset={10}
-                    className="w-72 gap-1.5 rounded-xl p-2"
+                    className="composer-fast-popover w-72 gap-1.5 rounded-xl p-2"
                   >
                     <PopoverHeader className="px-2 py-1">
                       <PopoverTitle>添加</PopoverTitle>
@@ -1773,17 +1961,13 @@ export function TaskPage({
                     className={buttonVariants({
                       variant: "ghost",
                       size: "xs",
-                      className:
+                      className: `composer-permission-trigger${
                         permissionMode === "full_access"
-                          ? "text-[#ff7a2f] hover:bg-[rgb(255_122_47_/_9%)] hover:text-[#ff8a42]"
-                          : undefined,
+                          ? " is-dangerous text-[#ff7a2f] hover:text-[#ff8a42]"
+                          : ""
+                      }`,
                     })}
                     aria-label="选择权限模式"
-                    onClick={() => {
-                      if (composerMenu !== "permission") {
-                        queueMicrotask(() => setComposerMenu("permission"));
-                      }
-                    }}
                   >
                     <PermissionModeIcon mode={permissionMode} size={14} />
                     <span className="hidden lg:inline">
@@ -1794,7 +1978,7 @@ export function TaskPage({
                     side="top"
                     align="start"
                     sideOffset={10}
-                    className="permission-popover w-[330px] gap-1 rounded-xl p-2"
+                    className="composer-fast-popover permission-popover w-[330px] gap-1 rounded-xl p-2"
                   >
                     <PopoverHeader className="px-2 py-1.5">
                       <PopoverTitle>应如何批准 LUMORA 操作？</PopoverTitle>
@@ -1893,16 +2077,17 @@ export function TaskPage({
 
                 <Popover
                   open={composerMenu === "model"}
-                  onOpenChange={(open) =>
-                    setComposerMenu(open ? "model" : null)
-                  }
+                  onOpenChange={(open) => {
+                    setComposerMenu(open ? "model" : null);
+                    setModelPickerSection(null);
+                  }}
                 >
                   <PopoverTrigger
-                    className="model-choice-button hidden h-7 min-w-32 max-w-52 items-center justify-between gap-2 rounded-lg border-0 bg-transparent px-2.5 text-xs font-medium text-foreground shadow-none hover:bg-accent lg:flex"
-                    aria-label="选择模型"
+                    className="model-reasoning-trigger flex h-7 min-w-0 max-w-64 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 text-xs font-medium text-foreground shadow-none hover:bg-transparent"
+                    aria-label="选择模型和推理强度"
                     title={
                       selectedModel
-                        ? modelDisplayName(selectedModel)
+                        ? `${modelDisplayName(selectedModel)}${reasoningEffort ? ` · ${reasoningEffortLabel(reasoningEffort)}` : ""}`
                         : "选择模型"
                     }
                   >
@@ -1911,68 +2096,94 @@ export function TaskPage({
                         ? modelDisplayName(selectedModel)
                         : "模型"}
                     </span>
+                    {reasoningEffortOptions.length > 0 && reasoningEffort && (
+                      <span className="model-reasoning-trigger-effort">
+                        {reasoningEffortLabel(reasoningEffort)}
+                      </span>
+                    )}
                     <ChevronDown className="size-3.5 shrink-0 opacity-60" />
                   </PopoverTrigger>
                   <PopoverContent
                     side="top"
                     align="end"
-                    sideOffset={4}
-                    className="composer-popover model-picker-popover w-48 gap-0.5 rounded-lg p-1.5"
+                    sideOffset={6}
+                    className="composer-popover composer-fast-popover model-reasoning-popover w-64 rounded-xl p-1.5"
                   >
-                    <PopoverHeader className="px-2 py-1">
-                      <PopoverTitle>选择模型</PopoverTitle>
-                    </PopoverHeader>
-                    {modelOptions.map((model) => (
-                      <Button
-                        className={[
-                          "h-8 w-full justify-between rounded-md px-2 text-start text-xs font-normal",
-                          model === selectedModel ? "is-selected" : "",
-                        ]
-                          .filter(Boolean)
-                          .join(" ")}
-                        variant="ghost"
+                    <button
+                      className={`model-reasoning-row${modelPickerSection === "model" ? " active" : ""}`}
+                      type="button"
+                      onPointerEnter={() => setModelPickerSection("model")}
+                      onClick={() => setModelPickerSection("model")}
+                    >
+                      <span>模型</span>
+                      <strong>{modelDisplayName(selectedModel)}</strong>
+                      <ChevronRight />
+                    </button>
+                    {reasoningEffortOptions.length > 0 && (
+                      <button
+                        className={`model-reasoning-row${modelPickerSection === "reasoning" ? " active" : ""}`}
                         type="button"
-                        role="menuitemradio"
-                        aria-checked={model === selectedModel}
-                        key={model}
-                        onClick={() => {
-                          setSelectedModel(model);
-                          setComposerMenu(null);
-                        }}
+                        onPointerEnter={() => setModelPickerSection("reasoning")}
+                        onClick={() => setModelPickerSection("reasoning")}
                       >
-                        <span className="truncate">
-                          {modelDisplayName(model)}
-                        </span>
-                        {model === selectedModel && (
-                          <Check className="composer-option-check size-4 shrink-0" />
-                        )}
-                      </Button>
-                    ))}
+                        <span>推理强度</span>
+                        <strong>{reasoningEffortLabel(reasoningEffort)}</strong>
+                        <ChevronRight />
+                      </button>
+                    )}
+
+                    {modelPickerSection && (
+                      <div
+                        className={`model-reasoning-submenu is-${modelPickerSection}`}
+                        role="menu"
+                        aria-label={
+                          modelPickerSection === "model"
+                            ? "选择模型"
+                            : "选择推理强度"
+                        }
+                      >
+                        {modelPickerSection === "model"
+                          ? modelOptions.map((model) => (
+                            <Button
+                              className="model-reasoning-option"
+                              variant="ghost"
+                              type="button"
+                              role="menuitemradio"
+                              aria-checked={model === selectedModel}
+                              key={model}
+                              onClick={() => {
+                                selectModel(model);
+                                setComposerMenu(null);
+                              }}
+                            >
+                              <span className="truncate">
+                                {modelDisplayName(model)}
+                              </span>
+                              {model === selectedModel && <Check />}
+                            </Button>
+                            ))
+                          : reasoningEffortOptions.map((option) => (
+                            <Button
+                              className="model-reasoning-option"
+                              variant="ghost"
+                              type="button"
+                              role="menuitemradio"
+                              aria-checked={option.value === reasoningEffort}
+                              key={option.value}
+                              onClick={() => {
+                                selectReasoningEffort(option.value);
+                                setComposerMenu(null);
+                              }}
+                            >
+                              <span>{option.label}</span>
+                              <small>{option.value}</small>
+                              {option.value === reasoningEffort && <Check />}
+                            </Button>
+                            ))}
+                      </div>
+                    )}
                   </PopoverContent>
                 </Popover>
-
-                <Select
-                  value={reasoningEffort}
-                  onValueChange={(value) =>
-                    value &&
-                    setReasoningEffort(value as ComposerReasoningEffort)
-                  }
-                >
-                  <SelectTrigger
-                    size="sm"
-                    className="order-2 hidden xl:flex"
-                  aria-label="选择推理强度"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent side="top" align="end">
-                  {reasoningEffortOptions.map((option) => (
-                    <SelectItem value={option.value} key={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                  </SelectContent>
-                </Select>
               </div>
             }
           />
@@ -2029,7 +2240,7 @@ export function TaskPage({
       </main>
     </AssistantRuntimeProvider>
   );
-}
+});
 
 function PlainTextMessagePart({ text }: TextMessagePartProps) {
   return <p>{text}</p>;
@@ -2120,16 +2331,19 @@ const permissionModeOptions: Array<{
   },
 ];
 
-const reasoningEffortOptions: Array<{
-  value: ComposerReasoningEffort;
+function reasoningEffortMetadata(value: string): {
   label: string;
   description: string;
-}> = [
-  { value: "none", label: "关闭", description: "不启用思考模式" },
-  { value: "low", label: "低", description: "响应更快" },
-  { value: "high", label: "高", description: "更深入地分析" },
-  { value: "max", label: "Max", description: "使用最大推理强度" },
-];
+} {
+  const known: Record<string, { label: string; description: string }> = {
+    none: { label: "关闭", description: "不启用思考模式" },
+    low: { label: "低", description: "更快响应" },
+    medium: { label: "中", description: "平衡速度与推理" },
+    high: { label: "高", description: "更深入地分析" },
+    max: { label: "Max", description: "使用最大推理强度" },
+  };
+  return known[value] ?? { label: value, description: `API 字段：${value}` };
+}
 
 function permissionModeLabel(mode: PermissionMode): string {
   return (
@@ -2172,10 +2386,7 @@ function PermissionModeIcon({
 }
 
 function reasoningEffortLabel(effort: ComposerReasoningEffort): string {
-  return (
-    reasoningEffortOptions.find((option) => option.value === effort)?.label ??
-    "高"
-  );
+  return reasoningEffortMetadata(effort).label;
 }
 
 function formatTokenCount(tokens: number): string {
@@ -2235,6 +2446,73 @@ function formatMessageDateTime(createdAt?: string): string {
 }
 
 const PERMISSION_MODE_STORAGE_KEY = "lumora.permission-mode";
+const TASK_COMPOSER_PREFERENCES_STORAGE_KEY =
+  "lumora.task-composer-preferences.v1";
+
+interface TaskComposerPreference {
+  model?: string;
+  reasoningByModel: Record<string, string>;
+}
+
+type TaskComposerPreferences = Record<string, TaskComposerPreference>;
+
+function loadTaskComposerPreferences(): TaskComposerPreferences {
+  try {
+    const value = window.localStorage.getItem(
+      TASK_COMPOSER_PREFERENCES_STORAGE_KEY,
+    );
+    if (!value) return {};
+    const parsed = JSON.parse(value) as TaskComposerPreferences;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function loadTaskComposerPreference(
+  taskId: string,
+): TaskComposerPreference | undefined {
+  return loadTaskComposerPreferences()[taskId];
+}
+
+function updateTaskComposerPreference(
+  taskId: string,
+  update: (preference: TaskComposerPreference) => TaskComposerPreference,
+): void {
+  try {
+    const preferences = loadTaskComposerPreferences();
+    preferences[taskId] = update(
+      preferences[taskId] ?? { reasoningByModel: {} },
+    );
+    window.localStorage.setItem(
+      TASK_COMPOSER_PREFERENCES_STORAGE_KEY,
+      JSON.stringify(preferences),
+    );
+  } catch {
+    // Local storage may be unavailable; the in-memory selection still works.
+  }
+}
+
+function saveTaskComposerModel(taskId: string, model: string): void {
+  updateTaskComposerPreference(taskId, (preference) => ({
+    ...preference,
+    model,
+  }));
+}
+
+function saveTaskComposerReasoning(
+  taskId: string,
+  model: string,
+  effort: string,
+): void {
+  updateTaskComposerPreference(taskId, (preference) => ({
+    ...preference,
+    reasoningByModel: {
+      ...preference.reasoningByModel,
+      [model]: effort,
+    },
+  }));
+}
 
 function loadPermissionMode(): PermissionMode {
   const value = window.localStorage.getItem(PERMISSION_MODE_STORAGE_KEY);

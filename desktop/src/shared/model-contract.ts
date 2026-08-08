@@ -26,12 +26,14 @@ export interface ProviderModel {
   modelId: string;
   contextWindow: number;
   maxOutputTokens: number;
+  reasoningEfforts: string[];
 }
 
 export interface SaveProviderModelInput {
   modelId: string;
   contextWindow: number;
   maxOutputTokens: number;
+  reasoningEfforts: string[];
 }
 
 export interface SaveModelProviderInput {
@@ -105,11 +107,7 @@ export interface ChatCompletion {
   usage: TokenUsage;
 }
 
-export type ReasoningEffort =
-  | "none"
-  | "low"
-  | "high"
-  | "max";
+export type ReasoningEffort = string;
 export type PermissionMode =
   | "full_access"
   | "auto_approve"

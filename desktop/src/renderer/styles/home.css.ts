@@ -8,24 +8,9 @@ const composerFromBottom = keyframes({
   to: { opacity: "1", transform: "translateY(0) scale(1)" },
 });
 
-const homePixelTrack = keyframes({
+const homePixelWorld = keyframes({
   from: { transform: "translateX(0)" },
   to: { transform: "translateX(-1440px)" },
-});
-
-const homePixelClouds = keyframes({
-  from: { transform: "translateX(0)" },
-  to: { transform: "translateX(-1440px)" },
-});
-
-const homePixelScenery = keyframes({
-  from: { transform: "translateX(0)" },
-  to: { transform: "translateX(-1440px)" },
-});
-
-const homePixelBlob = keyframes({
-  "0%, 100%": { transform: "scale(1, 1) translateY(0)" },
-  "50%": { transform: "scale(1.035, 0.965) translateY(1px)" },
 });
 
 const homePixelStatus = keyframes({
@@ -46,18 +31,19 @@ const homePixelJump = keyframes({
 
 globalStyle(".home-layout", {
   display: "grid",
-  overflow: "hidden",
+  overflowX: "hidden",
+  overflowY: "auto",
 });
 
 globalStyle(".home-content", {
   display: "flex",
   width: "min(calc(100% - 64px), 860px)",
-  height: "100%",
+  minHeight: "100%",
   margin: "0 auto",
   padding: "clamp(34px, 7vh, 74px) 0 42px",
   flexDirection: "column",
   alignItems: "stretch",
-  overflow: "auto",
+  overflow: "visible",
 });
 
 globalStyle(".home-hero", {
@@ -79,6 +65,7 @@ globalStyle(".home-pixel-panel", {
   background: "transparent",
   boxShadow: "none",
   cursor: "pointer",
+  contain: "layout paint style",
   font: "inherit",
   textAlign: "left",
   WebkitMaskImage:
@@ -134,20 +121,16 @@ globalStyle(".home-pixel-bands", {
   opacity: "0.22",
 });
 
-globalStyle(".home-pixel-clouds", {
-  animation: `${homePixelClouds} 36s linear infinite`,
+globalStyle(".home-pixel-world", {
+  animation: `${homePixelWorld} 24s linear infinite`,
+  willChange: "transform",
 });
 
-globalStyle(".home-pixel-scenery", {
-  animation: `${homePixelScenery} 24s linear infinite`,
-});
-
-globalStyle(".home-pixel-track", {
-  animation: `${homePixelTrack} 12.8s linear infinite`,
+globalStyle(".home-pixel-panel.is-scene-paused .home-pixel-world, .home-pixel-panel.is-scene-paused .home-pixel-run-status::before", {
+  animationPlayState: "paused",
 });
 
 globalStyle(".home-pixel-blob", {
-  animation: `${homePixelBlob} 720ms steps(2, end) infinite`,
   transformBox: "fill-box",
   transformOrigin: "center bottom",
 });
@@ -157,11 +140,11 @@ globalStyle(".home-pixel-panel.is-jumping .home-pixel-blob", {
 });
 
 globalStyle(".home-pixel-blob-trail > rect", {
-  animation: `${homePixelStatus} 560ms steps(1, end) infinite`,
+  opacity: "0",
 });
 
-globalStyle(".home-pixel-blob-trail .trail-two", {
-  animationDelay: "-280ms",
+globalStyle(".home-pixel-panel.is-jumping .home-pixel-blob-trail > rect", {
+  opacity: "0.48",
 });
 
 globalStyle(".home-hero h1", {
@@ -434,7 +417,7 @@ globalStyle(".home-pixel-panel", {
   },
 });
 
-globalStyle(".home-pixel-clouds, .home-pixel-scenery, .home-pixel-track, .home-pixel-blob, .home-pixel-blob-trail > rect, .home-pixel-run-status::before", {
+globalStyle(".home-pixel-world, .home-pixel-blob, .home-pixel-blob-trail > rect, .home-pixel-run-status::before", {
   "@media": {
     "(prefers-reduced-motion: reduce)": {
       animation: "none",

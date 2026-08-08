@@ -80,7 +80,7 @@ globalStyle(".sidebar-collapsed .sidebar,\n.sidebar-collapsed .settings-sidebar"
   pointerEvents: "none",
 });
 
-globalStyle(".app-shell > .home-layout,\n.app-shell > .task-layout,\n.app-shell > .prototype-layout", {
+globalStyle(".app-shell > .home-layout,\n.app-shell > .task-layout,\n.app-shell > .prototype-layout,\n.app-shell > .conversation-hub-layout", {
   gridColumn: "2",
 });
 
@@ -104,9 +104,9 @@ globalStyle(".window-navigation", {
   display: "flex",
   alignItems: "center",
   gap: "5px",
-  // 标题栏中的按钮必须排除在拖拽区域之外。
+  // 导航容器本身补足顶部拖拽面，具体交互控件再单独排除。
   // @ts-expect-error Electron 使用 Chromium 私有属性。
-  WebkitAppRegion: "no-drag",
+  WebkitAppRegion: "drag",
 });
 
 globalStyle(".window-navigation button", {
@@ -122,6 +122,8 @@ globalStyle(".window-navigation button", {
   cursor: "pointer",
   transition:
     "color 140ms ease, background-color 140ms ease, transform 140ms ease",
+  // @ts-expect-error Electron 使用 Chromium 私有属性。
+  WebkitAppRegion: "no-drag",
 });
 
 globalStyle(".window-navigation button:active:not(:disabled)", {

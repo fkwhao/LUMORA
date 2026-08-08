@@ -1,4 +1,7 @@
-import type { ApprovalDecisionInput } from "./task-contract";
+import type {
+  ApprovalDecisionInput,
+  TaskPreferencesInput,
+} from "./task-contract";
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/;
 const approvalKeys = ["approvalId", "decision", "taskId"] as const;
@@ -65,6 +68,33 @@ export function validateApprovalDecisionInput(
     taskId: validateTaskId(input.taskId),
     approvalId: validateApprovalId(input.approvalId),
     decision: input.decision,
+  };
+}
+
+export function validateTaskPreferencesInput(
+  input: unknown,
+): TaskPreferencesInput {
+  if (!isPlainRecord(input)) {
+    throw new Error("会话模型偏好格式无效");
+  }
+  const model = typeof input.model === "string" ? input.model.trim() : "";
+  const reasoningEffort =
+    typeof input.reasoningEffort === "string"
+      ? input.reasoningEffort.trim()
+      : "";
+  if (!model || model.length > 255) {
+    throw new Error("模型名称无效");
+  }
+  if (
+    reasoningEffort.length > 64 ||
+    (reasoningEffort && !/^[A-Za-z0-9._-]+$/.test(reasoningEffort))
+  ) {
+    throw new Error("推理强度无效");
+  }
+  return {
+    taskId: validateTaskId(input.taskId),
+    model,
+    reasoningEffort,
   };
 }
 

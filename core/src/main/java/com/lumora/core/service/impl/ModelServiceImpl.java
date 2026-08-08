@@ -87,7 +87,7 @@ public class ModelServiceImpl implements ModelService {
         configurationModelMapper.insert(new ModelConfigurationModel(
                 UUID.randomUUID().toString(), providerId,
                 configuration.getModelName(), configuration.getContextWindow(),
-                DEFAULT_MAX_OUTPUT_TOKENS, now, now));
+                DEFAULT_MAX_OUTPUT_TOKENS, "", now, now));
         return toProvider(configuration);
     }
 
@@ -180,7 +180,7 @@ public class ModelServiceImpl implements ModelService {
             if (findProviderModelByName(providerId, modelId) == null) {
                 configurationModelMapper.insert(new ModelConfigurationModel(
                         UUID.randomUUID().toString(), providerId, modelId,
-                        provider.getContextWindow(), DEFAULT_MAX_OUTPUT_TOKENS,
+                        provider.getContextWindow(), DEFAULT_MAX_OUTPUT_TOKENS, "",
                         now, now));
             }
         }
@@ -190,7 +190,8 @@ public class ModelServiceImpl implements ModelService {
     @Override
     @Transactional
     public ProviderModel createProviderModel(String providerId, String modelId,
-            int contextWindow, int maxOutputTokens, String correlationId) {
+            int contextWindow, int maxOutputTokens,
+            List<String> reasoningEfforts, String correlationId) {
         requireText(correlationId, "关联 ID");
         ModelConfiguration provider = requireProvider(providerId);
         String normalizedModel = requireText(modelId, "模型 ID");
@@ -201,7 +202,8 @@ public class ModelServiceImpl implements ModelService {
         ModelConfigurationModel model = new ModelConfigurationModel(
                 UUID.randomUUID().toString(), providerId, normalizedModel,
                 validateContextWindow(contextWindow),
-                validateMaxOutputTokens(maxOutputTokens), now, now);
+                validateMaxOutputTokens(maxOutputTokens),
+                encodeReasoningEfforts(reasoningEfforts), now, now);
         configurationModelMapper.insert(model);
         if (provider.getModelName() == null || provider.getModelName().isBlank()) {
             updateDefaultModel(provider, model);
@@ -213,7 +215,8 @@ public class ModelServiceImpl implements ModelService {
     @Transactional
     public ProviderModel updateProviderModel(String providerId,
             String modelConfigurationId, String modelId, int contextWindow,
-            int maxOutputTokens, String correlationId) {
+            int maxOutputTokens, List<String> reasoningEfforts,
+            String correlationId) {
         requireText(correlationId, "关联 ID");
         ModelConfiguration provider = requireProvider(providerId);
         ModelConfigurationModel model = requireProviderModel(
@@ -229,6 +232,7 @@ public class ModelServiceImpl implements ModelService {
         model.setModelId(normalizedModel);
         model.setContextWindow(validateContextWindow(contextWindow));
         model.setMaxOutputTokens(validateMaxOutputTokens(maxOutputTokens));
+        model.setReasoningEfforts(encodeReasoningEfforts(reasoningEfforts));
         model.setUpdatedAt(clock.instant());
         configurationModelMapper.updateById(model);
         if (oldModelId.equals(provider.getModelName())) {
@@ -694,7 +698,8 @@ public class ModelServiceImpl implements ModelService {
     private ProviderModel toProviderModel(ModelConfigurationModel model) {
         return new ProviderModel(model.getModelConfigurationModelId(),
                 model.getModelId(), model.getContextWindow(),
-                model.getMaxOutputTokens());
+                model.getMaxOutputTokens(),
+                decodeReasoningEfforts(model.getReasoningEfforts()));
     }
 
     private void updateDefaultModel(ModelConfiguration provider,
@@ -714,7 +719,7 @@ public class ModelServiceImpl implements ModelService {
         configurationModelMapper.insert(new ModelConfigurationModel(
                 UUID.randomUUID().toString(), provider.getConfigurationId(),
                 provider.getModelName(), provider.getContextWindow(),
-                DEFAULT_MAX_OUTPUT_TOKENS, now, now));
+                DEFAULT_MAX_OUTPUT_TOKENS, "", now, now));
     }
 
     private int validateContextWindow(int contextWindow) {
@@ -730,6 +735,35 @@ public class ModelServiceImpl implements ModelService {
                     "最大输出 Token 必须在 1 到 10000000 之间");
         }
         return maxOutputTokens;
+    }
+
+    private String encodeReasoningEfforts(List<String> reasoningEfforts) {
+        if (reasoningEfforts == null || reasoningEfforts.isEmpty()) {
+            return "";
+        }
+        if (reasoningEfforts.size() > 16) {
+            throw new IllegalArgumentException("推理档位最多可配置 16 个");
+        }
+        List<String> normalized = reasoningEfforts.stream()
+                .map(value -> requireText(value, "推理档位"))
+                .peek(value -> {
+                    if (value.length() > 64 || !value.matches("[A-Za-z0-9._-]+")) {
+                        throw new IllegalArgumentException(
+                                "推理档位只能包含字母、数字、点、下划线和连字符");
+                    }
+                })
+                .toList();
+        if (normalized.stream().distinct().count() != normalized.size()) {
+            throw new IllegalArgumentException("推理档位不能重复");
+        }
+        return String.join("\n", normalized);
+    }
+
+    private List<String> decodeReasoningEfforts(String encoded) {
+        if (encoded == null || encoded.isBlank()) {
+            return List.of();
+        }
+        return encoded.lines().filter(value -> !value.isBlank()).toList();
     }
 
     private String validateApiFormat(String apiFormat) {

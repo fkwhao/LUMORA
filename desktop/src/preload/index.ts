@@ -4,6 +4,7 @@ import type {
   ApprovalDecisionInput,
   LumoraApi,
   TaskEvent,
+  TaskPreferencesInput,
 } from "../shared/task-contract";
 import type {
   ChatMessage,
@@ -21,6 +22,7 @@ import {
   validateGoal,
   validateMessageId,
   validateTaskId,
+  validateTaskPreferencesInput,
 } from "../shared/validation";
 import type { ResolvedAppearanceTheme } from "../shared/window-contract";
 import type { ProjectDirectory } from "../shared/window-contract";
@@ -30,6 +32,11 @@ const api: LumoraApi = {
     create: (goal) => ipcRenderer.invoke("tasks:create", validateGoal(goal)),
     list: () => ipcRenderer.invoke("tasks:list"),
     get: (taskId) => ipcRenderer.invoke("tasks:get", validateTaskId(taskId)),
+    updatePreferences: (input: TaskPreferencesInput) =>
+      ipcRenderer.invoke(
+        "tasks:update-preferences",
+        validateTaskPreferencesInput(input),
+      ),
     subscribe: (untrustedTaskId, onEvent) => {
       const taskId = validateTaskId(untrustedTaskId);
       if (typeof onEvent !== "function") {

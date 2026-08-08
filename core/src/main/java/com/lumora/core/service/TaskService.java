@@ -52,6 +52,12 @@ public interface TaskService {
      */
     void touchTask(String taskId);
 
+    AgentTask updateComposerPreferences(
+            String taskId,
+            String model,
+            String reasoningEffort
+    );
+
     /**
      * 按领域状态机流转任务状态。
      *

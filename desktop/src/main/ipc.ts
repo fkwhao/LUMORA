@@ -1,17 +1,22 @@
 import { ipcMain, type WebContents } from "electron";
 
-import type { ApprovalDecisionInput } from "../shared/task-contract";
+import type {
+  ApprovalDecisionInput,
+  TaskPreferencesInput,
+} from "../shared/task-contract";
 import type { TaskGateway } from "./task-gateway";
 import {
   validateApprovalDecisionInput,
   validateGoal,
   validateTaskId,
+  validateTaskPreferencesInput,
 } from "../shared/validation";
 
 const channels = {
   create: "tasks:create",
   list: "tasks:list",
   get: "tasks:get",
+  updatePreferences: "tasks:update-preferences",
   decideApproval: "tasks:decide-approval",
   subscribe: "tasks:subscribe",
   unsubscribe: "tasks:unsubscribe",
@@ -27,6 +32,11 @@ export function registerTaskIpc(gateway: TaskGateway): () => void {
   ipcMain.handle(channels.list, () => gateway.list());
   ipcMain.handle(channels.get, (_event, taskId: unknown) =>
     gateway.get(validateTaskId(taskId)),
+  );
+  ipcMain.handle(
+    channels.updatePreferences,
+    (_event, input: TaskPreferencesInput) =>
+      gateway.updatePreferences(validateTaskPreferencesInput(input)),
   );
   ipcMain.handle(
     channels.decideApproval,
@@ -67,6 +77,7 @@ export function registerTaskIpc(gateway: TaskGateway): () => void {
     ipcMain.removeHandler(channels.create);
     ipcMain.removeHandler(channels.list);
     ipcMain.removeHandler(channels.get);
+    ipcMain.removeHandler(channels.updatePreferences);
     ipcMain.removeHandler(channels.decideApproval);
     ipcMain.removeAllListeners(channels.subscribe);
     ipcMain.removeAllListeners(channels.unsubscribe);

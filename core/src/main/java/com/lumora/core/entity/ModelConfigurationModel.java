@@ -20,6 +20,8 @@ public class ModelConfigurationModel {
     private int contextWindow;
     @TableField("max_output_tokens")
     private int maxOutputTokens;
+    @TableField("reasoning_efforts")
+    private String reasoningEfforts;
     @TableField(value = "created_at", typeHandler = SqliteInstantTypeHandler.class)
     private Instant createdAt;
     @TableField(value = "updated_at", typeHandler = SqliteInstantTypeHandler.class)
@@ -29,12 +31,14 @@ public class ModelConfigurationModel {
 
     public ModelConfigurationModel(String id, String configurationId,
             String modelId, int contextWindow, int maxOutputTokens,
+            String reasoningEfforts,
             Instant createdAt, Instant updatedAt) {
         this.modelConfigurationModelId = id;
         this.configurationId = configurationId;
         this.modelId = modelId;
         this.contextWindow = contextWindow;
         this.maxOutputTokens = maxOutputTokens;
+        this.reasoningEfforts = reasoningEfforts;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
     }
@@ -47,6 +51,8 @@ public class ModelConfigurationModel {
     public void setContextWindow(int contextWindow) { this.contextWindow = contextWindow; }
     public int getMaxOutputTokens() { return maxOutputTokens; }
     public void setMaxOutputTokens(int maxOutputTokens) { this.maxOutputTokens = maxOutputTokens; }
+    public String getReasoningEfforts() { return reasoningEfforts; }
+    public void setReasoningEfforts(String reasoningEfforts) { this.reasoningEfforts = reasoningEfforts; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }

@@ -17,6 +17,7 @@ public final class ApiPathConstants {
             API_PREFIX + "/chat/completions";
     public static final String TASK_BY_ID = "/{taskId}";
     public static final String TASK_EVENTS = TASK_BY_ID + "/events";
+    public static final String TASK_PREFERENCES = TASK_BY_ID + "/preferences";
     public static final String TASK_MESSAGES = TASK_BY_ID + "/messages";
     public static final String TASK_MESSAGE_STREAM =
             TASK_MESSAGES + "/stream";

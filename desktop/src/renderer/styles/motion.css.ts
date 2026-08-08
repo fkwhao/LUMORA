@@ -42,14 +42,6 @@ globalStyle(".review-pane", {
   animation: `${slideFromRight} 190ms cubic-bezier(0.2, 0.75, 0.25, 1) both`,
 });
 
-globalStyle(".settings-dialog-backdrop", {
-  animation: `${popIn} 150ms ease-out both`,
-});
-
-globalStyle(".settings-dialog", {
-  animation: `${riseIn} 180ms cubic-bezier(0.2, 0.75, 0.25, 1) both`,
-});
-
 globalStyle(".archive-task-row,\n.agent-run-event", {
   transition:
     "background-color 140ms ease, opacity 140ms ease, transform 140ms ease",
@@ -105,7 +97,7 @@ globalStyle(".app-shell > .task-layout,\n.settings-surface", {
 });
 
 globalStyle(
-  ".sidebar-collapsed.app-shell > .home-layout,\n.sidebar-collapsed.app-shell > .prototype-layout",
+  ".sidebar-collapsed.app-shell > .home-layout,\n.sidebar-collapsed.app-shell > .prototype-layout,\n.sidebar-collapsed.app-shell > .conversation-hub-layout",
   {
     width: "calc(100% + var(--sidebar-width) - 8px)",
     transform: "translateX(calc(-1 * var(--sidebar-width)))",
@@ -125,7 +117,7 @@ globalStyle(
 );
 
 globalStyle(
-  ".home-hero,\n.home-composer-stack,\n.history-search,\n.task-more-menu,\n.review-pane,\n.settings-dialog-backdrop,\n.settings-dialog,\n.window-navigation button svg",
+  ".home-hero,\n.home-composer-stack,\n.history-search,\n.task-more-menu,\n.review-pane,\n.window-navigation button svg",
   {
     "@media": {
       "(prefers-reduced-motion: reduce)": {

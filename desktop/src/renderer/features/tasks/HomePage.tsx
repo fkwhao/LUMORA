@@ -246,6 +246,8 @@ export function HomePage({ store, composerMotion, notify }: HomePageProps) {
 
 function PixelRunnerArtwork() {
   const [isJumping, setIsJumping] = useState(false);
+  const [sceneVisible, setSceneVisible] = useState(true);
+  const panelRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!isJumping) {
@@ -255,10 +257,24 @@ function PixelRunnerArtwork() {
     return () => window.clearTimeout(timer);
   }, [isJumping]);
 
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setSceneVisible(entry?.isIntersecting ?? true),
+      { rootMargin: "48px" },
+    );
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <button
+      ref={panelRef}
       type="button"
-      className={`home-pixel-panel${isJumping ? " is-jumping" : ""}`}
+      className={`home-pixel-panel${isJumping ? " is-jumping" : ""}${
+        sceneVisible ? "" : " is-scene-paused"
+      }`}
       aria-label="像素风景，点击让 LUMORA 软体跳跃"
       onClick={() => setIsJumping(true)}
     >
@@ -292,8 +308,8 @@ function PixelRunnerArtwork() {
           ))}
         </g>
 
-        <g className="home-pixel-clouds" opacity="0.28">
-          <g>
+        <g className="home-pixel-world">
+          <g className="home-pixel-clouds" opacity="0.28">
             <rect x="84" y="50" width="54" height="6" fill="currentColor" />
             <rect x="96" y="44" width="24" height="6" fill="currentColor" />
             <rect x="438" y="76" width="68" height="6" fill="currentColor" />
@@ -305,12 +321,16 @@ function PixelRunnerArtwork() {
             <rect x="1524" y="50" width="54" height="6" fill="currentColor" />
             <rect x="1536" y="44" width="24" height="6" fill="currentColor" />
           </g>
-        </g>
-
-        <g className="home-pixel-scenery">
-          <PixelScenerySegment offset={0} variant="wild" />
-          <PixelScenerySegment offset={720} variant="ruins" />
-          <PixelScenerySegment offset={1440} variant="wild" />
+          <g className="home-pixel-scenery">
+            <PixelScenerySegment offset={0} variant="wild" />
+            <PixelScenerySegment offset={720} variant="ruins" />
+            <PixelScenerySegment offset={1440} variant="wild" />
+          </g>
+          <g className="home-pixel-track">
+            <PixelTrackSegment offset={0} variant="wild" />
+            <PixelTrackSegment offset={720} variant="ruins" />
+            <PixelTrackSegment offset={1440} variant="wild" />
+          </g>
         </g>
 
         <g transform="translate(96 92) scale(2)">
@@ -328,11 +348,6 @@ function PixelRunnerArtwork() {
           </g>
         </g>
 
-        <g className="home-pixel-track">
-          <PixelTrackSegment offset={0} variant="wild" />
-          <PixelTrackSegment offset={720} variant="ruins" />
-          <PixelTrackSegment offset={1440} variant="wild" />
-        </g>
       </svg>
     </button>
   );

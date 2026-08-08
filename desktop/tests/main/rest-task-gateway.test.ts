@@ -106,6 +106,46 @@ describe("Java REST task gateway", () => {
 
     await expect(gateway.get("missing")).rejects.toThrow("任务不存在");
   });
+
+  it("persists task model preferences through the Java API", async () => {
+    let receivedMethod = "";
+    let receivedUrl = "";
+    let receivedBody = "";
+    const baseUrl = await listen(async (request) => {
+      receivedMethod = request.method ?? "";
+      receivedUrl = request.url ?? "";
+      receivedBody = await readBody(request);
+      return {
+        status: 200,
+        body: {
+          taskId: "task-1",
+          goal: "test",
+          status: "COMPLETED",
+          selectedModel: "deepseek-reasoner",
+          selectedReasoningEffort: "high",
+          planSteps: [],
+        },
+      };
+    });
+    const gateway = new RestTaskGateway({
+      baseUrl,
+      sessionToken: "test-token",
+    });
+
+    const updated = await gateway.updatePreferences({
+      taskId: "task-1",
+      model: "deepseek-reasoner",
+      reasoningEffort: "high",
+    });
+
+    expect(receivedMethod).toBe("PUT");
+    expect(receivedUrl).toBe("/api/v1/tasks/task-1/preferences");
+    expect(JSON.parse(receivedBody)).toEqual({
+      model: "deepseek-reasoner",
+      reasoningEffort: "high",
+    });
+    expect(updated.selectedReasoningEffort).toBe("high");
+  });
 });
 
 async function listen(

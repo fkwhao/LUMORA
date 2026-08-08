@@ -67,7 +67,7 @@ class DatabaseMigrationTest {
 
         assertThat(businessTableCount).isEqualTo(11);
         assertThat(foreignKeysEnabled).isEqualTo(1);
-        assertThat(applicationChangeSetCount()).isEqualTo(19);
+        assertThat(applicationChangeSetCount()).isEqualTo(21);
         assertThat(conversationMessageColumns()).contains(
                 "parent_message_id", "message_depth", "active_path"
         );
@@ -76,7 +76,11 @@ class DatabaseMigrationTest {
         assertThat(modelConfigurationColumns())
                 .contains("api_format", "is_active");
         assertThat(providerModelColumns())
-                .contains("model_id", "context_window", "max_output_tokens");
+                .contains("model_id", "context_window", "max_output_tokens",
+                        "reasoning_efforts");
+        assertThat(agentTaskColumns()).contains(
+                "selected_model", "selected_reasoning_effort"
+        );
         assertThat(memoryItemColumns()).contains(
                 "importance", "usage_count", "last_used_at",
                 "source_type", "source_reference"
@@ -87,7 +91,7 @@ class DatabaseMigrationTest {
         // 对同一数据库重复执行迁移，必须只校验历史而不能再次建表。
         liquibase.afterPropertiesSet();
 
-        assertThat(applicationChangeSetCount()).isEqualTo(19);
+        assertThat(applicationChangeSetCount()).isEqualTo(21);
     }
 
     private Integer applicationChangeSetCount() {
@@ -114,11 +118,20 @@ class DatabaseMigrationTest {
                     '016-memory-lifecycle-and-ranking',
                     '017-application-setting',
                     '018-normalize-application-setting-timestamps',
-                    '019-conversation-message-branches'
+                    '019-conversation-message-branches',
+                    '020-model-reasoning-efforts',
+                    '021-task-composer-preferences'
                 )
                 AND AUTHOR = 'lumora'
                 """,
                 Integer.class
+        );
+    }
+
+    private java.util.List<String> agentTaskColumns() {
+        return jdbcTemplate.query(
+                "PRAGMA table_info(agent_task)",
+                (resultSet, rowNumber) -> resultSet.getString("name")
         );
     }
 

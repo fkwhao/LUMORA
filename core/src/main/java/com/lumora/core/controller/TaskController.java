@@ -4,6 +4,7 @@ import com.lumora.core.common.constant.ApiPathConstants;
 import com.lumora.core.common.constant.HttpContractConstants;
 import com.lumora.core.converter.TaskResponseConverter;
 import com.lumora.core.dto.request.CreateTaskRequest;
+import com.lumora.core.dto.request.UpdateTaskPreferencesRequest;
 import com.lumora.core.dto.response.TaskResponse;
 import com.lumora.core.service.TaskService;
 import com.lumora.core.task.model.TaskDetails;
@@ -14,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -57,5 +59,19 @@ public class TaskController {
     @GetMapping(ApiPathConstants.TASK_BY_ID)
     public TaskResponse getTask(@PathVariable String taskId) {
         return responseConverter.fromDetails(taskService.getTaskDetails(taskId));
+    }
+
+    @PutMapping(ApiPathConstants.TASK_PREFERENCES)
+    public TaskResponse updateTaskPreferences(
+            @PathVariable String taskId,
+            @Valid @RequestBody UpdateTaskPreferencesRequest request
+    ) {
+        return responseConverter.fromTask(
+                taskService.updateComposerPreferences(
+                        taskId,
+                        request.getModel(),
+                        request.getReasoningEffort()
+                )
+        );
     }
 }

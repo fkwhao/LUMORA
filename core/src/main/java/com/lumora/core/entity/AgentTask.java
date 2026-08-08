@@ -28,6 +28,10 @@ public class AgentTask {
     private String resultSummary;
     @TableField("failure_reason")
     private String failureReason;
+    @TableField("selected_model")
+    private String selectedModel;
+    @TableField("selected_reasoning_effort")
+    private String selectedReasoningEffort;
     @TableField(
             value = "created_at",
             typeHandler = SqliteInstantTypeHandler.class
@@ -60,6 +64,8 @@ public class AgentTask {
         this.activeStep = activeStep;
         this.resultSummary = resultSummary;
         this.failureReason = failureReason;
+        this.selectedModel = "";
+        this.selectedReasoningEffort = "";
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
     }
@@ -118,6 +124,22 @@ public class AgentTask {
 
     public void setFailureReason(String failureReason) {
         this.failureReason = failureReason;
+    }
+
+    public String getSelectedModel() {
+        return selectedModel;
+    }
+
+    public void setSelectedModel(String selectedModel) {
+        this.selectedModel = selectedModel;
+    }
+
+    public String getSelectedReasoningEffort() {
+        return selectedReasoningEffort;
+    }
+
+    public void setSelectedReasoningEffort(String selectedReasoningEffort) {
+        this.selectedReasoningEffort = selectedReasoningEffort;
     }
 
     public Instant getCreatedAt() {

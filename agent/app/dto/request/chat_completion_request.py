@@ -113,6 +113,12 @@ class ChatCompletionRequest(BaseModel):
         default_factory=PromptContextRequest,
         alias="promptContext",
     )
-    reasoning_effort: Literal["none", "low", "high", "max"] | None = (
-        Field(default=None, alias="reasoningEffort")
+    reasoning_effort: str | None = (
+        Field(
+            default=None,
+            alias="reasoningEffort",
+            min_length=1,
+            max_length=64,
+            pattern=r"^[A-Za-z0-9._-]+$",
+        )
     )

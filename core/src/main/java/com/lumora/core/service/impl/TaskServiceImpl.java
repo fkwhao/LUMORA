@@ -131,6 +131,23 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     @Transactional
+    public AgentTask updateComposerPreferences(
+            String taskId,
+            String model,
+            String reasoningEffort
+    ) {
+        AgentTask task = getTask(taskId);
+        task.setSelectedModel(requireText(model, "模型"));
+        task.setSelectedReasoningEffort(
+                reasoningEffort == null ? "" : reasoningEffort.trim()
+        );
+        task.setUpdatedAt(clock.instant());
+        taskMapper.updateById(task);
+        return task;
+    }
+
+    @Override
+    @Transactional
     public AgentTask transitionTask(String taskId, TaskStatus nextStatus) {
         AgentTask task = getTask(taskId);
         TaskStatus currentStatus = task.getStatus();

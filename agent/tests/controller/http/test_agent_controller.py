@@ -182,7 +182,7 @@ class AgentControllerTest(unittest.TestCase):
             json={
                 "messages": [{"role": "user", "content": "你好"}],
                 "connection": self.model_connection(),
-                "reasoningEffort": "high",
+                "reasoningEffort": "ultra",
             },
         )
 
@@ -192,7 +192,7 @@ class AgentControllerTest(unittest.TestCase):
         self.assertIn('"type":"text_delta"', response.text)
         self.assertIn('"delta":"你好"', response.text)
         self.assertIn('"type":"completed"', response.text)
-        self.assertEqual(chat_service.last_reasoning_effort, "high")
+        self.assertEqual(chat_service.last_reasoning_effort, "ultra")
         frames = [frame for frame in response.text.strip().split("\n\n") if frame]
         event_names = [frame.splitlines()[0].removeprefix("event: ") for frame in frames]
         payloads = [

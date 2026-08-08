@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { LumoraModelApi } from "../../src/shared/model-contract";
+import type {
+  ChatMessage,
+  LumoraModelApi,
+} from "../../src/shared/model-contract";
 import type {
   LumoraTaskApi,
   TaskEvent,
@@ -104,6 +107,79 @@ describe("task store", () => {
       content: "可以开始整理。",
       durationMs: 2_100,
     });
+  });
+
+  it("shows recent messages first and progressively prepends long history", async () => {
+    const api = createApi();
+    const modelApi = createModelApi();
+    const messages: ChatMessage[] = Array.from({ length: 80 }, (_, index) => ({
+      messageId: `message-${index}`,
+      role: index % 2 === 0 ? "user" : "assistant",
+      content: `history-${index}`,
+    }));
+    let resolveMessages: ((messages: ChatMessage[]) => void) | undefined;
+    vi.mocked(modelApi.listMessages).mockImplementation(
+      () =>
+        new Promise<ChatMessage[]>((resolve) => {
+          resolveMessages = resolve;
+        }),
+    );
+    const store = createTaskStore(api, modelApi);
+
+    const opening = store.getState().openTask(createdTask.taskId);
+    resolveMessages?.(messages);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(store.getState().isLoadingHistory).toBe(false);
+    expect(store.getState().isHydratingHistory).toBe(true);
+    expect(store.getState().messages.length).toBeLessThan(messages.length);
+    expect(store.getState().messages.at(-1)?.content).toBe("history-79");
+
+    await opening;
+    expect(store.getState().messages).toEqual(messages);
+    expect(store.getState().isHydratingHistory).toBe(false);
+    expect(store.getState().historyHydrationProgress).toBe(1);
+  });
+
+  it("switches immediately, reuses cached conversations, and ignores stale loads", async () => {
+    const firstTask = { ...createdTask, taskId: "task-a", goal: "Task A" };
+    const secondTask = { ...createdTask, taskId: "task-b", goal: "Task B" };
+    const api = createApi();
+    vi.mocked(api.list).mockResolvedValue([firstTask, secondTask]);
+    let resolveFirst: ((task: TaskSnapshot) => void) | undefined;
+    let resolveSecond: ((task: TaskSnapshot) => void) | undefined;
+    vi.mocked(api.get).mockImplementation(
+      (taskId) =>
+        new Promise<TaskSnapshot>((resolve) => {
+          if (taskId === firstTask.taskId) resolveFirst = resolve;
+          else resolveSecond = resolve;
+        }),
+    );
+    const modelApi = createModelApi();
+    vi.mocked(modelApi.listMessages).mockImplementation(async (taskId) => [
+      { role: "user", content: `message-${taskId}` },
+    ]);
+    const store = createTaskStore(api, modelApi);
+    await store.getState().loadRecentTasks();
+
+    const firstOpen = store.getState().openTask(firstTask.taskId);
+    expect(store.getState().activeTask?.taskId).toBe(firstTask.taskId);
+    const secondOpen = store.getState().openTask(secondTask.taskId);
+    expect(store.getState().activeTask?.taskId).toBe(secondTask.taskId);
+
+    resolveSecond?.(secondTask);
+    await secondOpen;
+    expect(store.getState().activeTask?.taskId).toBe(secondTask.taskId);
+    resolveFirst?.(firstTask);
+    await firstOpen;
+    expect(store.getState().activeTask?.taskId).toBe(secondTask.taskId);
+
+    const cachedOpen = store.getState().openTask(firstTask.taskId);
+    expect(store.getState().activeTask?.taskId).toBe(firstTask.taskId);
+    expect(store.getState().isLoadingHistory).toBe(false);
+    expect(store.getState().messages[0]?.content).toBe("message-task-a");
+    resolveFirst?.(firstTask);
+    await cachedOpen;
   });
 
   it("shows manual compaction as an independent processing record", async () => {
@@ -368,6 +444,11 @@ function createApi(): LumoraTaskApi {
     create: vi.fn(async () => createdTask),
     list: vi.fn(async () => []),
     get: vi.fn(async () => createdTask),
+    updatePreferences: vi.fn(async (input) => ({
+      ...createdTask,
+      selectedModel: input.model,
+      selectedReasoningEffort: input.reasoningEffort,
+    })),
     subscribe: vi.fn(() => () => undefined),
     decideApproval: vi.fn(async () => createdTask),
   };

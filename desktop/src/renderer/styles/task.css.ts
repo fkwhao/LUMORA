@@ -42,6 +42,11 @@ const artifactSpin = keyframes({
   to: { transform: "rotate(360deg)" },
 });
 
+const historyHydrationSweep = keyframes({
+  from: { transform: "translateX(-115%)" },
+  to: { transform: "translateX(335%)" },
+});
+
 const agentRunSpin = keyframes({
   to: { transform: "rotate(360deg)" },
 });
@@ -404,6 +409,71 @@ globalStyle(".conversation-scroll", {
     "28px clamp(12px, 3vw, 28px) calc(var(--conversation-footer-height, 126px) + 18px)",
   overflow: "auto",
   scrollbarGutter: "stable",
+});
+
+globalStyle(".history-hydration-status", {
+  position: "absolute",
+  top: "10px",
+  left: "50%",
+  zIndex: "8",
+  display: "grid",
+  width: "178px",
+  gridTemplateColumns: "1fr",
+  gap: "6px",
+  padding: "8px 11px 7px",
+  border: "1px solid color-mix(in srgb, var(--ink) 10%, transparent)",
+  borderRadius: "11px",
+  background:
+    "linear-gradient(135deg, color-mix(in srgb, var(--surface) 97%, var(--ink) 3%), color-mix(in srgb, var(--surface) 91%, transparent))",
+  color: "var(--muted)",
+  boxShadow: "0 8px 26px rgb(15 23 42 / 9%), inset 0 1px rgb(255 255 255 / 28%)",
+  backdropFilter: "blur(14px) saturate(1.08)",
+  transform: "translateX(-50%)",
+  pointerEvents: "none",
+});
+
+globalStyle(".history-hydration-status::before", {
+  position: "absolute",
+  top: "10px",
+  left: "11px",
+  width: "5px",
+  height: "5px",
+  borderRadius: "50%",
+  background: "var(--accent)",
+  boxShadow: "0 0 0 3px color-mix(in srgb, var(--accent) 13%, transparent)",
+  content: "\"\"",
+});
+
+globalStyle(".history-hydration-label", {
+  paddingLeft: "14px",
+  color: "color-mix(in srgb, var(--ink) 72%, var(--muted))",
+  fontSize: "9.5px",
+  fontWeight: "620",
+  letterSpacing: "0.01em",
+  lineHeight: "1",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(".history-hydration-track", {
+  position: "relative",
+  height: "2.5px",
+  overflow: "hidden",
+  borderRadius: "999px",
+  background: "color-mix(in srgb, var(--muted) 16%, transparent)",
+});
+
+globalStyle(".history-hydration-track > i", {
+  position: "absolute",
+  inset: "0 auto 0 0",
+  borderRadius: "inherit",
+  background:
+    "linear-gradient(90deg, color-mix(in srgb, var(--accent) 62%, var(--ink)), var(--accent))",
+  transition: "width 90ms linear",
+});
+
+globalStyle(".history-hydration-status.is-indeterminate .history-hydration-track > i", {
+  width: "28%",
+  animation: `${historyHydrationSweep} 850ms linear infinite`,
 });
 
 globalStyle(".conversation-scroll::-webkit-scrollbar", {
@@ -1641,7 +1711,7 @@ globalStyle(
   {
     color: "var(--ink)",
     borderColor: "transparent",
-    background: "color-mix(in srgb, var(--ink) 8%, transparent) !important",
+    background: "color-mix(in srgb, var(--ink) 13%, transparent) !important",
   },
 );
 
@@ -1649,7 +1719,7 @@ globalStyle(
   ".follow-up-composer .composer-icon-button[aria-expanded='true']",
   {
     color: "var(--ink)",
-    background: "color-mix(in srgb, var(--ink) 9%, transparent) !important",
+    background: "color-mix(in srgb, var(--ink) 14%, transparent) !important",
   },
 );
 
@@ -1657,7 +1727,7 @@ globalStyle(
   ".follow-up-composer .composer-permission-button[aria-expanded='true'], .follow-up-composer .composer-choice-button[aria-expanded='true']",
   {
     color: "var(--ink)",
-    background: "transparent !important",
+    background: "color-mix(in srgb, var(--ink) 13%, transparent) !important",
   },
 );
 
@@ -1797,6 +1867,185 @@ globalStyle(".model-picker-popover", {
   maxHeight: "280px",
   overflowY: "auto",
 });
+
+globalStyle(".model-reasoning-trigger", {
+  letterSpacing: "-0.01em",
+});
+
+globalStyle(
+  ".model-reasoning-trigger:hover, .model-reasoning-trigger[aria-expanded='true']",
+  {
+    color: "var(--ink)",
+    borderRadius: "999px",
+    background: "color-mix(in srgb, var(--ink) 13%, transparent) !important",
+  },
+);
+
+globalStyle(
+  ".composer-context-trigger:hover, .composer-context-trigger[aria-expanded='true'], .composer-permission-trigger:hover, .composer-permission-trigger[aria-expanded='true']",
+  {
+    color: "var(--ink)",
+    background: "color-mix(in srgb, var(--ink) 13%, transparent) !important",
+  },
+);
+
+globalStyle(
+  ".composer-permission-trigger.is-dangerous:hover, .composer-permission-trigger.is-dangerous[aria-expanded='true']",
+  {
+    color: "#ff8a42",
+    background: "rgb(255 122 47 / 15%) !important",
+  },
+);
+
+globalStyle(".composer-fast-popover", {
+  animation: "none !important",
+  transitionDuration: "0ms !important",
+});
+
+globalStyle(".model-reasoning-trigger-effort", {
+  flex: "0 0 auto",
+  color: "var(--muted)",
+  fontSize: "inherit",
+  fontWeight: "inherit",
+  letterSpacing: "inherit",
+});
+
+globalStyle(".model-reasoning-popover", {
+  position: "relative",
+  overflow: "visible",
+  borderColor: "color-mix(in srgb, var(--ink) 11%, transparent)",
+  background: "color-mix(in srgb, var(--surface) 99%, var(--ink) 1%)",
+  boxShadow: "0 14px 38px rgb(15 23 42 / 14%)",
+});
+
+globalStyle(".model-reasoning-row", {
+  display: "grid",
+  width: "100%",
+  height: "36px",
+  gridTemplateColumns: "minmax(0, 1fr) auto 16px",
+  alignItems: "center",
+  gap: "8px",
+  padding: "0 9px 0 11px",
+  color: "var(--ink)",
+  border: "0",
+  borderRadius: "8px",
+  background: "transparent",
+  cursor: "pointer",
+  textAlign: "left",
+});
+
+globalStyle(".model-reasoning-row:hover,.model-reasoning-row.active", {
+  background: "color-mix(in srgb, var(--ink) 11%, transparent)",
+});
+
+globalStyle(".model-reasoning-row > span", {
+  overflow: "hidden",
+  fontSize: "11px",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(".model-reasoning-row > strong", {
+  maxWidth: "118px",
+  overflow: "hidden",
+  color: "var(--muted)",
+  fontSize: "10.5px",
+  fontWeight: "500",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(".model-reasoning-row > svg", {
+  width: "15px",
+  height: "15px",
+  color: "var(--subtle)",
+});
+
+globalStyle(".model-reasoning-submenu", {
+  position: "absolute",
+  bottom: "0",
+  display: "grid",
+  width: "238px",
+  maxHeight: "292px",
+  gap: "2px",
+  padding: "7px",
+  overflowY: "auto",
+  border: "1px solid color-mix(in srgb, var(--ink) 11%, transparent)",
+  borderRadius: "12px",
+  background: "color-mix(in srgb, var(--surface) 99%, var(--ink) 1%)",
+  boxShadow: "0 14px 38px rgb(15 23 42 / 14%)",
+});
+
+globalStyle(".model-reasoning-submenu.is-model", {
+  right: "calc(100% + 7px)",
+  left: "auto",
+});
+
+globalStyle(".model-reasoning-submenu.is-reasoning", {
+  right: "auto",
+  left: "calc(100% + 7px)",
+});
+
+globalStyle(".model-reasoning-option", {
+  width: "100%",
+  minHeight: "34px",
+  justifyContent: "flex-start",
+  gap: "7px",
+  padding: "0 9px",
+  borderRadius: "7px",
+  fontSize: "11px",
+  fontWeight: "480",
+  transition: "background-color 70ms linear, box-shadow 70ms linear",
+});
+
+globalStyle(".model-reasoning-option > span", {
+  minWidth: "0",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(".model-reasoning-option > small", {
+  marginLeft: "auto",
+  color: "var(--subtle)",
+  fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace",
+  fontSize: "8px",
+});
+
+globalStyle(".model-reasoning-option > svg", {
+  width: "15px",
+  height: "15px",
+  flex: "0 0 auto",
+  marginLeft: "auto",
+});
+
+globalStyle(".model-reasoning-option > small + svg", {
+  marginLeft: "2px",
+});
+
+globalStyle(".model-reasoning-option[aria-checked='true']", {
+  background: "color-mix(in srgb, var(--ink) 10%, transparent)",
+});
+
+globalStyle(".model-reasoning-option:hover", {
+  color: "var(--ink)",
+  background: "color-mix(in srgb, var(--ink) 14%, transparent) !important",
+  boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--ink) 7%, transparent)",
+});
+
+globalStyle(
+  ".model-reasoning-submenu.is-model, .model-reasoning-submenu.is-reasoning",
+  {
+    "@media": {
+      "(max-width: 760px)": {
+        right: "0",
+        left: "auto",
+        bottom: "calc(100% + 7px)",
+        width: "220px",
+      },
+    },
+  },
+);
 
 globalStyle(".follow-up-composer .model-picker-popover > button", {
   minHeight: "34px",

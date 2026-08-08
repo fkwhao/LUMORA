@@ -3,6 +3,7 @@ import "./base.css";
 import "./sidebar.css";
 import "./shell.css";
 import "./home.css";
+import "./conversation-hub.css";
 import "./task.css";
 import "./settings.css";
 import "./prototype.css";

@@ -5,6 +5,7 @@ import type {
   TaskEvent,
   TaskSnapshot,
   TaskSummary,
+  TaskPreferencesInput,
 } from "../shared/task-contract";
 import { validateApprovalDecisionInput } from "../shared/validation";
 
@@ -12,6 +13,7 @@ export interface TaskGateway {
   create(goal: string): Promise<TaskSnapshot>;
   list(): Promise<TaskSummary[]>;
   get(taskId: string): Promise<TaskSnapshot>;
+  updatePreferences(input: TaskPreferencesInput): Promise<TaskSnapshot>;
   subscribe(taskId: string, listener: (event: TaskEvent) => void): () => void;
   decideApproval(input: ApprovalDecisionInput): Promise<TaskSnapshot>;
   dispose(): void;
@@ -83,6 +85,19 @@ export class DemoTaskGateway implements TaskGateway {
 
   async get(taskId: string): Promise<TaskSnapshot> {
     return this.requireTask(taskId);
+  }
+
+  async updatePreferences(
+    input: TaskPreferencesInput,
+  ): Promise<TaskSnapshot> {
+    const task = this.requireTask(input.taskId);
+    const updated = {
+      ...task,
+      selectedModel: input.model,
+      selectedReasoningEffort: input.reasoningEffort,
+    };
+    this.tasks.set(input.taskId, updated);
+    return updated;
   }
 
   async list(): Promise<TaskSummary[]> {

@@ -172,3 +172,21 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 020-model-reasoning-efforts
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V20__model_reasoning_efforts.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false
+  - changeSet:
+      id: 021-task-composer-preferences
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V21__task_composer_preferences.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false
