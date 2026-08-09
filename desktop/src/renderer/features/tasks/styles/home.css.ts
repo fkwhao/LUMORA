@@ -8,27 +8,6 @@ const composerFromBottom = keyframes({
   to: { opacity: "1", transform: "translateY(0) scale(1)" },
 });
 
-const homePixelWorld = keyframes({
-  from: { transform: "translateX(0)" },
-  to: { transform: "translateX(-1440px)" },
-});
-
-const homePixelStatus = keyframes({
-  "0%, 49%": { opacity: "1" },
-  "50%, 100%": { opacity: "0.38" },
-});
-
-const homePixelJump = keyframes({
-  "0%": { transform: "translateY(0) scale(1, 1)" },
-  "12%": { transform: "translateY(3px) scale(1.2, 0.72)" },
-  "28%": { transform: "translateY(-20px) scale(0.76, 1.34)" },
-  "48%": { transform: "translateY(-50px) scale(0.86, 1.18)" },
-  "62%": { transform: "translateY(-44px) scale(1.04, 0.94)" },
-  "78%": { transform: "translateY(-18px) scale(0.9, 1.12)" },
-  "90%": { transform: "translateY(2px) scale(1.22, 0.7)" },
-  "100%": { transform: "translateY(0) scale(1, 1)" },
-});
-
 globalStyle(".home-layout", {
   display: "grid",
   overflowX: "hidden",
@@ -52,99 +31,26 @@ globalStyle(".home-hero", {
   textAlign: "center",
 });
 
-globalStyle(".home-pixel-panel", {
+globalStyle(".home-halftone-landscape", {
   position: "relative",
   width: "100%",
   height: "clamp(154px, 23vh, 208px)",
   marginBottom: "30px",
-  padding: "0",
-  overflow: "hidden",
   color: "var(--ink)",
-  border: "0",
-  borderRadius: "0",
-  background: "transparent",
-  boxShadow: "none",
-  cursor: "pointer",
-  contain: "layout paint style",
-  font: "inherit",
-  textAlign: "left",
-  WebkitMaskImage:
-    "linear-gradient(90deg, transparent 0%, #000 7%, #000 93%, transparent 100%)",
-  maskImage:
-    "linear-gradient(90deg, transparent 0%, #000 7%, #000 93%, transparent 100%)",
+  overflow: "hidden",
 });
 
-globalStyle(".home-pixel-panel::after", {
-  display: "none",
-});
-
-globalStyle(".home-pixel-panel:focus-visible", {
-  outline: "1px dashed var(--muted)",
-  outlineOffset: "5px",
-});
-
-globalStyle(".home-pixel-panel-heading", {
-  position: "absolute",
-  zIndex: "2",
-  top: "14px",
-  right: "18px",
-  left: "18px",
-  display: "flex",
-  justifyContent: "space-between",
-  color: "var(--muted)",
-  fontFamily: "var(--code-font, ui-monospace, monospace)",
-  fontSize: "9px",
-  fontWeight: "650",
-  letterSpacing: "0.08em",
-});
-
-globalStyle(".home-pixel-run-status::before", {
-  display: "inline-block",
-  width: "5px",
-  height: "5px",
-  marginRight: "6px",
+globalStyle(".home-halftone-landscape-vector", {
+  display: "block",
+  width: "100%",
+  height: "100%",
   background: "currentColor",
-  content: '\"\"',
-  animation: `${homePixelStatus} 800ms steps(1, end) infinite`,
-});
-
-globalStyle(".home-pixel-artwork", {
-  position: "absolute",
-  right: "14px",
-  bottom: "9px",
-  left: "14px",
-  width: "calc(100% - 28px)",
-  height: "calc(100% - 46px)",
-});
-
-globalStyle(".home-pixel-bands", {
-  opacity: "0.22",
-});
-
-globalStyle(".home-pixel-world", {
-  animation: `${homePixelWorld} 24s linear infinite`,
-  willChange: "transform",
-});
-
-globalStyle(".home-pixel-panel.is-scene-paused .home-pixel-world, .home-pixel-panel.is-scene-paused .home-pixel-run-status::before", {
-  animationPlayState: "paused",
-});
-
-globalStyle(".home-pixel-blob", {
-  transformBox: "fill-box",
-  transformOrigin: "center bottom",
-});
-
-globalStyle(".home-pixel-panel.is-jumping .home-pixel-blob", {
-  animation: `${homePixelJump} 820ms steps(1, end) 1`,
-});
-
-globalStyle(".home-pixel-blob-trail > rect", {
-  opacity: "0",
-});
-
-globalStyle(".home-pixel-panel.is-jumping .home-pixel-blob-trail > rect", {
-  opacity: "0.48",
+  WebkitMaskPosition: "center",
+  maskPosition: "center",
+  WebkitMaskRepeat: "no-repeat",
+  maskRepeat: "no-repeat",
+  WebkitMaskSize: "contain",
+  maskSize: "contain",
 });
 
 globalStyle(".home-hero h1", {
@@ -155,8 +61,32 @@ globalStyle(".home-hero h1", {
   letterSpacing: "-0.035em",
 });
 
-globalStyle(".home-hero h1 strong", {
-  fontWeight: "680",
+globalStyle(".home-pixel-drift-title", {
+  display: "flex",
+  width: "100%",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "0.18em",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(".pixel-drift-heading", {
+  position: "relative",
+  display: "block",
+  width: "clamp(158px, 20vw, 218px)",
+  height: "clamp(46px, 6vh, 58px)",
+  flex: "0 0 auto",
+  overflow: "visible",
+  transform: "translateY(0.12em)",
+});
+
+globalStyle(".pixel-drift-heading-canvas", {
+  position: "absolute",
+  top: "-20px",
+  left: "-12px",
+  display: "inline-block",
+  width: "calc(100% + 24px)",
+  height: "calc(100% + 40px)",
 });
 
 globalStyle(".home-hero p", {
@@ -404,23 +334,11 @@ globalStyle(".home-privacy-note", {
   textAlign: "center",
 });
 
-globalStyle(".home-pixel-panel", {
+globalStyle(".home-halftone-landscape", {
   "@media": {
     "(max-width: 720px)": {
       height: "132px",
       marginBottom: "24px",
-      borderRadius: "0",
-    },
-    "(prefers-reduced-motion: reduce)": {
-      animation: "none",
-    },
-  },
-});
-
-globalStyle(".home-pixel-world, .home-pixel-blob, .home-pixel-blob-trail > rect, .home-pixel-run-status::before", {
-  "@media": {
-    "(prefers-reduced-motion: reduce)": {
-      animation: "none",
     },
   },
 });

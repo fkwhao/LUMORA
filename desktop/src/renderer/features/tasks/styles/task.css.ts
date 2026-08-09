@@ -47,10 +47,6 @@ const historyHydrationSweep = keyframes({
   to: { transform: "translateX(335%)" },
 });
 
-const agentRunSpin = keyframes({
-  to: { transform: "rotate(360deg)" },
-});
-
 globalStyle(".task-layout", {
   display: "grid",
   gridTemplateRows: "auto minmax(0, 1fr)",
@@ -1106,7 +1102,7 @@ globalStyle(".agent-run-heading", {
 
 globalStyle(".agent-run-toggle", {
   display: "inline-flex",
-  minHeight: "0",
+  minHeight: "20px",
   alignItems: "center",
   gap: "6px",
   padding: "0 0 9px",
@@ -1134,13 +1130,17 @@ globalStyle(".agent-run-toggle.is-static", {
   cursor: "default",
 });
 
-globalStyle(".agent-run-loader", {
-  flex: "0 0 auto",
-  animation: `${agentRunSpin} 600ms linear infinite`,
-  "@media": {
-    "(prefers-reduced-motion: reduce)": { animation: "none" },
-  },
+globalStyle(".agent-run-toggle.is-running", {
+  position: "relative",
 });
+
+globalStyle(
+  ".agent-run-toggle.is-running > .lumora-processing-lattice",
+  {
+    position: "absolute",
+    right: "calc(100% + 6px)",
+  },
+);
 
 globalStyle(".agent-run-events", {
   display: "grid",
@@ -1171,7 +1171,7 @@ globalStyle(".agent-run.expanded .agent-run-events-inner", {
 });
 
 globalStyle(
-  ".agent-run-toggle.is-running > span,\n.work-phase-toggle.shimmer-text > span,\n.tool-call-item > button.shimmer-text > span,\n.work-log-placeholder.shimmer-text",
+  ".agent-run-toggle.is-running > span:last-child,\n.work-phase-toggle.shimmer-text > span,\n.tool-call-item > button.shimmer-text > span,\n.work-log-placeholder.shimmer-text",
   {
     color: "transparent",
     backgroundImage:

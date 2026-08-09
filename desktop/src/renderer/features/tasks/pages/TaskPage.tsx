@@ -69,6 +69,7 @@ import { ApprovalDock } from "../components/ApprovalDock";
 import { ToolApprovalDialog } from "../components/ToolApprovalDialog";
 import { AgentRunSummary } from "../components/AgentRunSummary";
 import { DiffReviewPane, type FileChange } from "../components/DiffReviewPane";
+import { ProcessingLattice } from "../components/ProcessingLattice";
 import type { TaskStore } from "../state/task-store";
 
 interface TaskPageProps {
@@ -1019,11 +1020,7 @@ export const TaskPage = memo(function TaskPage({
           data-slot="aui_assistant-message-indicator"
           role="status"
         >
-          <LoaderCircle
-            aria-hidden="true"
-            className="lumora-processing-loader"
-            size={13}
-          />
+          <ProcessingLattice />
           <span className="lumora-processing-shimmer">正在处理</span>
         </span>
       );

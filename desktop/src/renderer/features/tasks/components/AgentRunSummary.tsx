@@ -1,4 +1,11 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ChevronRight,
   FilePenLine,
@@ -7,11 +14,11 @@ import {
   Minimize2,
   PackageOpen,
   TerminalSquare,
-  LoaderCircle,
 } from "lucide-react";
 
 import type { WorkLogItem } from "../../../../shared/model-contract";
 import type { TaskEvent } from "../../../../shared/task-contract";
+import { ProcessingLattice } from "./ProcessingLattice";
 
 interface AgentRunSummaryProps {
   startedAt?: number;
@@ -67,7 +74,7 @@ export const AgentRunSummary = memo(function AgentRunSummary({
     return () => window.clearInterval(timer);
   }, [durationMs, running, startedAt]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (running) {
       setExpanded(true);
     } else if (wasRunning.current) {
@@ -85,7 +92,7 @@ export const AgentRunSummary = memo(function AgentRunSummary({
             className="agent-run-toggle is-running is-static"
             role="status"
           >
-            <LoaderCircle aria-hidden className="agent-run-loader" size={13} />
+            <ProcessingLattice />
             <span>{label}</span>
           </div>
         ) : hasDetails ? (
