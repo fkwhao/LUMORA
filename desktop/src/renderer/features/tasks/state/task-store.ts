@@ -16,6 +16,10 @@ import type {
 } from "../../../../shared/task-contract";
 import { applyChatEvent } from "./chat-event-handler";
 import {
+  createChatEventBatcher,
+  type ChatEventBatcher,
+} from "./chat-event-batcher";
+import {
   loadArchivedTaskIds,
   loadDeletedTaskIds,
   saveArchivedTaskIds,
@@ -115,6 +119,7 @@ export function createTaskStore(
   let unsubscribe: (() => void) | undefined;
   let unsubscribeChat: (() => void) | undefined;
   let resolveChat: (() => void) | undefined;
+  let chatEventBatcher: ChatEventBatcher | undefined;
   let openTaskRequest = 0;
   let preferenceUpdateQueue = Promise.resolve<TaskSnapshot | undefined>(
     undefined,
@@ -123,6 +128,11 @@ export function createTaskStore(
     string,
     { task: TaskSnapshot; messages: ChatMessage[] }
   >();
+  const clearChatEventBatcher = (flush: boolean) => {
+    if (flush) chatEventBatcher?.flush();
+    chatEventBatcher?.cancel();
+    chatEventBatcher = undefined;
+  };
 
   return createStore<TaskState>((set, get) => ({
     activeTask: undefined,
@@ -207,6 +217,7 @@ export function createTaskStore(
       }
       unsubscribeChat?.();
       unsubscribeChat = undefined;
+      clearChatEventBatcher(false);
       resolveChat?.();
       resolveChat = undefined;
       unsubscribe?.();
@@ -218,7 +229,12 @@ export function createTaskStore(
       const optimisticTask = cached?.task ??
         (summary ? snapshotFromSummary(summary) : undefined);
       const cachedWindow = cached
-        ? getInitialHistoryWindow(cached.messages)
+        ? {
+            messages: cached.messages,
+            startIndex: 0,
+            hasEarlierMessages: false,
+            progress: 1,
+          }
         : undefined;
       if (optimisticTask) {
         unsubscribe = api.subscribe(taskId, (event) => {
@@ -279,16 +295,12 @@ export function createTaskStore(
           });
         }
       };
-      const cachedHydration = cached && cachedWindow
-        ? hydrateHistory(cached.messages, cachedWindow.startIndex)
-        : Promise.resolve();
       try {
         const [task, messages] = await Promise.all([
           api.get(taskId),
           modelApi?.listMessages(taskId) ?? Promise.resolve([]),
         ]);
         conversationCache.set(taskId, { task, messages });
-        await cachedHydration;
         if (requestId !== openTaskRequest) {
           return;
         }
@@ -432,11 +444,15 @@ export function createTaskStore(
       await new Promise<void>((resolve) => {
         resolveChat = resolve;
         unsubscribeChat?.();
+        clearChatEventBatcher(false);
+        chatEventBatcher = createChatEventBatcher((event) => {
+          applyChatEvent(event, task.taskId, modelApi, get, set, resolve);
+        });
         unsubscribeChat = modelApi.streamMessage(
           task.taskId,
           normalizedContent,
           (event) => {
-            applyChatEvent(event, task.taskId, modelApi, get, set, resolve);
+            chatEventBatcher?.push(event);
           },
           {
             ...options,
@@ -445,6 +461,7 @@ export function createTaskStore(
           },
         );
       });
+      clearChatEventBatcher(true);
       resolveChat = undefined;
       unsubscribeChat?.();
       unsubscribeChat = undefined;
@@ -513,6 +530,7 @@ export function createTaskStore(
       if (!get().isChatting) {
         return;
       }
+      clearChatEventBatcher(true);
       unsubscribeChat?.();
       unsubscribeChat = undefined;
       const chatStartedAt = get().chatStartedAt;
@@ -621,12 +639,16 @@ export function createTaskStore(
       await new Promise<void>((resolve) => {
         resolveChat = resolve;
         unsubscribeChat?.();
+        clearChatEventBatcher(false);
+        chatEventBatcher = createChatEventBatcher((event) => {
+          applyChatEvent(event, task.taskId, modelApi, get, set, resolve);
+        });
         unsubscribeChat = modelApi.regenerateMessage(
           task.taskId,
           messageId,
           normalizedContent,
           (event) => {
-            applyChatEvent(event, task.taskId, modelApi, get, set, resolve);
+            chatEventBatcher?.push(event);
           },
           {
             ...options,
@@ -635,6 +657,7 @@ export function createTaskStore(
           },
         );
       });
+      clearChatEventBatcher(true);
       resolveChat = undefined;
       unsubscribeChat?.();
       unsubscribeChat = undefined;
@@ -703,6 +726,7 @@ export function createTaskStore(
         unsubscribe = undefined;
         unsubscribeChat?.();
         unsubscribeChat = undefined;
+        clearChatEventBatcher(false);
         resolveChat?.();
         resolveChat = undefined;
         set({
@@ -788,6 +812,7 @@ export function createTaskStore(
       unsubscribe = undefined;
       unsubscribeChat?.();
       unsubscribeChat = undefined;
+      clearChatEventBatcher(false);
       resolveChat?.();
       resolveChat = undefined;
       set({

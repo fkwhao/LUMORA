@@ -14,6 +14,7 @@ from app.dto.response.chat_completion_response import (
 from app.harness.contracts import (
     ProviderToolCall,
     ProviderTurn,
+    ProviderTurnEvent,
 )
 from app.harness.run_event import RunEvent, RunUsage
 from app.model.model_connection_settings import ModelConnectionSettings
@@ -215,7 +216,9 @@ class OpenAICompatibleProvider:
                 if not line.startswith("data:"):
                     continue
                 data = line[5:].strip()
-                if not data or data == "[DONE]":
+                if data == "[DONE]":
+                    break
+                if not data:
                     continue
                 payload = json.loads(data)
                 resolved_model = str(
@@ -322,6 +325,121 @@ class OpenAICompatibleProvider:
             model=str(payload.get("model") or settings.model),
             usage=self._parse_usage(payload.get("usage") or {}),
             tool_calls=calls,
+        )
+
+    async def stream_agent_turn(
+        self,
+        settings: ModelConnectionSettings,
+        messages: list[dict[str, Any]],
+        tools: tuple[dict[str, Any], ...],
+        reasoning_effort: str | None,
+    ) -> AsyncIterator[ProviderTurnEvent]:
+        request_body: dict[str, Any] = {
+            "model": settings.model,
+            "messages": messages,
+            "tools": list(tools),
+            "tool_choice": "auto",
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if settings.max_output_tokens is not None:
+            request_body["max_tokens"] = settings.max_output_tokens
+        if reasoning_effort:
+            request_body["reasoning"] = {"effort": reasoning_effort}
+
+        resolved_model = settings.model
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        usage = TokenUsageResponse(
+            promptTokens=0,
+            completionTokens=0,
+            totalTokens=0,
+        )
+        call_parts: dict[int, dict[str, str]] = {}
+
+        async with httpx.AsyncClient(timeout=120.0) as client, client.stream(
+            "POST",
+            f"{settings.base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {settings.api_key}",
+                "Content-Type": "application/json",
+            },
+            json=request_body,
+        ) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                if not data:
+                    continue
+                payload = json.loads(data)
+                resolved_model = str(payload.get("model") or resolved_model)
+                raw_usage = payload.get("usage")
+                if isinstance(raw_usage, dict):
+                    usage = self._parse_usage(raw_usage)
+                choices = payload.get("choices") or []
+                if not choices:
+                    continue
+                delta = choices[0].get("delta") or {}
+                reasoning = (
+                    delta.get("reasoning_content") or delta.get("reasoning")
+                )
+                if isinstance(reasoning, str) and reasoning:
+                    reasoning_parts.append(reasoning)
+                    yield ProviderTurnEvent(
+                        type="reasoning_delta",
+                        delta=reasoning,
+                        model=resolved_model,
+                    )
+                content = delta.get("content")
+                if isinstance(content, str) and content:
+                    content_parts.append(content)
+                    yield ProviderTurnEvent(
+                        type="content_delta",
+                        delta=content,
+                        model=resolved_model,
+                    )
+                for raw_call in delta.get("tool_calls") or []:
+                    if not isinstance(raw_call, dict):
+                        continue
+                    index = int(raw_call.get("index") or 0)
+                    current = call_parts.setdefault(
+                        index,
+                        {"id": "", "name": "", "arguments": ""},
+                    )
+                    if raw_call.get("id"):
+                        current["id"] = str(raw_call["id"])
+                    function = raw_call.get("function") or {}
+                    if function.get("name"):
+                        current["name"] += str(function["name"])
+                    if function.get("arguments"):
+                        current["arguments"] += str(function["arguments"])
+                    yield ProviderTurnEvent(
+                        type="tool_call_delta",
+                        model=resolved_model,
+                    )
+
+        calls = tuple(
+            ProviderToolCall(
+                call_id=part["id"] or str(uuid.uuid4()),
+                name=part["name"],
+                arguments_json=part["arguments"] or "{}",
+            )
+            for _, part in sorted(call_parts.items())
+        )
+        yield ProviderTurnEvent(
+            type="completed",
+            model=resolved_model,
+            turn=ProviderTurn(
+                content="".join(content_parts),
+                reasoning="".join(reasoning_parts),
+                model=resolved_model,
+                usage=usage,
+                tool_calls=calls,
+            ),
         )
 
     def _request_body(

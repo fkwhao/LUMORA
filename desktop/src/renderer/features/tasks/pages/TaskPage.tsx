@@ -2,6 +2,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -17,8 +18,16 @@ import {
   type TextMessagePartProps,
   fromThreadMessageLike,
   useAuiState,
-  useExternalStoreRuntime,
+  useRuntimeAdapters,
 } from "@assistant-ui/react";
+import type {
+  AssistantRuntime,
+  ExternalStoreAdapter,
+} from "@assistant-ui/core";
+import {
+  AssistantRuntimeImpl,
+  ExternalStoreRuntimeCore,
+} from "@assistant-ui/core/internal";
 import {
   ArrowDown,
   ArrowUp,
@@ -55,6 +64,10 @@ import type {
   ArtifactChunk,
 } from "../../../../shared/model-contract";
 import type { TaskEvent } from "../../../../shared/task-contract";
+import {
+  executionPlanFromWorkLog,
+  isExecutionPlanComplete,
+} from "../../../../shared/execution-plan";
 import { Thread } from "../../../components/assistant-ui/thread";
 import { Button, buttonVariants } from "../../../components/ui/button";
 import {
@@ -70,6 +83,7 @@ import { ToolApprovalDialog } from "../components/ToolApprovalDialog";
 import { AgentRunSummary } from "../components/AgentRunSummary";
 import { DiffReviewPane, type FileChange } from "../components/DiffReviewPane";
 import { ProcessingLattice } from "../components/ProcessingLattice";
+import { PlanTodoList } from "../components/PlanTodoList";
 import type { TaskStore } from "../state/task-store";
 
 interface TaskPageProps {
@@ -138,6 +152,9 @@ export const TaskPage = memo(function TaskPage({
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const conversationScrollRef = useRef<HTMLDivElement>(null);
   const conversationContentRef = useRef<HTMLDivElement>(null);
+  const questionRailContainerRef = useRef<HTMLElement>(null);
+  const questionRailRef = useRef<HTMLElement>(null);
+  const questionRailScrollFrameRef = useRef<number | null>(null);
   const followUpInputRef = useRef<HTMLTextAreaElement>(null);
   const conversationFooterRef = useRef<HTMLDivElement>(null);
   const composerMenuRef = useRef<HTMLFormElement>(null);
@@ -148,11 +165,7 @@ export const TaskPage = memo(function TaskPage({
   const questionPositionsRef = useRef<Array<{ index: number; top: number }>>(
     [],
   );
-  const railPointerStartRef = useRef<{ x: number; y: number } | null>(null);
-  const railWasDraggedRef = useRef(false);
   const lastAutoScrolledQuestionRef = useRef<string | undefined>(undefined);
-  const lastOpenedTaskRef = useRef<string | undefined>(undefined);
-  const stopOpeningScrollRef = useRef<() => void>(() => undefined);
   const openChangeReview = useCallback((item: WorkLogItem) => {
     setSelectedChangeId(item.itemId);
     setReviewOpen(true);
@@ -429,67 +442,6 @@ export const TaskPage = memo(function TaskPage({
     });
   }, [isChatting, messages]);
 
-  useEffect(() => {
-    if (!task || isLoadingHistory) {
-      return;
-    }
-    const latestQuestion = [...messages]
-      .reverse()
-      .find((message) => message.role === "user");
-    const openedContentKey = `${task.taskId}:${
-      latestQuestion?.messageId ??
-      latestQuestion?.createdAt ??
-      latestQuestion?.content ??
-      task.goal
-    }`;
-    if (lastOpenedTaskRef.current === openedContentKey) return;
-    lastOpenedTaskRef.current = openedContentKey;
-    let cancelled = false;
-    let frame: number | undefined;
-    const timers: number[] = [];
-    const scrollToLatestQuestion = () => {
-      if (cancelled) return;
-      if (frame !== undefined) cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        frame = undefined;
-        if (cancelled) return;
-        const scroll = conversationScrollRef.current;
-        if (!scroll) return;
-        const questions = scroll.querySelectorAll("[data-question-index]");
-        if (questions.length > 0) {
-          scrollToQuestion(questions.length - 1, "auto");
-        } else {
-          scroll.scrollTop = scroll.scrollHeight;
-        }
-      });
-    };
-    scrollToLatestQuestion();
-    timers.push(
-      window.setTimeout(scrollToLatestQuestion, 80),
-      window.setTimeout(scrollToLatestQuestion, 240),
-    );
-    const content = conversationContentRef.current;
-    const observer =
-      content && typeof ResizeObserver !== "undefined"
-        ? new ResizeObserver(scrollToLatestQuestion)
-        : undefined;
-    if (content) observer?.observe(content);
-    const stop = () => {
-      if (cancelled) return;
-      cancelled = true;
-      if (frame !== undefined) cancelAnimationFrame(frame);
-      timers.forEach((timer) => window.clearTimeout(timer));
-      observer?.disconnect();
-      if (stopOpeningScrollRef.current === stop) {
-        stopOpeningScrollRef.current = () => undefined;
-      }
-    };
-    stopOpeningScrollRef.current();
-    stopOpeningScrollRef.current = stop;
-    timers.push(window.setTimeout(stop, 520));
-    return stop;
-  }, [isLoadingHistory, messages, task]);
-
   useEffect(
     () => () => {
       if (scrollStateFrameRef.current !== null) {
@@ -512,6 +464,14 @@ export const TaskPage = memo(function TaskPage({
         : messages,
     [messages, task],
   );
+  const executionPlan = useMemo(() => {
+    const latestAssistant = [...displayMessages]
+      .reverse()
+      .find((message) => message.role === "assistant");
+    return executionPlanFromWorkLog(latestAssistant?.workLog);
+  }, [displayMessages]);
+  const showExecutionPlan =
+    executionPlan.length > 0 && !isExecutionPlanComplete(executionPlan);
 
   const messageRepository = useMemo(() => {
     const persisted = displayMessages.flatMap(
@@ -685,7 +645,7 @@ export const TaskPage = memo(function TaskPage({
     ],
   );
 
-  const runtime = useExternalStoreRuntime<ThreadMessage>({
+  const runtime = useSynchronousExternalStoreRuntime<ThreadMessage>({
     messageRepository,
     setMessages: () => undefined,
     unstable_onBranchChange: ({ headId }) => {
@@ -731,9 +691,145 @@ export const TaskPage = memo(function TaskPage({
         : "";
     return [{ message, messageIndex, result }];
   });
+  const latestQuestionEntry = questionEntries.at(-1);
+  const latestQuestionMessageId = latestQuestionEntry
+    ? (latestQuestionEntry.message.messageId ??
+      runtimeMessageId(latestQuestionEntry.messageIndex))
+    : undefined;
+
+  useLayoutEffect(() => {
+    const scroll = conversationScrollRef.current;
+    const content = conversationContentRef.current;
+    if (!task || !scroll || !content || !latestQuestionMessageId) return;
+
+    let frame: number | undefined;
+    let stableFrames = 0;
+    let attempts = 0;
+    let finished = false;
+    scroll.classList.add("is-restoring-position");
+    questionPositionsRef.current = [];
+
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      observer.disconnect();
+      scroll.classList.remove("is-restoring-position");
+    };
+    const alignLatestQuestion = () => {
+      frame = undefined;
+      if (finished) return;
+      attempts += 1;
+      const target = Array.from(
+        scroll.querySelectorAll<HTMLElement>("[data-message-id]"),
+      ).find(
+        (element) => element.dataset.messageId === latestQuestionMessageId,
+      );
+      if (target) {
+        const previousScrollBehavior = scroll.style.scrollBehavior;
+        scroll.style.scrollBehavior = "auto";
+        const targetTop =
+          scroll.scrollTop +
+          target.getBoundingClientRect().top -
+          scroll.getBoundingClientRect().top -
+          34;
+        const boundedTargetTop = Math.max(
+          0,
+          Math.min(targetTop, scroll.scrollHeight - scroll.clientHeight),
+        );
+        scroll.scrollTop = boundedTargetTop;
+        scroll.style.scrollBehavior = previousScrollBehavior;
+        stableFrames =
+          Math.abs(scroll.scrollTop - boundedTargetTop) <= 1
+            ? stableFrames + 1
+            : 0;
+        setActiveQuestionIndex(questionEntries.length - 1);
+      } else {
+        stableFrames = 0;
+      }
+
+      if (
+        (!isLoadingHistory && !isHydratingHistory && stableFrames >= 2) ||
+        attempts >= 30
+      ) {
+        finish();
+        return;
+      }
+      frame = requestAnimationFrame(alignLatestQuestion);
+    };
+    const observer = new MutationObserver(() => {
+      stableFrames = 0;
+      if (frame === undefined) {
+        frame = requestAnimationFrame(alignLatestQuestion);
+      }
+    });
+    observer.observe(content, { childList: true, subtree: true });
+    alignLatestQuestion();
+
+    return finish;
+  }, [
+    isHydratingHistory,
+    isLoadingHistory,
+    latestQuestionMessageId,
+    questionEntries.length,
+    task?.taskId,
+  ]);
+
+  useEffect(() => {
+    const rail = questionRailRef.current;
+    const container = questionRailContainerRef.current;
+    if (!rail || !container) return;
+    const updateEdges = () => {
+      const top = rail.scrollTop > 2;
+      const bottom = rail.scrollTop + rail.clientHeight < rail.scrollHeight - 2;
+      container.classList.toggle("can-scroll-up", top);
+      container.classList.toggle("can-scroll-down", bottom);
+    };
+    const handleScroll = () => {
+      if (questionRailScrollFrameRef.current !== null) return;
+      questionRailScrollFrameRef.current = requestAnimationFrame(() => {
+        questionRailScrollFrameRef.current = null;
+        updateEdges();
+      });
+    };
+    const frame = requestAnimationFrame(() => {
+      const active = rail.querySelector<HTMLElement>(
+        `[data-rail-question-index="${activeQuestionIndex}"]`,
+      );
+      if (active) {
+        const railBounds = rail.getBoundingClientRect();
+        const activeBounds = active.getBoundingClientRect();
+        if (activeBounds.top < railBounds.top + 18) {
+          rail.scrollTop -= railBounds.top + 18 - activeBounds.top;
+        } else if (activeBounds.bottom > railBounds.bottom - 18) {
+          rail.scrollTop += activeBounds.bottom - (railBounds.bottom - 18);
+        }
+      }
+      updateEdges();
+    });
+    rail.addEventListener("scroll", handleScroll, { passive: true });
+    if (typeof ResizeObserver === "undefined") {
+      return () => {
+        cancelAnimationFrame(frame);
+        rail.removeEventListener("scroll", handleScroll);
+      };
+    }
+    const observer = new ResizeObserver(updateEdges);
+    observer.observe(rail);
+    const list = rail.querySelector<HTMLElement>(".question-rail-list");
+    if (list) observer.observe(list);
+    return () => {
+      cancelAnimationFrame(frame);
+      if (questionRailScrollFrameRef.current !== null) {
+        cancelAnimationFrame(questionRailScrollFrameRef.current);
+        questionRailScrollFrameRef.current = null;
+      }
+      rail.removeEventListener("scroll", handleScroll);
+      observer.disconnect();
+    };
+  }, [activeQuestionIndex, questionEntries.length, task?.taskId]);
 
   function cancelConversationScrollAnimation() {
-    stopOpeningScrollRef.current();
     const scroll = conversationScrollRef.current;
     if (scroll) {
       if (typeof scroll.scrollTo === "function") {
@@ -829,33 +925,16 @@ export const TaskPage = memo(function TaskPage({
     });
   }
 
-  function scrollConversationFromRail(event: React.WheelEvent<HTMLElement>) {
-    event.preventDefault();
-    cancelConversationScrollAnimation();
-    conversationScrollRef.current?.scrollBy({ top: event.deltaY });
-  }
-
-  function scrubQuestionRail(event: React.PointerEvent<HTMLElement>) {
-    const items = Array.from(
-      event.currentTarget.querySelectorAll<HTMLElement>(
-        ".question-rail-item",
-      ),
+  function positionQuestionRailTooltip(element: HTMLButtonElement) {
+    const bounds = element.getBoundingClientRect();
+    element.style.setProperty(
+      "--question-rail-tooltip-top",
+      `${bounds.top + bounds.height / 2}px`,
     );
-    if (items.length === 0) {
-      return;
-    }
-    const nearest = items.reduce((current, item) => {
-      const currentBounds = current.getBoundingClientRect();
-      const itemBounds = item.getBoundingClientRect();
-      const currentDistance = Math.abs(
-        currentBounds.top + currentBounds.height / 2 - event.clientY,
-      );
-      const itemDistance = Math.abs(
-        itemBounds.top + itemBounds.height / 2 - event.clientY,
-      );
-      return itemDistance < currentDistance ? item : current;
-    });
-    scrollToQuestion(Number(nearest.dataset.railQuestionIndex), "auto");
+    element.style.setProperty(
+      "--question-rail-tooltip-left",
+      `${bounds.right + 8}px`,
+    );
   }
 
   const openArtifact = useCallback(async (artifactId: string) => {
@@ -1090,46 +1169,15 @@ export const TaskPage = memo(function TaskPage({
       </header>
 
       <div className="task-stage">
-        <aside className="question-rail" aria-label="本次会话的问题记录">
+        <aside
+          ref={questionRailContainerRef}
+          className="question-rail"
+          aria-label="本次会话的问题记录"
+        >
           <nav
+            ref={questionRailRef}
             className="question-rail-track"
             aria-label="跳转到会话问题"
-            onWheel={scrollConversationFromRail}
-            onPointerDown={(event) => {
-              railPointerStartRef.current = {
-                x: event.clientX,
-                y: event.clientY,
-              };
-              railWasDraggedRef.current = false;
-            }}
-            onPointerMove={(event) => {
-              const start = railPointerStartRef.current;
-              if (
-                start &&
-                Math.hypot(
-                  event.clientX - start.x,
-                  event.clientY - start.y,
-                ) > 4
-              ) {
-                if (!event.currentTarget.hasPointerCapture(event.pointerId)) {
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                }
-                railWasDraggedRef.current = true;
-                scrubQuestionRail(event);
-              }
-            }}
-            onPointerUp={(event) => {
-              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                event.currentTarget.releasePointerCapture(event.pointerId);
-              }
-              railPointerStartRef.current = null;
-            }}
-            onPointerCancel={(event) => {
-              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                event.currentTarget.releasePointerCapture(event.pointerId);
-              }
-              railPointerStartRef.current = null;
-            }}
           >
             <div className="question-rail-list">
               {questionEntries.map(({ message, result }, questionIndex) => (
@@ -1144,11 +1192,13 @@ export const TaskPage = memo(function TaskPage({
                   aria-current={
                     activeQuestionIndex === questionIndex ? "step" : undefined
                   }
+                  onMouseEnter={(event) =>
+                    positionQuestionRailTooltip(event.currentTarget)
+                  }
+                  onFocus={(event) =>
+                    positionQuestionRailTooltip(event.currentTarget)
+                  }
                   onClick={() => {
-                    if (railWasDraggedRef.current) {
-                      railWasDraggedRef.current = false;
-                      return;
-                    }
                     scrollToQuestion(questionIndex);
                   }}
                 >
@@ -1250,15 +1300,17 @@ export const TaskPage = memo(function TaskPage({
                                 <Copy size={14} />
                               </button>
                             </ActionBarPrimitive.Copy>
-                            <ActionBarPrimitive.Edit asChild>
-                              <button
-                                type="button"
-                                aria-label="编辑并重新发送消息"
-                                title="编辑并重新发送"
-                              >
-                                <Pencil size={14} />
-                              </button>
-                            </ActionBarPrimitive.Edit>
+                            {questionIndex === questionEntries.length - 1 && (
+                              <ActionBarPrimitive.Edit asChild>
+                                <button
+                                  type="button"
+                                  aria-label="编辑并重新发送消息"
+                                  title="编辑并重新发送"
+                                >
+                                  <Pencil size={14} />
+                                </button>
+                              </ActionBarPrimitive.Edit>
+                            )}
                           </ActionBarPrimitive.Root>
                         </div>
                       </MessagePrimitive.Root>
@@ -1806,6 +1858,11 @@ export const TaskPage = memo(function TaskPage({
               event.target.value = "";
             }}
           />
+          {showExecutionPlan && (
+            <aside className="conversation-plan-float" aria-label="当前执行计划">
+              <PlanTodoList steps={executionPlan} />
+            </aside>
+          )}
           {(isLoadingHistory || isHydratingHistory) && (
             <div
               className={
@@ -2238,6 +2295,25 @@ export const TaskPage = memo(function TaskPage({
     </AssistantRuntimeProvider>
   );
 });
+
+function useSynchronousExternalStoreRuntime<T>(
+  adapter: ExternalStoreAdapter<T>,
+): AssistantRuntime {
+  const [core] = useState(() => new ExternalStoreRuntimeCore(adapter));
+  const [runtime] = useState(() => new AssistantRuntimeImpl(core));
+  const { modelContext } = useRuntimeAdapters() ?? {};
+
+  useLayoutEffect(() => {
+    core.setAdapter(adapter);
+  }, [adapter, core]);
+
+  useEffect(() => {
+    if (!modelContext) return;
+    return runtime.registerModelContextProvider(modelContext);
+  }, [modelContext, runtime]);
+
+  return runtime;
+}
 
 function PlainTextMessagePart({ text }: TextMessagePartProps) {
   return <p>{text}</p>;

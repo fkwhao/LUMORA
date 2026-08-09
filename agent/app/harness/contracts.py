@@ -1,6 +1,6 @@
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from app.dto.response.chat_completion_response import (
     ChatCompletionResponse,
@@ -26,9 +26,26 @@ class ProviderTurn:
     tool_calls: tuple[ProviderToolCall, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class ProviderTurnEvent:
+    type: Literal[
+        "content_delta",
+        "reasoning_delta",
+        "tool_call_delta",
+        "completed",
+    ]
+    delta: str = ""
+    model: str = ""
+    turn: ProviderTurn | None = None
+
+
 TurnCompleter = Callable[
     [ModelConnectionSettings, list[dict[str, Any]], tuple[dict[str, Any], ...], str | None],
     Awaitable[ProviderTurn],
+]
+TurnStreamer = Callable[
+    [ModelConnectionSettings, list[dict[str, Any]], tuple[dict[str, Any], ...], str | None],
+    AsyncIterator[ProviderTurnEvent],
 ]
 HistoryCompactor = Callable[
     [ModelConnectionSettings, list[dict[str, Any]], str | None],

@@ -138,6 +138,7 @@ def test_apply_patch_requires_unique_match_and_writes_atomically(
 
 def test_default_registry_exposes_large_file_tools() -> None:
     assert create_default_tool_registry().names() == (
+        "update_plan",
         "artifact_read",
         "artifact_search",
         "list_files",
@@ -153,6 +154,7 @@ def test_legacy_tool_runtime_import_keeps_default_registry_compatible() -> None:
     registry = create_default_tool_registry()
     compatible = create_compatible_registry()
     expected_names = (
+        "update_plan",
         "artifact_read",
         "artifact_search",
         "list_files",

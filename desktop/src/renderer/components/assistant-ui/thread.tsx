@@ -178,6 +178,8 @@ const ThreadRoot: FC<
       <ThreadPrimitive.Viewport
         {...viewportProps}
         turnAnchor="top"
+        scrollToBottomOnInitialize={false}
+        scrollToBottomOnThreadSwitch={false}
         data-slot="aui_thread-viewport"
         className={cn(
           "relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth",
@@ -593,6 +595,7 @@ const AssistantActionBar: FC = () => {
 
 const UserMessage: FC = () => {
   const messageIndex = useAuiState((s) => s.message.index);
+  const messageId = useAuiState((s) => s.message.id);
   const questionIndex = useAuiState(
     (s) =>
       s.thread.messages
@@ -604,6 +607,7 @@ const UserMessage: FC = () => {
     <MessagePrimitive.Root
       data-slot="aui_user-message-root"
       data-question-index={questionIndex}
+      data-message-id={messageId}
       className="fade-in slide-in-from-bottom-1 animate-in grid auto-rows-auto grid-cols-[minmax(0,1fr)] content-start gap-y-2 px-2 duration-150 [contain-intrinsic-size:auto_200px] [content-visibility:auto] [&:where(>*)]:col-start-1"
       data-role="user"
     >
@@ -631,6 +635,14 @@ const UserMessage: FC = () => {
 };
 
 const UserActionBar: FC = () => {
+  const messageIndex = useAuiState((s) => s.message.index);
+  const isLatestUserMessage = useAuiState(
+    (s) =>
+      !s.thread.messages
+        .slice(messageIndex + 1)
+        .some((message) => message.role === "user"),
+  );
+
   return (
     <ActionBarPrimitive.Root
       hideWhenRunning
@@ -646,15 +658,17 @@ const UserActionBar: FC = () => {
           </AuiIf>
         </TooltipIconButton>
       </ActionBarPrimitive.Copy>
-      <ActionBarPrimitive.Edit asChild>
-        <TooltipIconButton
-          tooltip="编辑并重新发送"
-          aria-label="编辑并重新发送消息"
-          className="aui-user-action-edit"
-        >
-          <PencilIcon />
-        </TooltipIconButton>
-      </ActionBarPrimitive.Edit>
+      {isLatestUserMessage && (
+        <ActionBarPrimitive.Edit asChild>
+          <TooltipIconButton
+            tooltip="编辑并重新发送"
+            aria-label="编辑并重新发送消息"
+            className="aui-user-action-edit"
+          >
+            <PencilIcon />
+          </TooltipIconButton>
+        </ActionBarPrimitive.Edit>
+      )}
     </ActionBarPrimitive.Root>
   );
 };

@@ -18,6 +18,8 @@ Python Agent Runtime
 ### Electron Desktop
 
 - Renderer 负责任务、对话、计划、Changes 和设置界面。
+- 多步骤任务的最近一次 `update_plan` 快照显示在对话区域右上角；清单收起后为紧凑
+  胶囊，全部步骤完成后自动隐藏。计划仅用于透明展示，不增加等待用户确认的阶段。
 - Preload 只暴露按业务领域划分的白名单能力。
 - Main 负责窗口生命周期、Java REST Client、SSE 重连和协议校验。
 - Renderer 不启用 Node.js 集成，也不持有后端地址和启动令牌。
@@ -77,7 +79,7 @@ transport/http
 `CompletionProviderPort`，`AgentHarness` 只依赖 `AgentTurnProviderPort`。具体
 `OpenAICompatibleProvider` 仅在 `main.py` 组合根实例化，可替换为 Responses、Anthropic、
 本地模型或测试 Fake Provider。Provider 不再创建或拥有 Agent Loop；它只实现模型发现、完成、
-流式完成、单回合工具调用和摘要能力。Provider 回合结构与回调契约集中在
+流式完成、单回合工具调用增量流和摘要能力。Provider 回合结构与回调契约集中在
 `app/harness/contracts.py`，Port 集中在 `app/harness/ports/model_provider.py`，从而避免 Provider
 反向依赖具体 `AgentLoopRunner`。`AgentHarness` 为每次运行创建独立 Runner，避免并发任务共享
 可变 Prompt 或中途摘要状态。Provider、ChatService、Harness 与 ToolCallExecutor 统一输出内部
@@ -86,7 +88,8 @@ transport/http
 
 所有流式聊天请求都从 `ChatService` 进入 `AgentHarness`，不再由 Service 在 Provider 原生流和
 Agent Loop 之间分支。Harness 保留两种内部策略：没有可用工具时透传 Provider 原生增量流；
-存在工具且已建立工作区 ToolContext 时进入 `AgentLoopRunner`。统一入口不会牺牲普通聊天的
+存在工具且已建立工作区 ToolContext 时进入 `AgentLoopRunner`，由 Runner 实时转发最终正文
+增量并累计流式工具调用参数。统一入口不会牺牲普通聊天或项目任务的
 逐段输出，同时为两种策略提供共同的取消、Tracing、上下文守卫和后续多 Agent 扩展点。
 
 目标架构采用 Supervisor、动态 Worker、有界并发和队列调度：
@@ -108,14 +111,25 @@ Capability，不是固定 Agent 类型。首版本机调度使用 `asyncio.Queue
 
 ## 4. 统一运行事件
 
-Python 会话执行过程已经统一使用 transport-neutral 的 `RunEvent`，覆盖模型文本、推理、进度、
-工具、审批、上下文压缩、用量和生命周期事件。HTTP 边界负责 camelCase 字段与 SSE 序列化，
-公开事件枚举、内部事件枚举和 OpenAPI 由契约测试保持一致。后续 Agent/Artifact 等事件继续沿用
-同一结构扩展：
+Python 会话执行过程已经统一使用 transport-neutral 的简化 `RunEvent`，覆盖模型文本、推理、
+进度、工具、审批、上下文压缩、用量和生命周期事件。HTTP 边界负责 camelCase 字段与 SSE
+序列化，公开事件枚举、内部事件枚举和 OpenAPI 由契约测试保持一致。当前公开类型主要包括：
+
+```text
+text_delta / reasoning_delta / progress_message
+tool_started / tool_completed / tool_failed
+tool_approval_requested / tool_approval_resolved
+context_compaction_started / context_compaction_progress
+context_compacted / context_compaction_failed
+usage / completed / failed
+```
+
+完整 Run Runtime 后续仍沿用同一抽象扩展 Agent、Plan 和 Artifact 生命周期，并升级为：
 
 ```text
 RunEvent
 ├── RunLifecycleEvent
+├── PlanLifecycleEvent
 ├── AgentLifecycleEvent
 ├── ModelStreamEvent
 ├── ToolExecutionEvent
@@ -123,26 +137,13 @@ RunEvent
 └── ArtifactEvent
 ```
 
-典型事件包括：
+工具、审批、Compact 和完成状态由结构化事件推导；模型生成的 `progress_message` 只作为
+用户可见的语义阶段标题，不作为任务权威状态。普通多步骤任务通常只在目标明显切换时生成
+2～4 个概括阶段，连续工具调用沿用当前阶段，具体发现和测试数字留到最终回答。
 
-```text
-RUN_STARTED
-PLAN_CREATED
-AGENT_STARTED
-MODEL_CALL_STARTED
-REASONING_DELTA
-TEXT_DELTA
-TOOL_CALL_STARTED
-TOOL_CALL_COMPLETED
-APPROVAL_REQUIRED
-DIFF_CREATED
-RUN_COMPLETED
-```
-
-“正在思考”“正在编辑文件”等界面状态由结构化事件推导，不解析模型自然语言。
-高频文本增量实时转发但不逐 token 落库；Run、Agent、工具、审批和 Artifact 的关键
-状态由 Java 持久化。事件使用 `event_id` 去重，并通过 Run 内单调递增的 `sequence`
-支持 SSE 重连和状态恢复。
+高频文本增量实时转发但不逐 token 落库，最终消息、工作记录、用量、工具审批和 Artifact
+索引由 Java 持久化。带全局 `event_id`、`run_id`、耐久等级、单调 `sequence`、Snapshot 和
+Checkpoint 的可重放事件信封仍是目标设计；当前 Python 进程重启后不能恢复执行中的模型调用。
 
 ## 5. System Prompt 与工具注册
 
@@ -169,12 +170,14 @@ Python Harness 的 Tool Registry 提供名称、用途、输入 JSON Schema、�
 工具。注册中心是工具 Schema 的唯一事实来源；Java 只传工具名称白名单，不再维护
 重复 Schema。
 
-当前实现包含 `list_files`、`search_in_file`、`read_file`、`apply_patch`、
-`write_file` 和 `shell_command`。大文件默认先搜索定位、再按行分段读取，现有文件的
-局部修改通过唯一文本匹配的原子补丁完成。注册中心
+当前实现包含 `update_plan`、`list_files`、`search_in_file`、`read_file`、
+`apply_patch`、`write_file`、`shell_command`、`artifact_read` 和
+`artifact_search`。`update_plan` 发布无副作用的完整计划快照；大文件默认先搜索定位、
+再按行分段读取，现有文件的局部修改通过唯一文本匹配的原子补丁完成。注册中心
 统一执行 Schema 校验、业务校验、工作区约束、并发锁和 UI metadata 装配。工具返回
 的 `content` 会反馈给模型，`metadata` 只沿 SSE 事件发送给 UI，不进入模型上下文。
-内置工具按 `artifact_tools.py`、`filesystem_tools.py` 和 `shell_tools.py` 分能力维护，
+内置工具按 `planning_tools.py`、`artifact_tools.py`、`filesystem_tools.py` 和
+`shell_tools.py` 分能力维护，
 `default_registry.py` 只按稳定顺序装配；`tool_runtime.py` 保留旧导入兼容入口。破坏性属性
 同时用于审计、界面表达和执行前权限审批，不能只依赖 Prompt 或标记本身阻止危险操作。
 

@@ -79,6 +79,16 @@ export interface ChatMessage {
 
 export type WorkLogItemStatus = "running" | "completed" | "failed";
 
+export type ExecutionPlanStepStatus =
+  | "pending"
+  | "in_progress"
+  | "completed";
+
+export interface ExecutionPlanStep {
+  step: string;
+  status: ExecutionPlanStepStatus;
+}
+
 export interface WorkLogItem {
   itemId: string;
   kind: "progress" | "tool" | "context";

@@ -125,6 +125,7 @@ public class AgentPromptContextRequest {
                 workspacePath.trim(),
                 List.of(),
                 List.of(
+                        "update_plan",
                         "list_files",
                         "search_in_file",
                         "read_file",

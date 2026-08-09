@@ -1,6 +1,6 @@
 # LUMORA 工具调用运行时设计
 
-> 文档状态：当前实现，2026-08-04。
+> 文档状态：当前实现，2026-08-09。
 
 ## 1. 目标与结论
 
@@ -121,15 +121,19 @@ required、additionalProperties、minimum 和 maximum。引入组合 Schema 或�
 
 | 工具 | 分类 | 只读 | 并发策略 | 主要边界 |
 | --- | --- | --- | --- | --- |
+| `update_plan` | planning | 是 | 同一计划串行 | 每次提交完整快照，1～20 步，最多一个 `in_progress` |
 | `list_files` | filesystem | 是 | 可并发 | 默认工作区内；外部 glob 需逐次确认，最多展示 300 项 |
 | `search_in_file` | filesystem | 是 | 可并发 | 普通文本搜索，默认 40、最多展示 100 个匹配 |
 | `read_file` | filesystem | 是 | 可并发 | 默认 200 行，单次最多 400 行或 40,000 字符 |
 | `apply_patch` | filesystem | 否 | 同一目标文件串行 | 旧文本必须唯一匹配，原子替换，补丁最多 100,000 字符 |
 | `write_file` | filesystem | 否 | 同一目标文件串行 | 用于新建或明确完整覆盖，输入最多 1,000,000 字符 |
 | `shell_command` | shell | 否 | 同一工作区串行 | 非交互、默认 120 秒/最长 600 秒、有界输出、灾难性命令硬拒绝 |
+| `artifact_read` | filesystem | 是 | 可并发 | 只接受任务所属的不透明 Artifact ID，单次最多 40,000 字符 |
+| `artifact_search` | filesystem | 是 | 可并发 | 只接受任务所属的不透明 Artifact ID，最多返回 100 条命中 |
 
 `write_file` 当前统一标记为 destructive，因为输入阶段无法可靠判断目标在执行时是否
-仍然存在。以后接入审批时，应在执行前重新计算真实风险并防止检查与使用之间的竞态。
+仍然存在。当前权限执行器会按照权限模式和分层规则进入审批；后续精确
+`grantedPermissions` 与受限 Worker 仍需进一步消除检查与使用之间的竞态。
 
 ### 6.1 大文件读取与修改流程
 
@@ -196,7 +200,7 @@ tool_approval_resolved
 统一渲染，运行时文字使用现有 shimmer 扫光；压缩摘要本身只进入 Java 的摘要表，不作为普通
 聊天正文展示。
 
-供应商适配器负责生成单回合结果，`AgentHarness` 管理运行边界，`AgentLoopRunner` 负责
+供应商适配器负责生成单回合增量事件并在流末组装完整回合，`AgentHarness` 管理运行边界，`AgentLoopRunner` 负责
 多回合工具编排，`ToolCallExecutor` 负责参数校验、权限审批、执行与事件投影，
 `ToolResultProcessor` 负责 Artifact 外置与模型可见截断。职责分离后，工具生命周期、累计
 用量和二十轮上限不依赖某个具体模型供应商。Provider 所需的回合数据结构与回调类型统一定义
@@ -212,11 +216,14 @@ Java 与 Desktop 契约。
 
 `ChatService.stream` 始终调用 `AgentHarness.stream`。Harness 根据当前 Prompt 是否包含工具以及
 是否存在 ToolContext 选择执行策略：普通聊天继续使用 Provider 原生流式接口，工具聊天使用
-最多二十轮的 Agent Loop。该分支属于 Harness 内部策略，不再形成两套应用层运行入口。
+最多二十轮的 Agent Loop。工具聊天中的最终正文同样以 `text_delta` 实时转发；工具调用名称和
+JSON 参数则在流中累计，回合结束后再交给执行器。该分支属于 Harness 内部策略，不再形成两套
+应用层运行入口。
 
 事件包含稳定的 `itemId`、模型 `toolCallId`、工具名称、展示标题、参数、输出、耗时、
-退出码和 metadata。每轮工具调用前，模型输出一句描述本轮目的的动态阶段标题；Java
-持久化消息的工作记录，Electron 将其投影为：
+退出码和 metadata。模型只在工作目标发生明显切换时输出一句描述新阶段的标题；普通
+多步骤任务通常保持 2～4 个概括阶段，同一目标下的连续工具调用不重复生成阶段文字。
+Java 持久化消息的工作记录，Electron 将其投影为：
 
 - 默认折叠的“正在处理/已处理”摘要；
 - 展开后的动态语义阶段，例如“正在生成测试数据”；
@@ -224,6 +231,11 @@ Java 与 Desktop 契约。
 - 单次工具调用的参数、命令、输出和状态详情；
 - “已编辑 文件名.ext”点击后打开右侧局部 Diff 预览；
 - 执行中的灰色文字扫光效果。
+
+多步骤实现任务会在探索必要上下文后调用 `update_plan` 发布完整计划，并在步骤状态变化
+时更新快照。Electron 从最近一次有效调用中解析步骤，在对话区域右上角显示可折叠 To-do；
+收起态为紧凑胶囊，全部步骤完成后不再显示。`update_plan` 工作记录不重复出现在工具活动
+列表中，避免计划 UI 和执行详情展示同一信息。
 
 模型隐藏推理不进入这条可验证工作记录；UI 只显示阶段说明和真实工具执行事件。
 

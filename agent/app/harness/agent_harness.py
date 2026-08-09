@@ -61,6 +61,7 @@ class AgentHarness:
             prompt_supplier,
             self._context_planner,
             self._result_processor,
+            stream_turn=getattr(self._provider, "stream_agent_turn", None),
         )
         async for event in runner.stream(
             settings,

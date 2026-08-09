@@ -12,6 +12,7 @@ from app.harness.agent_loop import AgentLoopRunner
 from app.harness.contracts import (
     ProviderToolCall,
     ProviderTurn,
+    ProviderTurnEvent,
 )
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.prompt.prompt_assembly import PromptAssembly
@@ -66,6 +67,67 @@ def _settings() -> ModelConnectionSettings:
 
 def test_agent_loop_streams_tool_lifecycle_before_final_answer() -> None:
     asyncio.run(_assert_tool_lifecycle_before_final_answer())
+
+
+def test_agent_loop_forwards_final_answer_deltas_in_tool_mode() -> None:
+    asyncio.run(_assert_final_answer_deltas_are_forwarded())
+
+
+async def _assert_final_answer_deltas_are_forwarded() -> None:
+    deltas = (
+        "这是项目模式下的第一段流式回答，",
+        "接下来继续输出第二段内容，",
+        "这里还有第三段内容用于跨过分类缓冲，",
+        "第四段会作为后续可见增量继续输出，",
+        "最后完成。",
+    )
+
+    async def complete_turn(*_args):
+        raise AssertionError("存在流式回合能力时不应调用一次性完成接口")
+
+    async def stream_turn(*_args):
+        for delta in deltas:
+            yield ProviderTurnEvent(
+                type="content_delta",
+                delta=delta,
+                model="test-model",
+            )
+        yield ProviderTurnEvent(
+            type="completed",
+            model="test-model",
+            turn=ProviderTurn(
+                content="".join(deltas),
+                reasoning="",
+                model="test-model",
+                usage=TokenUsageResponse(
+                    promptTokens=8,
+                    completionTokens=6,
+                    totalTokens=14,
+                ),
+                tool_calls=(),
+            ),
+        )
+
+    events = [
+        event
+        async for event in AgentLoopRunner(
+            complete_turn,
+            stream_turn=stream_turn,
+        ).stream(
+            _settings(),
+            PromptAssembly(()),
+            [ChatMessageRequest(role="user", content="继续")],
+            None,
+            ToolRegistry(),
+            ToolContext(Path(".")),
+        )
+    ]
+
+    text_events = [event for event in events if event.type == "text_delta"]
+    assert len(text_events) >= 2
+    assert "".join(event.delta for event in text_events) == "".join(deltas)
+    assert events[-2].type == "usage"
+    assert events[-1].type == "completed"
 
 
 async def _assert_tool_lifecycle_before_final_answer() -> None:

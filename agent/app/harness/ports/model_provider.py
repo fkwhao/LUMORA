@@ -3,7 +3,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from app.dto.request.chat_completion_request import ChatMessageRequest
 from app.dto.response.chat_completion_response import ChatCompletionResponse
-from app.harness.contracts import ProviderTurn
+from app.harness.contracts import ProviderTurn, ProviderTurnEvent
 from app.harness.run_event import RunEvent
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.prompt.prompt_assembly import PromptAssembly
@@ -22,6 +22,14 @@ class CompletionProviderPort(Protocol):
 
 @runtime_checkable
 class AgentTurnProviderPort(Protocol):
+    def stream_agent_turn(
+        self,
+        settings: ModelConnectionSettings,
+        messages: list[dict[str, Any]],
+        tools: tuple[dict[str, Any], ...],
+        reasoning_effort: str | None,
+    ) -> AsyncIterator[ProviderTurnEvent]: ...
+
     async def complete_agent_turn(
         self,
         settings: ModelConnectionSettings,

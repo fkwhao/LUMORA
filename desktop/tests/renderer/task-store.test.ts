@@ -156,9 +156,12 @@ describe("task store", () => {
         }),
     );
     const modelApi = createModelApi();
-    vi.mocked(modelApi.listMessages).mockImplementation(async (taskId) => [
-      { role: "user", content: `message-${taskId}` },
-    ]);
+    vi.mocked(modelApi.listMessages).mockImplementation(async (taskId) =>
+      Array.from({ length: taskId === firstTask.taskId ? 80 : 1 }, (_, index) => ({
+        role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+        content: index === 0 ? `message-${taskId}` : `history-${index}`,
+      })),
+    );
     const store = createTaskStore(api, modelApi);
     await store.getState().loadRecentTasks();
 
@@ -177,6 +180,8 @@ describe("task store", () => {
     const cachedOpen = store.getState().openTask(firstTask.taskId);
     expect(store.getState().activeTask?.taskId).toBe(firstTask.taskId);
     expect(store.getState().isLoadingHistory).toBe(false);
+    expect(store.getState().isHydratingHistory).toBe(false);
+    expect(store.getState().messages).toHaveLength(80);
     expect(store.getState().messages[0]?.content).toBe("message-task-a");
     resolveFirst?.(firstTask);
     await cachedOpen;

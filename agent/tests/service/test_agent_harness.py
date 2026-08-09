@@ -4,7 +4,7 @@ from pathlib import Path
 from app.dto.request.chat_completion_request import ChatMessageRequest
 from app.dto.response.chat_completion_response import TokenUsageResponse
 from app.harness.agent_harness import AgentHarness
-from app.harness.contracts import ProviderTurn
+from app.harness.contracts import ProviderTurn, ProviderTurnEvent
 from app.harness.run_event import RunEvent, RunUsage
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.permission.broker import ApprovalBroker
@@ -27,6 +27,7 @@ class StrategyRecordingProvider:
     def __init__(self) -> None:
         self.stream_calls = 0
         self.turn_calls = 0
+        self.turn_stream_calls = 0
 
     async def stream(self, *args, **kwargs):
         del args, kwargs
@@ -52,6 +53,30 @@ class StrategyRecordingProvider:
                 totalTokens=8,
             ),
             tool_calls=(),
+        )
+
+    async def stream_agent_turn(self, *args, **kwargs):
+        del args, kwargs
+        self.turn_stream_calls += 1
+        yield ProviderTurnEvent(
+            type="content_delta",
+            delta="工具模式回答",
+            model="test-model",
+        )
+        yield ProviderTurnEvent(
+            type="completed",
+            model="test-model",
+            turn=ProviderTurn(
+                content="工具模式回答",
+                reasoning="",
+                model="test-model",
+                usage=TokenUsageResponse(
+                    promptTokens=5,
+                    completionTokens=3,
+                    totalTokens=8,
+                ),
+                tool_calls=(),
+            ),
         )
 
     async def compact_agent_history(self, *args, **kwargs):
@@ -137,4 +162,5 @@ def test_harness_uses_agent_loop_strategy_with_tools(tmp_path: Path) -> None:
     assert [event.type for event in events] == ["text_delta", "usage", "completed"]
     assert events[0].delta == "工具模式回答"
     assert provider.stream_calls == 0
-    assert provider.turn_calls == 1
+    assert provider.turn_calls == 0
+    assert provider.turn_stream_calls == 1

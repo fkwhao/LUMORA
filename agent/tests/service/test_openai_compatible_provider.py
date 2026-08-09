@@ -1,8 +1,53 @@
+import asyncio
+import json
+
 from app.dto.request.chat_completion_request import ChatMessageRequest
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.prompt.prompt_builder import PromptBuilder
 from app.prompt.prompt_context import PromptContext
 from app.provider.openai_compatible_provider import OpenAICompatibleProvider
+
+
+class _StreamingResponse:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    def raise_for_status(self) -> None:
+        return None
+
+    async def aiter_lines(self):
+        yield "data: " + json.dumps({
+            "model": "example-model",
+            "choices": [{"delta": {"content": "完成"}}],
+        }, ensure_ascii=False)
+        yield "data: " + json.dumps({
+            "model": "example-model",
+            "choices": [],
+            "usage": {
+                "prompt_tokens": 4,
+                "completion_tokens": 2,
+                "total_tokens": 6,
+            },
+        })
+        yield "data: [DONE]"
+        yield "data: this-must-not-be-parsed"
+
+
+class _StreamingClient:
+    def __init__(self, *_args, **_kwargs) -> None:
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    def stream(self, *_args, **_kwargs):
+        return _StreamingResponse()
 
 
 def test_prompt_assembly_routes_context_and_tools_to_api_fields() -> None:
@@ -78,3 +123,34 @@ def test_model_max_output_tokens_are_sent_as_max_tokens() -> None:
     )
 
     assert body["max_tokens"] == 32_768
+
+
+def test_agent_turn_stream_stops_at_done_marker(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.provider.openai_compatible_provider.httpx.AsyncClient",
+        _StreamingClient,
+    )
+    provider = OpenAICompatibleProvider()
+
+    async def collect():
+        return [
+            event
+            async for event in provider.stream_agent_turn(
+                ModelConnectionSettings(
+                    provider_name="OpenAI compatible",
+                    base_url="https://example.com/v1",
+                    model="example-model",
+                    api_key="secret",
+                ),
+                [{"role": "user", "content": "继续"}],
+                (),
+                None,
+            )
+        ]
+
+    events = asyncio.run(collect())
+
+    assert [event.type for event in events] == ["content_delta", "completed"]
+    assert events[-1].turn is not None
+    assert events[-1].turn.content == "完成"
+    assert events[-1].turn.usage.total_tokens == 6

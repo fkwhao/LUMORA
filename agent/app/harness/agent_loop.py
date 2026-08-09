@@ -11,6 +11,7 @@ from app.harness.contracts import (
     HistoryCompactor,
     PromptSupplier,
     TurnCompleter,
+    TurnStreamer,
 )
 from app.harness.run_event import RunEvent, RunUsage
 from app.model.model_connection_settings import ModelConnectionSettings
@@ -26,6 +27,9 @@ from app.tool.registry import ToolRegistry
 class AgentLoopRunner:
     """编排模型回合、工具执行和公开工作事件。"""
 
+    _FINAL_STREAM_CLASSIFICATION_CHARS = 32
+    _VISIBLE_DELTA_CHARS = 8
+
     def __init__(
         self,
         complete_turn: TurnCompleter,
@@ -33,6 +37,7 @@ class AgentLoopRunner:
         prompt_supplier: PromptSupplier | None = None,
         context_planner: ContextPlanner | None = None,
         result_processor: ToolResultProcessor | None = None,
+        stream_turn: TurnStreamer | None = None,
     ) -> None:
         self._complete_turn = complete_turn
         self._compact_history = compact_history
@@ -40,6 +45,7 @@ class AgentLoopRunner:
         self._context_planner = context_planner or ContextPlanner()
         self._token_estimator = TokenEstimator()
         self._result_processor = result_processor or ToolResultProcessor()
+        self._stream_turn = stream_turn
 
     async def stream(
         self,
@@ -75,12 +81,80 @@ class AgentLoopRunner:
         active_summary = conversation_summary
 
         for _iteration in range(20):
-            turn = await self._complete_turn(
-                settings,
-                request_messages,
-                prompt.tools,
-                reasoning_effort,
-            )
+            content_was_streamed = False
+            if self._stream_turn is None:
+                turn = await self._complete_turn(
+                    settings,
+                    request_messages,
+                    prompt.tools,
+                    reasoning_effort,
+                )
+            else:
+                turn = None
+                pending_content: list[str] = []
+                pending_chars = 0
+                visible_content: list[str] = []
+                visible_chars = 0
+                tool_call_seen = False
+                async for turn_event in self._stream_turn(
+                    settings,
+                    request_messages,
+                    prompt.tools,
+                    reasoning_effort,
+                ):
+                    if turn_event.type == "reasoning_delta":
+                        continue
+                    elif turn_event.type == "tool_call_delta":
+                        tool_call_seen = True
+                    elif turn_event.type == "content_delta":
+                        if content_was_streamed:
+                            visible_content.append(turn_event.delta)
+                            visible_chars += len(turn_event.delta)
+                            if visible_chars >= self._VISIBLE_DELTA_CHARS:
+                                yield RunEvent(
+                                    type="text_delta",
+                                    delta="".join(visible_content),
+                                    model=turn_event.model or resolved_model,
+                                )
+                                visible_content.clear()
+                                visible_chars = 0
+                            continue
+                        pending_content.append(turn_event.delta)
+                        pending_chars += len(turn_event.delta)
+                        if (
+                            not tool_call_seen
+                            and pending_chars
+                            >= self._FINAL_STREAM_CLASSIFICATION_CHARS
+                        ):
+                            content_was_streamed = True
+                            yield RunEvent(
+                                type="text_delta",
+                                delta="".join(pending_content),
+                                model=turn_event.model or resolved_model,
+                            )
+                            pending_content.clear()
+                    elif turn_event.type == "completed":
+                        turn = turn_event.turn
+                if turn is None:
+                    raise ValueError("模型流未返回完整回合")
+                if (
+                    not turn.tool_calls
+                    and not content_was_streamed
+                    and pending_content
+                ):
+                    content_was_streamed = True
+                    yield RunEvent(
+                        type="text_delta",
+                        delta="".join(pending_content),
+                        model=turn.model,
+                    )
+                elif not turn.tool_calls and visible_content:
+                    yield RunEvent(
+                        type="text_delta",
+                        delta="".join(visible_content),
+                        model=turn.model,
+                    )
+            assert turn is not None
             resolved_model = turn.model
             prompt_tokens += turn.usage.prompt_tokens
             completion_tokens += turn.usage.completion_tokens
@@ -89,18 +163,13 @@ class AgentLoopRunner:
                 self._token_estimator.estimate_messages(request_messages)
                 + self._token_estimator.estimate_tools(prompt.tools)
             )
-            if turn.reasoning:
-                yield RunEvent(
-                    type="reasoning_delta",
-                    delta=turn.reasoning,
-                    model=resolved_model,
-                )
             if not turn.tool_calls:
                 if not turn.content.strip():
                     raise ValueError("模型返回了空消息")
-                yield RunEvent(
-                    type="text_delta", delta=turn.content, model=resolved_model
-                )
+                if not content_was_streamed:
+                    yield RunEvent(
+                        type="text_delta", delta=turn.content, model=resolved_model
+                    )
                 yield RunEvent(
                     type="usage",
                     model=resolved_model,
@@ -114,7 +183,7 @@ class AgentLoopRunner:
                 yield RunEvent(type="completed", model=resolved_model)
                 return
 
-            if turn.content.strip():
+            if turn.content.strip() and not content_was_streamed:
                 yield RunEvent(
                     type="progress_message",
                     item_id=str(uuid.uuid4()),

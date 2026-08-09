@@ -18,6 +18,7 @@ import {
 
 import type { WorkLogItem } from "../../../../shared/model-contract";
 import type { TaskEvent } from "../../../../shared/task-contract";
+import { isPlanWorkLogItem } from "../../../../shared/execution-plan";
 import { ProcessingLattice } from "./ProcessingLattice";
 
 interface AgentRunSummaryProps {
@@ -264,6 +265,7 @@ function buildWorkPhases(items: WorkLogItem[]): WorkPhase[] {
   const phases: WorkPhase[] = [];
   let current: WorkPhase | undefined;
   for (const item of items) {
+    if (isPlanWorkLogItem(item)) continue;
     if (item.kind === "progress") {
       current = {
         phaseId: item.itemId,
@@ -292,13 +294,10 @@ function phaseTitle(content?: string): string {
     .replace(/\s+/g, " ")
     .trim();
   if (!normalized) return "正在处理任务";
-  const firstSentence = normalized.split(/(?<=[。！？!?])\s*/)[0] ?? normalized;
-  const activeTitle = firstSentence
+  const activeTitle = normalized
     .replace(/^(我会先|我先|接下来我会|接下来)[，,：:]?\s*/, "正在")
     .replace(/[。！？!?]$/, "");
-  return activeTitle.length > 96
-    ? `${activeTitle.slice(0, 96)}…`
-    : activeTitle;
+  return activeTitle;
 }
 
 function fallbackPhaseTitle(item: WorkLogItem): string {

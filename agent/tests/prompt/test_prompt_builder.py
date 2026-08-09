@@ -31,6 +31,9 @@ class PromptBuilderTest(unittest.TestCase):
         self.assertIn("遵守项目现有代码规范。", prompt)
         self.assertIn("不得为了局部修改连续读取、拼装或重写整个文件", prompt)
         self.assertIn("完整写入工具只用于新建文件", prompt)
+        self.assertIn("普通多步骤任务通常保持 2–4 个阶段", prompt)
+        self.assertIn("同一目标下的读取、搜索、编辑和验证应沿用当前阶段", prompt)
+        self.assertNotIn("每轮调用工具前", prompt)
         self.assertNotIn("API Key", prompt.split("# 当前运行上下文")[1])
         self.assertTrue(all(
             segment.trust_level.value == "trusted"

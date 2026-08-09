@@ -51,6 +51,33 @@ describe("AgentRunSummary", () => {
     expect(screen.getByText("tsc --noEmit")).toBeInTheDocument();
   });
 
+  it("keeps the complete multi-sentence phase text", () => {
+    const content =
+      "我先读取现有源码，确认当前状态。现有代码已确认：组件、工具和接口均已就绪，接下来继续检查配置与测试。";
+
+    render(
+      <AgentRunSummary
+        durationMs={3_000}
+        running={false}
+        workLog={[
+          {
+            itemId: "progress-long",
+            kind: "progress",
+            status: "completed",
+            content,
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /已处理 3s/ }));
+    expect(
+      screen.getByRole("button", {
+        name: "正在读取现有源码，确认当前状态。现有代码已确认：组件、工具和接口均已就绪，接下来继续检查配置与测试",
+      }),
+    ).toBeInTheDocument();
+  });
+
   it("keeps an active tool call compact until the user opens its details", () => {
     render(
       <AgentRunSummary

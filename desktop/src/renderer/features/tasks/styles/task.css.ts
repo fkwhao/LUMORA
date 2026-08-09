@@ -235,7 +235,40 @@ globalStyle(".question-rail", {
   minWidth: "42px",
   minHeight: "0",
   padding: "18px 0",
+  overflow: "visible",
   background: "var(--aui-background, var(--surface))",
+});
+
+globalStyle(".question-rail::before, .question-rail::after", {
+  position: "absolute",
+  zIndex: "4",
+  right: "0",
+  left: "0",
+  height: "16px",
+  content: '""',
+  opacity: "0",
+  pointerEvents: "none",
+  transition: "opacity 160ms ease",
+});
+
+globalStyle(".question-rail::before", {
+  top: "0",
+  background:
+    "linear-gradient(to bottom, var(--aui-background, var(--surface)) 18%, color-mix(in srgb, var(--aui-background, var(--surface)) 76%, transparent) 54%, transparent)",
+});
+
+globalStyle(".question-rail::after", {
+  bottom: "0",
+  background:
+    "linear-gradient(to top, var(--aui-background, var(--surface)) 18%, color-mix(in srgb, var(--aui-background, var(--surface)) 76%, transparent) 54%, transparent)",
+});
+
+globalStyle(".question-rail.can-scroll-up::before", {
+  opacity: "1",
+});
+
+globalStyle(".question-rail.can-scroll-down::after", {
+  opacity: "1",
 });
 
 globalStyle(".question-rail-track", {
@@ -243,18 +276,28 @@ globalStyle(".question-rail-track", {
   width: "100%",
   height: "100%",
   padding: "0",
-  overscrollBehavior: "contain",
-  touchAction: "none",
+  overflowY: "auto",
+  overflowX: "hidden",
+  overscrollBehaviorY: "contain",
+  scrollbarWidth: "none",
+  touchAction: "pan-y",
   userSelect: "none",
+});
+
+globalStyle(".question-rail-track::-webkit-scrollbar", {
+  width: "0",
+  height: "0",
 });
 
 globalStyle(".question-rail-list", {
   display: "flex",
   width: "100%",
   minHeight: "100%",
+  boxSizing: "border-box",
   alignItems: "center",
   flexDirection: "column",
-  justifyContent: "center",
+  justifyContent: "safe center",
+  padding: "12px 0",
 });
 
 globalStyle(".question-rail-item", {
@@ -334,10 +377,10 @@ globalStyle(".question-rail-item:focus-visible", {
 });
 
 globalStyle(".question-rail-tooltip", {
-  position: "absolute",
-  zIndex: "30",
-  top: "50%",
-  left: "42px",
+  position: "fixed",
+  zIndex: "80",
+  top: "var(--question-rail-tooltip-top, 50%)",
+  left: "var(--question-rail-tooltip-left, 50px)",
   display: "grid",
   width: "min(328px, 36vw)",
   gap: "7px",
@@ -398,6 +441,19 @@ globalStyle(".conversation-pane", {
   borderRight: "1px solid var(--line)",
 });
 
+globalStyle(".conversation-plan-float", {
+  position: "absolute",
+  top: "14px",
+  right: "clamp(16px, 2.5vw, 28px)",
+  zIndex: "12",
+  width: "min(320px, calc(100% - 32px))",
+  maxHeight: "calc(100% - 28px)",
+  display: "flex",
+  justifyContent: "flex-end",
+  alignItems: "flex-start",
+  overflow: "auto",
+});
+
 globalStyle(".conversation-scroll", {
   height: "100%",
   minHeight: "0",
@@ -406,6 +462,14 @@ globalStyle(".conversation-scroll", {
   overflow: "auto",
   scrollbarGutter: "stable",
 });
+
+globalStyle(
+  '.conversation-scroll.is-restoring-position, [data-slot="aui_thread-viewport"].is-restoring-position',
+  {
+    opacity: "0",
+    pointerEvents: "none",
+  },
+);
 
 globalStyle(".history-hydration-status", {
   position: "absolute",
@@ -1213,10 +1277,11 @@ globalStyle(".work-phase", {
 });
 
 globalStyle(".work-phase-toggle", {
-  display: "inline-flex",
+  display: "flex",
+  width: "100%",
   maxWidth: "100%",
   minHeight: "24px",
-  alignItems: "center",
+  alignItems: "flex-start",
   gap: "5px",
   padding: "0",
   color: "var(--ink)",
@@ -1231,9 +1296,12 @@ globalStyle(".work-phase-toggle", {
 });
 
 globalStyle(".work-phase-toggle > span", {
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
+  minWidth: "0",
+  overflow: "visible",
+  overflowWrap: "anywhere",
+  textOverflow: "clip",
+  whiteSpace: "normal",
+  wordBreak: "break-word",
 });
 
 globalStyle(".work-phase-steps", {
@@ -2840,6 +2908,21 @@ globalStyle(".review-file-list", {
   overflowX: "auto",
   borderBottom: "1px solid var(--line)",
   scrollbarWidth: "none",
+  transition: "opacity 90ms cubic-bezier(0.2, 0.75, 0.25, 1)",
+  "@media": {
+    "(prefers-reduced-motion: reduce)": {
+      transition: "none",
+    },
+  },
+});
+
+globalStyle('[data-slot="aui_thread-viewport"]', {
+  transition: "opacity 90ms cubic-bezier(0.2, 0.75, 0.25, 1)",
+  "@media": {
+    "(prefers-reduced-motion: reduce)": {
+      transition: "none",
+    },
+  },
 });
 
 globalStyle(".review-file-list::-webkit-scrollbar", {
