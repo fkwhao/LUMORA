@@ -50,6 +50,8 @@ export function applyChatEvent(
     event.type === "tool_started" ||
     event.type === "tool_completed" ||
     event.type === "tool_failed" ||
+    event.type === "approval_review_started" ||
+    event.type === "approval_review_completed" ||
     event.type === "context_compaction_started" ||
     event.type === "context_compaction_progress" ||
     event.type === "context_compacted" ||

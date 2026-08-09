@@ -534,6 +534,8 @@ components:
             - tool_failed
             - tool_approval_requested
             - tool_approval_resolved
+            - approval_review_started
+            - approval_review_completed
             - usage
             - completed
             - failed

@@ -286,6 +286,8 @@ class OpenAICompatibleProvider:
             "tool_choice": "auto",
             "stream": False,
         }
+        if settings.max_output_tokens is not None:
+            request_body["max_tokens"] = settings.max_output_tokens
         if reasoning_effort:
             request_body["reasoning"] = {"effort": reasoning_effort}
         async with httpx.AsyncClient(timeout=120.0) as client:

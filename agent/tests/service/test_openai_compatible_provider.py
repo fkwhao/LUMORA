@@ -50,6 +50,39 @@ class _StreamingClient:
         return _StreamingResponse()
 
 
+class _CompletionResponse:
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self):
+        return {
+            "model": "example-model",
+            "choices": [{"message": {"content": "done"}}],
+            "usage": {
+                "prompt_tokens": 2,
+                "completion_tokens": 1,
+                "total_tokens": 3,
+            },
+        }
+
+
+class _CompletionClient:
+    body = None
+
+    def __init__(self, *_args, **_kwargs) -> None:
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    async def post(self, *_args, **kwargs):
+        _CompletionClient.body = kwargs["json"]
+        return _CompletionResponse()
+
+
 def test_prompt_assembly_routes_context_and_tools_to_api_fields() -> None:
     provider = OpenAICompatibleProvider()
     prompt = PromptBuilder().build(
@@ -123,6 +156,30 @@ def test_model_max_output_tokens_are_sent_as_max_tokens() -> None:
     )
 
     assert body["max_tokens"] == 32_768
+
+
+def test_agent_turn_completion_honors_max_output_tokens(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.provider.openai_compatible_provider.httpx.AsyncClient",
+        _CompletionClient,
+    )
+
+    asyncio.run(
+        OpenAICompatibleProvider().complete_agent_turn(
+            ModelConnectionSettings(
+                provider_name="OpenAI compatible",
+                base_url="https://example.com/v1",
+                model="example-model",
+                api_key="secret",
+                max_output_tokens=512,
+            ),
+            [{"role": "user", "content": "review"}],
+            (),
+            None,
+        )
+    )
+
+    assert _CompletionClient.body["max_tokens"] == 512
 
 
 def test_agent_turn_stream_stops_at_done_marker(monkeypatch) -> None:

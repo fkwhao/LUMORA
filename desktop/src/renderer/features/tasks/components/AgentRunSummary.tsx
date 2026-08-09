@@ -6,12 +6,14 @@ import {
   useState,
 } from "react";
 import {
+  ChevronDown,
   ChevronRight,
   FilePenLine,
   FileSearch,
   FolderSearch,
   Minimize2,
   PackageOpen,
+  ShieldCheck,
   TerminalSquare,
 } from "lucide-react";
 
@@ -146,28 +148,61 @@ function WorkPhaseEntry({
   onOpenArtifact?: (artifactId: string) => void;
 }) {
   const running = active || phase.items.some((item) => item.status === "running");
-  const [expanded, setExpanded] = useState(running);
-
-  useEffect(() => {
-    if (running) {
-      setExpanded(true);
-    }
-  }, [running]);
 
   return (
-    <section className={`work-phase${expanded ? " expanded" : ""}`}>
-      <button
-        className={`work-phase-toggle${running ? " shimmer-text" : ""}`}
-        type="button"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((current) => !current)}
+    <section className="work-phase expanded">
+      <div
+        className={`work-phase-toggle is-static${running ? " shimmer-text" : ""}`}
       >
         <span>{phase.title}</span>
-      </button>
+      </div>
       {phase.items.length > 0 && (
-        <div className="work-phase-steps" aria-hidden={!expanded}>
+        <div className="work-phase-steps">
           <div className="work-phase-steps-inner">
-          {phase.items.map((item) => (
+            <ToolGroupEntry
+              items={phase.items}
+              onReviewChange={onReviewChange}
+              onOpenArtifact={onOpenArtifact}
+              running={running}
+            />
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ToolGroupEntry({
+  items,
+  running,
+  onReviewChange,
+  onOpenArtifact,
+}: {
+  items: WorkLogItem[];
+  running: boolean;
+  onReviewChange?: (item: WorkLogItem) => void;
+  onOpenArtifact?: (artifactId: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <section className={`tool-group${expanded ? " expanded" : ""}`}>
+      <button
+        aria-expanded={expanded}
+        className={`tool-group-toggle${running ? " shimmer-text" : ""}`}
+        onClick={() => setExpanded((current) => !current)}
+        type="button"
+      >
+        {expanded ? (
+          <ChevronDown className="tool-group-chevron" size={13} />
+        ) : (
+          <ChevronRight className="tool-group-chevron" size={13} />
+        )}
+        <span>{toolGroupLabel(items)}</span>
+      </button>
+      <div className="tool-call-list" aria-hidden={!expanded}>
+        <div className="tool-call-list-inner">
+          {items.map((item) => (
             <ToolCallItem
               item={item}
               key={item.itemId}
@@ -175,9 +210,8 @@ function WorkPhaseEntry({
               onOpenArtifact={onOpenArtifact}
             />
           ))}
-          </div>
         </div>
-      )}
+      </div>
     </section>
   );
 }
@@ -199,7 +233,13 @@ function ToolCallItem({
   const primaryDetail = command || path || item.title || item.toolName || "工具调用";
   const isEdit = item.toolName === "write_file" || item.toolName === "apply_patch";
   const artifactId = stringMetadata(item, "artifactId");
-  const Icon = item.kind === "context" ? Minimize2 : toolIcon(item.toolName ?? "");
+  const reviewRisk = stringMetadata(item, "approvalReviewRiskLevel");
+  const Icon =
+    item.kind === "context"
+      ? Minimize2
+      : item.kind === "approval"
+        ? ShieldCheck
+        : toolIcon(item.toolName ?? "");
 
   function activate() {
     if (isEdit && path && onReviewChange) {
@@ -212,6 +252,7 @@ function ToolCallItem({
   return (
     <article
       className={`tool-call-item${expanded ? " expanded" : ""}`}
+      data-kind={item.kind}
       data-status={item.status}
     >
       <button
@@ -242,7 +283,13 @@ function ToolCallItem({
           )}
           {(item.output || item.errorMessage) && (
             <div>
-              <span>{item.status === "failed" ? "错误输出" : "执行结果"}</span>
+              <span>
+                {item.kind === "approval"
+                  ? "审批结果"
+                  : item.status === "failed"
+                    ? "错误输出"
+                    : "执行结果"}
+              </span>
               <pre><code>{item.output || item.errorMessage}</code></pre>
             </div>
           )}
@@ -257,6 +304,7 @@ function ToolCallItem({
             </button>
           )}
           <footer>
+            {reviewRisk && <span>风险 {reviewRisk}</span>}
             {item.exitCode !== undefined && <span>退出码 {item.exitCode}</span>}
             {item.durationMs !== undefined && <span>耗时 {formatDuration(item.durationMs)}</span>}
           </footer>
@@ -347,7 +395,19 @@ function toolCallLabel(item: WorkLogItem, detail: string) {
     if (item.status === "failed") return item.title || "上下文压缩失败";
     return item.content || item.title || "已压缩上下文";
   }
+  if (item.kind === "approval") {
+    const decision = stringMetadata(item, "approvalReviewDecision");
+    if (item.status === "running") return `审批智能体正在审批 ${detail}`;
+    if (decision === "deny") return `智能审批未通过，本次未执行 ${detail}`;
+    if (decision === "require_human") {
+      return booleanMetadata(item, "approvalReviewFallback")
+        ? `智能审批暂不可用，本次未执行 ${detail}`
+        : `智能审批未通过，本次未执行 ${detail}`;
+    }
+    return `智能审批已通过 ${detail}`;
+  }
   const fileDetail = fileName(detail);
+  const failureKind = stringMetadata(item, "failureKind");
   if (item.status === "running") {
     if (item.toolName === "read_file") return `正在读取 ${fileDetail}`;
     if (item.toolName === "write_file" || item.toolName === "apply_patch") {
@@ -357,6 +417,18 @@ function toolCallLabel(item: WorkLogItem, detail: string) {
       return `正在搜索 ${detail}`;
     }
     return `正在运行 ${detail}`;
+  }
+  if (failureKind === "human_approval_denied") {
+    return `人工审批未通过 ${fileDetail}`;
+  }
+  if (failureKind === "permission_denied") {
+    return `权限规则已拒绝 ${fileDetail}`;
+  }
+  if (failureKind === "automatic_approval_blocked") {
+    return `替我审批未通过 ${fileDetail}`;
+  }
+  if (failureKind === "approval_retry_blocked") {
+    return `已跳过重复调用 ${fileDetail}`;
   }
   if (item.status === "failed") return `运行失败 ${fileDetail}`;
   if (item.toolName === "read_file") return `已读取 ${fileDetail}`;
@@ -369,6 +441,62 @@ function toolCallLabel(item: WorkLogItem, detail: string) {
   return item.durationMs
     ? `已在 ${formatDuration(item.durationMs)} 内运行 ${detail}`
     : `已运行 ${detail}`;
+}
+
+function toolGroupLabel(items: WorkLogItem[]): string {
+  const actionable = items.filter(
+    (item) => item.kind === "tool" || item.kind === "approval",
+  );
+  const commands = actionable
+    .map((item) => stringArgument(item, "command"))
+    .filter(Boolean);
+  const pathItems = actionable.filter((item) => stringArgument(item, "path"));
+  const toolNames = new Set(actionable.map((item) => item.toolName));
+
+  if (toolNames.has("write_file") || toolNames.has("apply_patch")) {
+    const onlyTestFiles =
+      pathItems.length > 0 && pathItems.every((item) => isTestFilePath(item));
+    return onlyTestFiles ? "更新相关测试" : "更新相关文件";
+  }
+  if (commands.some((command) => /\bgit\s+push\b/i.test(command))) {
+    return "提交当前分支";
+  }
+  if (
+    commands.some((command) =>
+      /(?:\bpytest\b|\bvitest\b|\bjest\b|\bmvn\s+test\b|\bgradle\s+test\b|\bcargo\s+test\b|\bgo\s+test\b|\bdotnet\s+test\b)/i.test(
+        command,
+      ),
+    )
+  ) {
+    return "运行相关测试";
+  }
+  if (
+    commands.some((command) =>
+      /(?:\btypecheck\b|\blint\b|\bbuild\b|\bcompile\b)/i.test(command),
+    )
+  ) {
+    return "验证更新结果";
+  }
+  if (
+    commands.some((command) =>
+      /(?:\bnpm\s+(?:i|install)\b|\bpnpm\s+(?:i|install|add)\b|\byarn\s+add\b|\bpip\s+install\b)/i.test(
+        command,
+      ),
+    )
+  ) {
+    return "安装项目依赖";
+  }
+  if (
+    toolNames.has("read_file") ||
+    toolNames.has("list_files") ||
+    toolNames.has("search_in_file")
+  ) {
+    return "检查相关文件";
+  }
+  if (items.every((item) => item.kind === "context")) {
+    return "整理上下文";
+  }
+  return commands.length > 0 ? "执行相关命令" : "执行相关工具";
 }
 
 function fileName(path: string): string {
@@ -391,6 +519,27 @@ function stringArgument(item: WorkLogItem, key: string) {
 function stringMetadata(item: WorkLogItem, key: string) {
   const value = item.metadata?.[key];
   return typeof value === "string" ? value : "";
+}
+
+function booleanMetadata(item: WorkLogItem, key: string) {
+  return item.metadata?.[key] === true;
+}
+
+function isTestFilePath(item: WorkLogItem): boolean {
+  const rawPath = stringArgument(item, "path").replace(/\\/g, "/");
+  const workspace = stringMetadata(item, "workspacePath")
+    .replace(/\\/g, "/")
+    .replace(/\/$/, "");
+  const path =
+    workspace && rawPath.toLocaleLowerCase().startsWith(`${workspace.toLocaleLowerCase()}/`)
+      ? rawPath.slice(workspace.length + 1)
+      : rawPath;
+  return (
+    /(^|\/)src\/test(s)?(\/|$)/i.test(path) ||
+    /(^|\/)(__tests__|tests)(\/|$)/i.test(path) ||
+    (!/^[a-z]:\//i.test(path) && /^test\//i.test(path)) ||
+    /(^|\/)(test_[^/]+|[^/]+\.(test|spec)\.[^/]+|[^/]+_test\.[^/]+)$/i.test(path)
+  );
 }
 
 function formatDuration(durationMs: number, minimumOne = true): string {

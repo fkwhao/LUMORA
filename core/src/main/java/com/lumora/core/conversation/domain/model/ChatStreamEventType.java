@@ -12,6 +12,8 @@ public enum ChatStreamEventType {
     TOOL_FAILED("tool_failed"),
     TOOL_APPROVAL_REQUESTED("tool_approval_requested"),
     TOOL_APPROVAL_RESOLVED("tool_approval_resolved"),
+    APPROVAL_REVIEW_STARTED("approval_review_started"),
+    APPROVAL_REVIEW_COMPLETED("approval_review_completed"),
     CONTEXT_COMPACTION_STARTED("context_compaction_started"),
     CONTEXT_COMPACTION_PROGRESS("context_compaction_progress"),
     CONTEXT_COMPACTED("context_compacted"),

@@ -9,11 +9,29 @@ from app.permission.model import (
     PermissionPolicy,
     PermissionRule,
 )
+from app.permission.reviewer import (
+    ApprovalReviewDecision,
+    ApprovalReviewer,
+    ApprovalReviewRequest,
+    ApprovalReviewResult,
+    ModelApprovalReviewer,
+)
+from app.permission.reviewer_policy import (
+    ApprovalReviewerPolicy,
+    ApprovalReviewerPolicyStore,
+)
 
 __all__ = [
     "ApprovalBroker",
     "ApprovalDecision",
     "ApprovalRequest",
+    "ApprovalReviewDecision",
+    "ApprovalReviewRequest",
+    "ApprovalReviewResult",
+    "ApprovalReviewer",
+    "ApprovalReviewerPolicy",
+    "ApprovalReviewerPolicyStore",
+    "ModelApprovalReviewer",
     "PermissionConfigStore",
     "PermissionDecision",
     "PermissionEngine",

@@ -40,6 +40,8 @@ desktop/config/dev-local.yml
 
 integration/runtime/
 .worktrees/
+.lumora/approval-reviewer.local.md
+.lumora/permissions.local.yaml
 
 # 本机产品草稿和历史实施记录不属于公开源码仓库。
 artwork/

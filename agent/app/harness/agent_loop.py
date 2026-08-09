@@ -19,6 +19,7 @@ from app.permission.broker import ApprovalBroker
 from app.permission.config_store import PermissionConfigStore
 from app.permission.engine import PermissionEngine
 from app.permission.model import PermissionPolicy
+from app.permission.reviewer import ApprovalReviewer, ModelApprovalReviewer
 from app.prompt.prompt_assembly import PromptAssembly
 from app.tool.base import ToolContext
 from app.tool.registry import ToolRegistry
@@ -38,6 +39,7 @@ class AgentLoopRunner:
         context_planner: ContextPlanner | None = None,
         result_processor: ToolResultProcessor | None = None,
         stream_turn: TurnStreamer | None = None,
+        approval_reviewer: ApprovalReviewer | None = None,
     ) -> None:
         self._complete_turn = complete_turn
         self._compact_history = compact_history
@@ -46,6 +48,11 @@ class AgentLoopRunner:
         self._token_estimator = TokenEstimator()
         self._result_processor = result_processor or ToolResultProcessor()
         self._stream_turn = stream_turn
+        self._approval_reviewer = (
+            approval_reviewer
+            if approval_reviewer is not None
+            else ModelApprovalReviewer(complete_turn)
+        )
 
     async def stream(
         self,
@@ -79,6 +86,16 @@ class AgentLoopRunner:
         active_context_tokens = 0
         resolved_model = settings.model
         active_summary = conversation_summary
+        blocked_call_signatures: set[str] = set()
+        tool_executor = ToolCallExecutor(
+            registry,
+            permission_engine,
+            approval_broker,
+            permission_config_store,
+            self._result_processor,
+            self._approval_reviewer,
+            blocked_call_signatures,
+        )
 
         for _iteration in range(20):
             content_was_streamed = False
@@ -217,21 +234,18 @@ class AgentLoopRunner:
             })
             inline_result_chars = 0
             pending_tool_messages: list[dict[str, Any]] = []
-            tool_executor = ToolCallExecutor(
-                registry,
-                permission_engine,
-                approval_broker,
-                permission_config_store,
-                self._result_processor,
-            )
+            latest_user_request = _latest_user_request(request_messages)
             for call in turn.tool_calls:
                 result_text = "工具调用未返回结果"
                 async for event, result_text in tool_executor.execute(
                     call,
                     tool_context,
                     resolved_model,
+                    settings,
                     permission_policy,
                     inline_result_chars,
+                    latest_user_request,
+                    turn.content[-10_000:],
                 ):
                     yield event
                 inline_result_chars += len(result_text)
@@ -325,3 +339,13 @@ class AgentLoopRunner:
                         active_context_tokens=after_tokens,
                     )
         raise ValueError("工具调用轮次超过限制")
+
+
+def _latest_user_request(messages: list[dict[str, Any]]) -> str:
+    for message in reversed(messages):
+        if message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, str) and content.strip():
+            return content[-20_000:]
+    return ""

@@ -93,7 +93,7 @@ export interface ExecutionPlanStep {
 
 export interface WorkLogItem {
   itemId: string;
-  kind: "progress" | "tool" | "context";
+  kind: "progress" | "tool" | "context" | "approval";
   status: WorkLogItemStatus;
   content?: string;
   toolCallId?: string;
@@ -155,6 +155,8 @@ export type ChatStreamEventType =
   | "tool_failed"
   | "tool_approval_requested"
   | "tool_approval_resolved"
+  | "approval_review_started"
+  | "approval_review_completed"
   | "context_compaction_started"
   | "context_compaction_progress"
   | "context_compacted"

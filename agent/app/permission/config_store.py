@@ -100,7 +100,8 @@ class PermissionConfigStore:
     @staticmethod
     def _input_pattern(tool: Tool, input_data: ToolInput) -> str:
         if tool.category is ToolCategory.SHELL:
-            return "*"
+            command = str(input_data.get("command") or "")
+            return _literal_fnmatch_pattern(command) if command else "*"
         return str(input_data.get("path") or input_data.get("pattern") or "*")
 
     @staticmethod
@@ -172,3 +173,9 @@ class PermissionConfigStore:
             return
         updated = [*existing, entry]
         ignore_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+
+
+def _literal_fnmatch_pattern(value: str) -> str:
+    """Encode one exact value as an fnmatch pattern."""
+
+    return value.replace("[", "[[]").replace("*", "[*]").replace("?", "[?]")

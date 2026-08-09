@@ -1,19 +1,28 @@
 import json
+import time
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import replace
-from typing import Literal
+from typing import Any, Literal
 
 from app.execution.tool_result_processor import ToolResultProcessor
 from app.harness.contracts import ProviderToolCall
 from app.harness.run_event import RunEvent
+from app.model.model_connection_settings import ModelConnectionSettings
 from app.permission.broker import ApprovalBroker
 from app.permission.config_store import PermissionConfigStore
 from app.permission.engine import PermissionEngine
 from app.permission.model import (
     ApprovalDecision,
     PermissionDecision,
+    PermissionMode,
     PermissionPolicy,
+)
+from app.permission.reviewer import (
+    ApprovalReviewDecision,
+    ApprovalReviewer,
+    ApprovalReviewRequest,
+    ApprovalReviewResult,
 )
 from app.tool.base import ToolContext
 from app.tool.registry import ToolRegistry
@@ -29,20 +38,31 @@ class ToolCallExecutor:
         approval_broker: ApprovalBroker,
         permission_config_store: PermissionConfigStore,
         result_processor: ToolResultProcessor,
+        approval_reviewer: ApprovalReviewer | None = None,
+        blocked_call_signatures: set[str] | None = None,
     ) -> None:
         self._registry = registry
         self._permission_engine = permission_engine
         self._approval_broker = approval_broker
         self._permission_config_store = permission_config_store
         self._result_processor = result_processor
+        self._approval_reviewer = approval_reviewer
+        self._blocked_call_signatures = (
+            blocked_call_signatures
+            if blocked_call_signatures is not None
+            else set()
+        )
 
     async def execute(
         self,
         call: ProviderToolCall,
         tool_context: ToolContext,
         model: str,
+        settings: ModelConnectionSettings,
         permission_policy: PermissionPolicy,
         inline_result_chars: int,
+        user_request: str = "",
+        assistant_context: str = "",
     ) -> AsyncIterator[tuple[RunEvent, str]]:
         item_id = str(uuid.uuid4())
         title = call.name
@@ -68,6 +88,29 @@ class ToolCallExecutor:
         try:
             tool, arguments = self._registry.validate(call.name, arguments)
             title = tool.display_title(arguments)
+            call_signature = _tool_call_signature(call.name, arguments)
+            if call_signature in self._blocked_call_signatures:
+                result_text = _automatic_block_result(
+                    "同一工具调用此前已被智能审批阻止，不会重复执行。",
+                    error_code="approval_retry_blocked",
+                )
+                yield RunEvent(
+                    type="tool_failed",
+                    item_id=item_id,
+                    tool_call_id=call.call_id,
+                    tool_name=call.name,
+                    title=title,
+                    arguments=arguments,
+                    output="已跳过此前被智能审批阻止的重复调用。",
+                    error_message="重复调用未执行",
+                    metadata={
+                        "failureKind": "approval_retry_blocked",
+                        "toolExecutionState": "not_started",
+                        "workspacePath": str(tool_context.workspace_path),
+                    },
+                    model=model,
+                ), result_text
+                return
             effective_policy = self._permission_config_store.load_policy(
                 tool_context.workspace_path,
                 permission_policy,
@@ -83,14 +126,18 @@ class ToolCallExecutor:
                 "permissionReason": evaluation.reason,
                 "riskLevel": evaluation.risk_level,
                 "reversible": evaluation.reversible,
+                "workspacePath": str(tool_context.workspace_path),
             }
             if evaluation.decision is PermissionDecision.DENY:
-                result_text = json.dumps(
-                    {
-                        "ok": False,
-                        "content": f"权限系统已拒绝：{evaluation.reason}",
-                    },
-                    ensure_ascii=False,
+                self._blocked_call_signatures.add(call_signature)
+                denied_metadata = {
+                    **permission_metadata,
+                    "failureKind": "permission_denied",
+                    "toolExecutionState": "not_started",
+                }
+                result_text = _automatic_block_result(
+                    f"权限系统已拒绝：{evaluation.reason}",
+                    error_code="permission_denied",
                 )
                 yield RunEvent(
                     type="tool_failed",
@@ -101,7 +148,7 @@ class ToolCallExecutor:
                     arguments=arguments,
                     output=evaluation.reason,
                     error_message=evaluation.reason,
-                    metadata=permission_metadata,
+                    metadata=denied_metadata,
                     permission_layer=evaluation.layer,
                     reason=evaluation.reason,
                     risk_level=evaluation.risk_level,
@@ -112,78 +159,212 @@ class ToolCallExecutor:
 
             execution_context = tool_context
             if evaluation.decision is PermissionDecision.ASK:
-                approval = self._approval_broker.create(tool_context.correlation_id)
-                yield RunEvent(
-                    type="tool_approval_requested",
-                    item_id=item_id,
-                    tool_call_id=call.call_id,
-                    tool_name=call.name,
-                    title=title,
-                    arguments=arguments,
-                    approval_id=approval.approval_id,
-                    permission_layer=evaluation.layer,
-                    reason=evaluation.reason,
-                    risk_level=evaluation.risk_level,
-                    reversible=evaluation.reversible,
-                    metadata=permission_metadata,
-                    model=model,
-                ), ""
-                approval_decision = await self._approval_broker.wait(
-                    approval.approval_id
-                )
-                allowed = approval_decision is not ApprovalDecision.DENY
-                decision: Literal["allow", "deny"] = (
-                    "allow" if allowed else "deny"
-                )
-                yield RunEvent(
-                    type="tool_approval_resolved",
-                    item_id=item_id,
-                    tool_call_id=call.call_id,
-                    tool_name=call.name,
-                    title=title,
-                    arguments=arguments,
-                    approval_id=approval.approval_id,
-                    permission_layer=evaluation.layer,
-                    reason=evaluation.reason,
-                    risk_level=evaluation.risk_level,
-                    reversible=evaluation.reversible,
-                    decision=decision,
-                    metadata=permission_metadata,
-                    model=model,
-                ), ""
-                if not allowed:
-                    denied_message = "用户拒绝了本次工具调用"
-                    result_text = json.dumps(
-                        {"ok": False, "content": denied_message},
-                        ensure_ascii=False,
+                if effective_policy.mode is PermissionMode.AUTO_APPROVE:
+                    if (
+                        evaluation.layer != "mode"
+                        or self._approval_reviewer is None
+                    ):
+                        self._blocked_call_signatures.add(call_signature)
+                        block_reason = (
+                            "替我审批模式不会请求人工确认，本次调用未执行："
+                            f"{evaluation.reason}"
+                        )
+                        blocked_metadata = {
+                            **permission_metadata,
+                            "failureKind": "automatic_approval_blocked",
+                            "toolExecutionState": "not_started",
+                        }
+                        result_text = _automatic_block_result(
+                            block_reason,
+                            error_code="automatic_approval_blocked",
+                        )
+                        yield RunEvent(
+                            type="tool_failed",
+                            item_id=item_id,
+                            tool_call_id=call.call_id,
+                            tool_name=call.name,
+                            title=title,
+                            arguments=arguments,
+                            output=block_reason,
+                            error_message=block_reason,
+                            metadata=blocked_metadata,
+                            permission_layer=evaluation.layer,
+                            reason=evaluation.reason,
+                            risk_level=evaluation.risk_level,
+                            reversible=evaluation.reversible,
+                            model=model,
+                        ), result_text
+                        return
+
+                    review_item_id = f"approval-review-{item_id}"
+                    review_started_at = time.perf_counter()
+                    yield RunEvent(
+                        type="approval_review_started",
+                        item_id=review_item_id,
+                        tool_call_id=call.call_id,
+                        tool_name=call.name,
+                        title=title,
+                        arguments=arguments,
+                        permission_layer=evaluation.layer,
+                        reason=evaluation.reason,
+                        risk_level=evaluation.risk_level,
+                        reversible=evaluation.reversible,
+                        metadata={
+                            **permission_metadata,
+                            "approvalReviewer": "agent",
+                            "approvalReviewDecision": "reviewing",
+                        },
+                        model=model,
+                    ), ""
+                    review = await self._approval_reviewer.review(
+                        settings,
+                        ApprovalReviewRequest(
+                            tool_name=call.name,
+                            tool_category=tool.category.value,
+                            arguments=arguments,
+                            workspace_path=tool_context.workspace_path,
+                            user_request=user_request,
+                            assistant_context=assistant_context,
+                            permission_layer=evaluation.layer,
+                            permission_reason=evaluation.reason,
+                            risk_level=evaluation.risk_level,
+                            reversible=evaluation.reversible,
+                            grants_external_path=evaluation.grants_external_path,
+                        ),
+                    )
+                    review_duration_ms = max(
+                        1,
+                        int((time.perf_counter() - review_started_at) * 1_000),
+                    )
+                    permission_metadata = {
+                        **permission_metadata,
+                        "approvalReviewer": "agent",
+                        "approvalReviewDecision": review.decision.value,
+                        "approvalReviewReason": review.reason,
+                        "approvalReviewRiskLevel": review.risk_level,
+                        "approvalReviewerModel": review.reviewer_model,
+                        "approvalReviewFallback": review.fallback,
+                    }
+                    allowed_by_reviewer = (
+                        review.decision is ApprovalReviewDecision.ALLOW_ONCE
+                    )
+                    result_text = ""
+                    if not allowed_by_reviewer:
+                        self._blocked_call_signatures.add(call_signature)
+                        failure_kind = (
+                            "approval_reviewer_unavailable"
+                            if review.fallback
+                            else "approval_review_blocked"
+                        )
+                        permission_metadata = {
+                            **permission_metadata,
+                            "failureKind": failure_kind,
+                            "toolExecutionState": "not_started",
+                        }
+                        blocked_reason = _review_block_reason(review)
+                        result_text = _automatic_block_result(
+                            blocked_reason,
+                            error_code=failure_kind,
+                        )
+                    yield RunEvent(
+                        type="approval_review_completed",
+                        item_id=review_item_id,
+                        tool_call_id=call.call_id,
+                        tool_name=call.name,
+                        title=title,
+                        arguments=arguments,
+                        output=review.reason,
+                        duration_ms=review_duration_ms,
+                        permission_layer=evaluation.layer,
+                        reason=review.reason,
+                        risk_level=review.risk_level,
+                        reversible=evaluation.reversible,
+                        decision="allow" if allowed_by_reviewer else "deny",
+                        metadata=permission_metadata,
+                        model=model,
+                    ), result_text
+                    if not allowed_by_reviewer:
+                        return
+                else:
+                    approval = self._approval_broker.create(
+                        tool_context.correlation_id
                     )
                     yield RunEvent(
-                        type="tool_failed",
+                        type="tool_approval_requested",
                         item_id=item_id,
                         tool_call_id=call.call_id,
                         tool_name=call.name,
                         title=title,
                         arguments=arguments,
-                        output=denied_message,
-                        error_message=denied_message,
+                        approval_id=approval.approval_id,
+                        permission_layer=evaluation.layer,
+                        reason=evaluation.reason,
+                        risk_level=evaluation.risk_level,
+                        reversible=evaluation.reversible,
                         metadata=permission_metadata,
                         model=model,
-                    ), result_text
-                    return
-                if (
-                    approval_decision is ApprovalDecision.ALLOW_ALWAYS
-                    and not evaluation.grants_external_path
-                ):
-                    self._permission_config_store.add_local_allow(
-                        tool_context.workspace_path,
-                        tool,
-                        arguments,
+                    ), ""
+                    approval_decision = await self._approval_broker.wait(
+                        approval.approval_id
                     )
-                if evaluation.grants_external_path:
-                    execution_context = replace(
-                        tool_context,
-                        allow_external_paths=True,
+                    allowed = approval_decision is not ApprovalDecision.DENY
+                    decision: Literal["allow", "deny"] = (
+                        "allow" if allowed else "deny"
                     )
+                    yield RunEvent(
+                        type="tool_approval_resolved",
+                        item_id=item_id,
+                        tool_call_id=call.call_id,
+                        tool_name=call.name,
+                        title=title,
+                        arguments=arguments,
+                        approval_id=approval.approval_id,
+                        permission_layer=evaluation.layer,
+                        reason=evaluation.reason,
+                        risk_level=evaluation.risk_level,
+                        reversible=evaluation.reversible,
+                        decision=decision,
+                        metadata=permission_metadata,
+                        model=model,
+                    ), ""
+                    if not allowed:
+                        denied_message = "用户拒绝了本次工具调用"
+                        denied_metadata = {
+                            **permission_metadata,
+                            "failureKind": "human_approval_denied",
+                            "toolExecutionState": "not_started",
+                        }
+                        result_text = json.dumps(
+                            {"ok": False, "content": denied_message},
+                            ensure_ascii=False,
+                        )
+                        yield RunEvent(
+                            type="tool_failed",
+                            item_id=item_id,
+                            tool_call_id=call.call_id,
+                            tool_name=call.name,
+                            title=title,
+                            arguments=arguments,
+                            output=denied_message,
+                            error_message=denied_message,
+                            metadata=denied_metadata,
+                            model=model,
+                        ), result_text
+                        return
+                    if (
+                        approval_decision is ApprovalDecision.ALLOW_ALWAYS
+                        and not evaluation.grants_external_path
+                    ):
+                        self._permission_config_store.add_local_allow(
+                            tool_context.workspace_path,
+                            tool,
+                            arguments,
+                        )
+                    if evaluation.grants_external_path:
+                        execution_context = replace(
+                            tool_context,
+                            allow_external_paths=True,
+                        )
 
             yield RunEvent(
                 type="tool_started",
@@ -248,3 +429,41 @@ class ToolCallExecutor:
                 error_message=str(error),
                 model=model,
             ), result_text
+
+
+def _tool_call_signature(tool_name: str, arguments: dict[str, Any]) -> str:
+    normalized = json.dumps(
+        arguments,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return f"{tool_name.casefold()}:{normalized}"
+
+
+def _review_block_reason(review: ApprovalReviewResult) -> str:
+    if review.fallback:
+        return f"智能审批暂不可用，本次调用未执行：{review.reason}"
+    if review.decision is ApprovalReviewDecision.REQUIRE_HUMAN:
+        return (
+            "智能审批认为该调用需要人工确认；替我审批模式不会请求用户点击，"
+            f"因此本次未执行：{review.reason}"
+        )
+    return f"智能审批未通过，本次调用未执行：{review.reason}"
+
+
+def _automatic_block_result(reason: str, *, error_code: str) -> str:
+    return json.dumps(
+        {
+            "ok": False,
+            "content": reason,
+            "errorCode": error_code,
+            "retryable": False,
+            "nextAction": (
+                "不要原样重试同一调用。请尝试范围更小、更安全或不需要额外权限的"
+                "替代方案；如果没有替代方案，继续完成其余工作，并在最终答复中说明"
+                "未执行项及用户可自行执行的步骤。"
+            ),
+        },
+        ensure_ascii=False,
+    )

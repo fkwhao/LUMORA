@@ -65,11 +65,20 @@ class PermissionEngine:
         input_data: ToolInput,
         policy: PermissionPolicy,
     ) -> PermissionEvaluation:
+        destructive = _is_effectively_destructive(tool, context, input_data)
+        reversible = _is_effectively_reversible(tool, destructive)
+        risk_level = _risk_level(tool, destructive)
         hard_denial = self._dangerous_shell_denial(tool, input_data)
         if hard_denial is not None:
             return hard_denial
 
-        sandbox = self._path_sandbox(tool, context, input_data)
+        sandbox = self._path_sandbox(
+            tool,
+            context,
+            input_data,
+            destructive=destructive,
+            reversible=reversible,
+        )
         if sandbox is not None:
             return sandbox
 
@@ -82,8 +91,8 @@ class PermissionEngine:
                     f"匹配 {rule.source} 级权限规则："
                     f"{rule.tool}({rule.pattern})"
                 ),
-                risk_level=self._risk_level(tool, input_data),
-                reversible=not tool.is_destructive(input_data),
+                risk_level=risk_level,
+                reversible=reversible,
             )
 
         if policy.mode is PermissionMode.FULL_ACCESS:
@@ -91,6 +100,8 @@ class PermissionEngine:
                 PermissionDecision.ALLOW,
                 "mode",
                 "完全访问模式允许工作区内调用",
+                risk_level=risk_level,
+                reversible=reversible,
             )
 
         if tool.is_read_only(input_data):
@@ -98,24 +109,40 @@ class PermissionEngine:
                 PermissionDecision.ALLOW,
                 "mode",
                 "只读工具在当前权限模式下自动允许",
+                risk_level=risk_level,
+                reversible=reversible,
             )
 
         if (
             policy.mode is PermissionMode.AUTO_APPROVE
-            and not tool.is_destructive(input_data)
+            and tool.category is ToolCategory.SHELL
+        ):
+            return PermissionEvaluation(
+                PermissionDecision.ASK,
+                "mode",
+                "Shell calls in automatic approval mode require reviewer evaluation",
+                risk_level=risk_level,
+                reversible=reversible,
+            )
+
+        if (
+            policy.mode is PermissionMode.AUTO_APPROVE
+            and not destructive
         ):
             return PermissionEvaluation(
                 PermissionDecision.ALLOW,
                 "mode",
                 "替我审批模式允许非破坏性调用",
+                risk_level=risk_level,
+                reversible=reversible,
             )
 
         return PermissionEvaluation(
             PermissionDecision.ASK,
             "mode",
             "当前权限模式要求用户确认",
-            risk_level=self._risk_level(tool, input_data),
-            reversible=not tool.is_destructive(input_data),
+            risk_level=risk_level,
+            reversible=reversible,
         )
 
     @staticmethod
@@ -141,6 +168,9 @@ class PermissionEngine:
         tool: Tool,
         context: ToolContext,
         input_data: ToolInput,
+        *,
+        destructive: bool,
+        reversible: bool,
     ) -> PermissionEvaluation | None:
         if tool.category is not ToolCategory.FILESYSTEM:
             return None
@@ -164,9 +194,9 @@ class PermissionEngine:
                 "path_sandbox",
                 f"文件路径超出工作区：{candidate}",
                 risk_level=(
-                    "HIGH" if tool.is_destructive(input_data) else "MEDIUM"
+                    "HIGH" if destructive else "MEDIUM"
                 ),
-                reversible=not tool.is_destructive(input_data),
+                reversible=reversible,
                 grants_external_path=True,
             )
 
@@ -219,13 +249,43 @@ class PermissionEngine:
             ),
         )
 
-    @staticmethod
-    def _risk_level(tool: Tool, input_data: ToolInput) -> str:
-        if tool.is_destructive(input_data):
-            return "HIGH"
-        if tool.category is ToolCategory.SHELL:
-            return "MEDIUM"
-        return "LOW"
+
+def _is_effectively_destructive(
+    tool: Tool,
+    context: ToolContext,
+    input_data: ToolInput,
+) -> bool:
+    """Treat a new workspace file differently from overwriting one."""
+    if tool.category is not ToolCategory.FILESYSTEM or tool.name != "write_file":
+        return tool.is_destructive(input_data)
+    raw_path = input_data.get("path")
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        return tool.is_destructive(input_data)
+    path = Path(raw_path.strip()).expanduser()
+    candidate = (
+        path.resolve()
+        if path.is_absolute()
+        else (context.workspace_path / path).resolve()
+    )
+    try:
+        candidate.relative_to(context.workspace_path)
+    except ValueError:
+        return tool.is_destructive(input_data)
+    return candidate.exists()
+
+
+def _is_effectively_reversible(tool: Tool, destructive: bool) -> bool:
+    if not destructive:
+        return True
+    return tool.category is ToolCategory.FILESYSTEM and tool.name == "apply_patch"
+
+
+def _risk_level(tool: Tool, destructive: bool) -> str:
+    if destructive:
+        return "HIGH" if tool.category is ToolCategory.SHELL else "MEDIUM"
+    if tool.category is ToolCategory.SHELL:
+        return "MEDIUM"
+    return "LOW"
 
 
 def _is_catastrophic_shell_command(command: str) -> bool:

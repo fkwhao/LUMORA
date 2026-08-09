@@ -17,6 +17,8 @@ class ChatStreamEventResponse(BaseModel):
         "tool_failed",
         "tool_approval_requested",
         "tool_approval_resolved",
+        "approval_review_started",
+        "approval_review_completed",
         "context_compaction_started",
         "context_compaction_progress",
         "context_compacted",

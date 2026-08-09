@@ -1,0 +1,19 @@
+version: 1
+rules:
+  # 确定性规则先于自动 Reviewer。deny 不能被其他层的 allow 覆盖。
+  # 普通 git push 不在这里固定 ask，让 Reviewer 结合用户请求判断。
+  - tool: Bash
+    pattern: "git push*--force*"
+    decision: ask
+  - tool: Bash
+    pattern: "git push*--delete*"
+    decision: ask
+  - tool: Bash
+    pattern: "python -m pytest*"
+    decision: allow
+  - tool: Bash
+    pattern: "*credential*"
+    decision: deny
+  - tool: write_file
+    pattern: "generated/*"
+    decision: allow

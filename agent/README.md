@@ -72,3 +72,37 @@ localhost 请求临时传给 Python，Python 不保存 API Key。
 ```powershell
 python -m app.main
 ```
+
+## 自动审批 Reviewer
+
+界面选择“替我审批”后，Shell 和风险工具会先交给 Python 内置 Reviewer。Reviewer 复用
+当前任务选择的 OpenAI 兼容 API、API Key 和模型，不要求接入任何第三方 Agent SDK；它没有
+工具权限，只能对当前调用返回 `allow_once`、`deny` 或 `require_human`。工作区内创建新文件
+由确定性低风险规则直接允许；覆盖已有文件、Shell 等灰区才调用 Reviewer。模型接口或输出
+异常会自动重试一次，连续失败时阻止本次调用，并在界面标明“智能审批暂不可用，本次
+未执行”。“替我审批”不会创建人工审批弹窗；主 Agent 会改用更安全的替代方案，或在最终
+回答中说明未执行项。只有“请求审批”模式会暂停等待用户选择。
+
+Reviewer 或人工点击“拒绝”都不会落盘成永久拒绝；为避免循环，同一次 Agent 运行中完全
+相同的已拒绝调用会直接跳过，新任务中仍会重新评估。只有显式写入 `permissions.yaml` 的
+`deny` 才会持续生效。
+
+确定性规则写在以下 YAML 文件，格式参考
+[`config/permissions.example.yaml`](config/permissions.example.yaml)：
+
+```text
+~/.lumora/permissions.yaml
+{workspace}/.lumora/permissions.yaml
+{workspace}/.lumora/permissions.local.yaml
+```
+
+Reviewer 的自然语言业务策略参考
+[`config/approval-reviewer.example.md`](config/approval-reviewer.example.md)，可放在：
+
+```text
+~/.lumora/approval-reviewer.md
+{workspace}/.lumora/approval-reviewer.md
+{workspace}/.lumora/approval-reviewer.local.md
+```
+
+硬拒绝和工作区外路径检查始终优先；YAML 的 `deny` / `ask` 也不会被 Reviewer 覆盖。

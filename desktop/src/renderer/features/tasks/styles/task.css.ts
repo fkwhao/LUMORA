@@ -1298,6 +1298,10 @@ globalStyle(".work-phase-toggle", {
   textAlign: "left",
 });
 
+globalStyle(".work-phase-toggle.is-static", {
+  cursor: "default",
+});
+
 globalStyle(".work-phase-toggle > span", {
   minWidth: "0",
   overflow: "visible",
@@ -1363,12 +1367,6 @@ globalStyle(".tool-group-toggle > span", {
 
 globalStyle(".tool-group-toggle .tool-group-chevron", {
   flex: "0 0 auto",
-  transform: "rotate(-90deg)",
-  transition: "transform 150ms ease",
-});
-
-globalStyle(".tool-group.expanded > .tool-group-toggle .tool-group-chevron", {
-  transform: "rotate(0deg)",
 });
 
 globalStyle(".tool-call-list", {
@@ -1455,6 +1453,50 @@ globalStyle(".tool-call-item > button > span", {
 globalStyle(".tool-call-item > button:hover", {
   color: "var(--ink)",
 });
+
+globalStyle('.tool-call-item[data-kind="approval"] > button', {
+  color: "#c95110",
+});
+
+globalStyle('.tool-call-item[data-kind="approval"] > button:hover', {
+  color: "#b9470b",
+});
+
+globalStyle(
+  '.tool-call-item[data-kind="approval"] > button.shimmer-text > span',
+  {
+    color: "transparent",
+    backgroundImage:
+      "linear-gradient(90deg, #c95110 0%, #c95110 36%, #ed7a37 50%, #c95110 64%, #c95110 100%)",
+    "@media": {
+      "(prefers-reduced-motion: reduce)": {
+        color: "#c95110",
+        backgroundImage: "none",
+      },
+    },
+  },
+);
+
+globalStyle(
+  '[data-theme="dark"] .tool-call-item[data-kind="approval"] > button',
+  {
+    color: "#ff9a60",
+  },
+);
+
+globalStyle(
+  '[data-theme="dark"] .tool-call-item[data-kind="approval"] > button.shimmer-text > span',
+  {
+    backgroundImage:
+      "linear-gradient(90deg, #ff9a60 0%, #ff9a60 36%, #ffd0b5 50%, #ff9a60 64%, #ff9a60 100%)",
+    "@media": {
+      "(prefers-reduced-motion: reduce)": {
+        color: "#ff9a60",
+        backgroundImage: "none",
+      },
+    },
+  },
+);
 
 globalStyle(".tool-call-detail", {
   display: "grid",

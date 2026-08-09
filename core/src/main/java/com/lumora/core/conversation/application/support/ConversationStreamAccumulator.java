@@ -36,6 +36,8 @@ public class ConversationStreamAccumulator {
                 || event.getType() == ChatStreamEventType.TOOL_STARTED
                 || event.getType() == ChatStreamEventType.TOOL_COMPLETED
                 || event.getType() == ChatStreamEventType.TOOL_FAILED
+                || event.getType() == ChatStreamEventType.APPROVAL_REVIEW_STARTED
+                || event.getType() == ChatStreamEventType.APPROVAL_REVIEW_COMPLETED
                 || event.getType() == ChatStreamEventType.CONTEXT_COMPACTION_STARTED
                 || event.getType() == ChatStreamEventType.CONTEXT_COMPACTION_PROGRESS
                 || event.getType() == ChatStreamEventType.CONTEXT_COMPACTED

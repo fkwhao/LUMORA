@@ -49,7 +49,20 @@ public final class WorkLogEventProjector {
             "afterTokens",
             "throughSequence",
             "retainedFromSequence",
-            "trigger"
+            "trigger",
+            "permissionLayer",
+            "permissionReason",
+            "riskLevel",
+            "reversible",
+            "workspacePath",
+            "approvalReviewer",
+            "approvalReviewDecision",
+            "approvalReviewReason",
+            "approvalReviewRiskLevel",
+            "approvalReviewerModel",
+            "approvalReviewFallback",
+            "failureKind",
+            "toolExecutionState"
     );
 
     private WorkLogEventProjector() {

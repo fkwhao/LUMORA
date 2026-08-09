@@ -13,6 +13,29 @@ export function workLogItemFromEvent(
     };
   }
   if (
+    event.type === "approval_review_started" ||
+    event.type === "approval_review_completed"
+  ) {
+    const decision = event.metadata?.approvalReviewDecision;
+    return {
+      itemId: event.itemId || event.toolCallId || createId(),
+      kind: "approval",
+      status:
+        event.type === "approval_review_started"
+          ? "running"
+          : decision === "deny" || decision === "require_human"
+            ? "failed"
+            : "completed",
+      toolCallId: event.toolCallId,
+      toolName: event.toolName,
+      title: event.title,
+      arguments: event.arguments,
+      output: event.output || event.reason,
+      durationMs: event.durationMs,
+      metadata: event.metadata,
+    };
+  }
+  if (
     event.type === "context_compaction_started" ||
     event.type === "context_compaction_progress" ||
     event.type === "context_compacted" ||
