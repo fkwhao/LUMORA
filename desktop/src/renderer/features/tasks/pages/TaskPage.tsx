@@ -1,6 +1,8 @@
 import {
+  createContext,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -82,8 +84,8 @@ import { ApprovalDock } from "../components/ApprovalDock";
 import { ToolApprovalDialog } from "../components/ToolApprovalDialog";
 import { AgentRunSummary } from "../components/AgentRunSummary";
 import { DiffReviewPane, type FileChange } from "../components/DiffReviewPane";
-import { ProcessingLattice } from "../components/ProcessingLattice";
 import { PlanTodoList } from "../components/PlanTodoList";
+import { resolveContextUsage } from "../state/context-usage";
 import type { TaskStore } from "../state/task-store";
 
 interface TaskPageProps {
@@ -92,6 +94,33 @@ interface TaskPageProps {
   composerMotion?: "from-center";
   notify(message: string, tone?: "info" | "success"): void;
 }
+
+interface TaskMessageRenderContextValue {
+  chatStartedAt?: number;
+  chatWasStopped: boolean;
+  displayMessages: ChatMessage[];
+  isChatting: boolean;
+  isCompacting: boolean;
+  lastChatDurationMs?: number;
+  onOpenArtifact(artifactId: string): void;
+  onReviewChange(item: WorkLogItem): void;
+  taskEvents: TaskEvent[];
+}
+
+interface RuntimeMessageCacheEntry {
+  source: ChatMessage;
+  status: "complete" | "running";
+  message: ThreadMessage;
+}
+
+const TaskMessageRenderContext = createContext<
+  TaskMessageRenderContextValue | undefined
+>(undefined);
+
+const TASK_THREAD_COMPONENTS = {
+  AssistantMessageBefore: TaskAssistantMessageRunSummary,
+  AssistantIndicator: TaskAssistantProcessingIndicator,
+};
 
 type ComposerReasoningEffort = ReasoningEffort;
 const EMPTY_TASK_EVENTS: TaskEvent[] = [];
@@ -166,6 +195,26 @@ export const TaskPage = memo(function TaskPage({
     [],
   );
   const lastAutoScrolledQuestionRef = useRef<string | undefined>(undefined);
+  const runtimeMessageCacheRef = useRef(
+    new Map<string, RuntimeMessageCacheEntry>(),
+  );
+  const questionMessageCount = useMemo(
+    () => messages.filter((message) => message.role === "user").length,
+    [messages],
+  );
+  const latestUserMessageKey = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message?.role === "user") {
+        return (
+          message.runtimeId ??
+          message.messageId ??
+          `${message.createdAt ?? ""}:${message.content}`
+        );
+      }
+    }
+    return undefined;
+  }, [messages]);
   const openChangeReview = useCallback((item: WorkLogItem) => {
     setSelectedChangeId(item.itemId);
     setReviewOpen(true);
@@ -391,7 +440,15 @@ export const TaskPage = memo(function TaskPage({
         }
       };
     }
-    const observer = new ResizeObserver(refreshQuestionPositions);
+    let observedWidth = content.getBoundingClientRect().width;
+    const observer = new ResizeObserver((entries) => {
+      const nextWidth = entries[0]?.contentRect.width ?? observedWidth;
+      if (Math.abs(nextWidth - observedWidth) < 0.5) {
+        return;
+      }
+      observedWidth = nextWidth;
+      refreshQuestionPositions();
+    });
     observer.observe(content);
     return () => {
       observer.disconnect();
@@ -400,7 +457,7 @@ export const TaskPage = memo(function TaskPage({
         questionLayoutFrameRef.current = null;
       }
     };
-  }, [task?.taskId]);
+  }, [task?.taskId, questionMessageCount]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -412,25 +469,19 @@ export const TaskPage = memo(function TaskPage({
       }
     });
     return () => cancelAnimationFrame(frame);
-  }, [messages, isChatting]);
+  }, [questionMessageCount, isChatting]);
 
   useEffect(() => {
     if (!isChatting) {
       return;
     }
-    const latestUser = [...messages]
-      .reverse()
-      .find((message) => message.role === "user");
-    if (!latestUser) {
+    if (!latestUserMessageKey) {
       return;
     }
-    const questionKey =
-      latestUser.messageId ??
-      `${latestUser.createdAt ?? ""}:${latestUser.content}`;
-    if (lastAutoScrolledQuestionRef.current === questionKey) {
+    if (lastAutoScrolledQuestionRef.current === latestUserMessageKey) {
       return;
     }
-    lastAutoScrolledQuestionRef.current = questionKey;
+    lastAutoScrolledQuestionRef.current = latestUserMessageKey;
     requestAnimationFrame(() => {
       const questionCount =
         conversationScrollRef.current?.querySelectorAll(
@@ -440,7 +491,7 @@ export const TaskPage = memo(function TaskPage({
         scrollToQuestion(questionCount - 1);
       }
     });
-  }, [isChatting, messages]);
+  }, [isChatting, latestUserMessageKey]);
 
   useEffect(
     () => () => {
@@ -474,6 +525,40 @@ export const TaskPage = memo(function TaskPage({
     executionPlan.length > 0 && !isExecutionPlanComplete(executionPlan);
 
   const messageRepository = useMemo(() => {
+    const runtimeMessageCache = runtimeMessageCacheRef.current;
+    const activeRuntimeIds = new Set<string>();
+    const toRuntimeMessage = (
+      message: ChatMessage,
+      index: number,
+      status: "complete" | "running",
+    ) => {
+      const id = renderMessageId(message, index);
+      activeRuntimeIds.add(id);
+      const cached = runtimeMessageCache.get(id);
+      if (cached?.source === message && cached.status === status) {
+        return cached.message;
+      }
+      const runtimeMessage = fromThreadMessageLike(
+        {
+          id,
+          role: message.role,
+          content: message.content,
+          createdAt: message.createdAt
+            ? new Date(message.createdAt)
+            : undefined,
+        },
+        id,
+        status === "running"
+          ? { type: "running" }
+          : { type: "complete", reason: "unknown" },
+      );
+      runtimeMessageCache.set(id, {
+        source: message,
+        status,
+        message: runtimeMessage,
+      });
+      return runtimeMessage;
+    };
     const persisted = displayMessages.flatMap(
       (message) => message.threadMessages ?? [],
     );
@@ -488,44 +573,39 @@ export const TaskPage = memo(function TaskPage({
     const repositorySource = [...byId.values()].sort(
       (left, right) => (left.sequence ?? 0) - (right.sequence ?? 0),
     );
+    const renderIdByPersistedId = new Map(
+      repositorySource.flatMap((message, index) =>
+        message.messageId
+          ? [[message.messageId, renderMessageId(message, index)] as const]
+          : [],
+      ),
+    );
     const entries = repositorySource.map((message, index) => {
-      const id = message.messageId ?? runtimeMessageId(index);
+      const id = renderMessageId(message, index);
       return {
-        parentId: message.parentMessageId ?? null,
-        message: fromThreadMessageLike(
-          {
-            id,
-            role: message.role,
-            content: message.content,
-            createdAt: message.createdAt
-              ? new Date(message.createdAt)
-              : undefined,
-          },
-          id,
-          { type: "complete", reason: "unknown" },
-        ),
+        parentId: message.parentMessageId
+          ? (renderIdByPersistedId.get(message.parentMessageId) ??
+            message.parentMessageId)
+          : null,
+        message: toRuntimeMessage(message, index, "complete"),
       };
     });
 
     let activeParentId: string | null = null;
     displayMessages.forEach((message, index) => {
-      const id = message.messageId ?? runtimeMessageId(index);
-      if (!byId.has(id)) {
+      const id = renderMessageId(message, index);
+      if (!message.messageId || !byId.has(message.messageId)) {
         entries.push({
-          parentId: message.parentMessageId ?? activeParentId,
-          message: fromThreadMessageLike(
-            {
-              id,
-              role: message.role,
-              content: message.content,
-              createdAt: message.createdAt
-                ? new Date(message.createdAt)
-                : undefined,
-            },
-            id,
+          parentId: message.parentMessageId
+            ? (renderIdByPersistedId.get(message.parentMessageId) ??
+              activeParentId)
+            : activeParentId,
+          message: toRuntimeMessage(
+            message,
+            index,
             isChatting && index === displayMessages.length - 1
-              ? { type: "running" }
-              : { type: "complete", reason: "unknown" },
+              ? "running"
+              : "complete",
           ),
         });
       }
@@ -536,7 +616,12 @@ export const TaskPage = memo(function TaskPage({
     const headId =
       lastIndex < 0
         ? null
-        : displayMessages[lastIndex]?.messageId ?? runtimeMessageId(lastIndex);
+        : renderMessageId(displayMessages[lastIndex]!, lastIndex);
+    runtimeMessageCache.forEach((_entry, id) => {
+      if (!activeRuntimeIds.has(id)) {
+        runtimeMessageCache.delete(id);
+      }
+    });
     return { messages: entries, headId };
   }, [displayMessages, isChatting]);
 
@@ -565,7 +650,7 @@ export const TaskPage = memo(function TaskPage({
         ? displayMessages.findIndex(
             (candidate, index) =>
               candidate.messageId === message.sourceId ||
-              runtimeMessageId(index) === message.sourceId,
+              renderMessageId(candidate, index) === message.sourceId,
           )
         : -1;
       const parentIndex =
@@ -574,7 +659,7 @@ export const TaskPage = memo(function TaskPage({
           : displayMessages.findIndex(
               (candidate, index) =>
                 candidate.messageId === message.parentId ||
-                runtimeMessageId(index) === message.parentId,
+                renderMessageId(candidate, index) === message.parentId,
             );
       const target = displayMessages[
         sourceIndex >= 0 ? sourceIndex : parentIndex + 1
@@ -613,7 +698,7 @@ export const TaskPage = memo(function TaskPage({
         ? displayMessages.find(
             (message, index) =>
               message.messageId === parentId ||
-              runtimeMessageId(index) === parentId,
+              renderMessageId(message, index) === parentId,
           )
         : displayMessages.find((message) => message.role === "user");
       if (!target?.messageId || target.role !== "user") {
@@ -693,8 +778,10 @@ export const TaskPage = memo(function TaskPage({
   });
   const latestQuestionEntry = questionEntries.at(-1);
   const latestQuestionMessageId = latestQuestionEntry
-    ? (latestQuestionEntry.message.messageId ??
-      runtimeMessageId(latestQuestionEntry.messageIndex))
+    ? renderMessageId(
+        latestQuestionEntry.message,
+        latestQuestionEntry.messageIndex,
+      )
     : undefined;
 
   useLayoutEffect(() => {
@@ -1013,99 +1100,37 @@ export const TaskPage = memo(function TaskPage({
   const contextLimit = modelSettings?.models.find(
     (model) => model.modelId === selectedModel,
   )?.contextWindow ?? modelSettings?.contextWindow ?? 128_000;
-  const reportedContextTokens = [...messages]
-    .reverse()
-    .find(
-      (message) =>
-        message.role === "assistant" &&
-        (message.activeContextTokens ?? 0) > 0,
-    )?.activeContextTokens;
-  const estimatedTokens = estimateConversationTokens(messages);
-  const contextTokens = reportedContextTokens ?? estimatedTokens;
+  const contextUsage = resolveContextUsage(messages);
+  const contextTokens = contextUsage.tokens;
   const contextPercent = Math.min(
     100,
     Math.round((contextTokens / contextLimit) * 100),
   );
 
-  const AssistantMessageRunSummary = useCallback(function AssistantMessageRunSummary() {
-    const index = useAuiState((state) => state.message.index);
-    const originalMessage = displayMessages[index];
-    const isCurrentAssistant =
-      isChatting &&
-      (originalMessage === undefined ||
-        index === displayMessages.length - 1);
-    const isThinkingStage =
-      isCurrentAssistant &&
-      !originalMessage?.content.trim() &&
-      (originalMessage?.workLog?.length ?? 0) === 0 &&
-      taskEvents.length === 0;
-
-    if (!originalMessage || isThinkingStage) return null;
-
-    return (
-      <AgentRunSummary
-            startedAt={chatStartedAt}
-            durationMs={
-              originalMessage.durationMs ||
-              (index === displayMessages.length - 1
-                ? lastChatDurationMs
-                : undefined)
-            }
-            events={
-              index === displayMessages.length - 1
-                ? taskEvents
-                : EMPTY_TASK_EVENTS
-            }
-            workLog={originalMessage.workLog}
-            running={
-              (isChatting || isCompacting) &&
-              index === displayMessages.length - 1
-            }
-            stopped={
-              chatWasStopped &&
-              index === displayMessages.length - 1
-            }
-            onReviewChange={openChangeReview}
-            onOpenArtifact={openArtifact}
-      />
-    );
-  }, [
-    chatStartedAt,
-    chatWasStopped,
-    displayMessages,
-    isChatting,
-    isCompacting,
-    lastChatDurationMs,
-    openArtifact,
-    openChangeReview,
-    taskEvents,
-  ]);
-
-  const AssistantProcessingIndicator = useCallback(function AssistantProcessingIndicator() {
-    const index = useAuiState((state) => state.message.index);
-    const originalMessage = displayMessages[index];
-    const isCurrentAssistant =
-      isChatting &&
-      (originalMessage === undefined || index === displayMessages.length - 1);
-    const runSummaryIsVisible =
-      (originalMessage?.workLog?.length ?? 0) > 0 ||
-      (index === displayMessages.length - 1 && taskEvents.length > 0);
-    if (isCurrentAssistant && runSummaryIsVisible) return null;
-
-    if (isCurrentAssistant) {
-      return (
-        <span
-          className="lumora-processing-indicator"
-          data-slot="aui_assistant-message-indicator"
-          role="status"
-        >
-          <ProcessingLattice />
-          <span className="lumora-processing-shimmer">正在处理</span>
-        </span>
-      );
-    }
-    return null;
-  }, [displayMessages, isChatting, taskEvents]);
+  const messageRenderContext = useMemo<TaskMessageRenderContextValue>(
+    () => ({
+      chatStartedAt,
+      chatWasStopped,
+      displayMessages,
+      isChatting,
+      isCompacting,
+      lastChatDurationMs,
+      onOpenArtifact: openArtifact,
+      onReviewChange: openChangeReview,
+      taskEvents,
+    }),
+    [
+      chatStartedAt,
+      chatWasStopped,
+      displayMessages,
+      isChatting,
+      isCompacting,
+      lastChatDurationMs,
+      openArtifact,
+      openChangeReview,
+      taskEvents,
+    ],
+  );
 
   if (!task) {
     return null;
@@ -1113,6 +1138,7 @@ export const TaskPage = memo(function TaskPage({
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
+      <TaskMessageRenderContext.Provider value={messageRenderContext}>
       <main
         className={`task-layout${composerMotion ? ` composer-enter-${composerMotion}` : ""}`}
       >
@@ -1186,7 +1212,7 @@ export const TaskPage = memo(function TaskPage({
                     activeQuestionIndex === questionIndex ? " active" : ""
                   }`}
                   type="button"
-                  key={message.messageId ?? `question-${questionIndex}`}
+                  key={message.runtimeId ?? message.messageId ?? `question-${questionIndex}`}
                   data-rail-question-index={questionIndex}
                   aria-label={`跳转到问题 ${questionIndex + 1}：${message.content}`}
                   aria-current={
@@ -1593,14 +1619,16 @@ export const TaskPage = memo(function TaskPage({
                             id="context-usage-tooltip"
                             role="tooltip"
                           >
-                            <span>背景信息窗口：</span>
+                            <span>
+                              {isChatting ? "当前模型请求：" : "最近一次模型请求："}
+                            </span>
                             <strong>
-                              {reportedContextTokens === undefined ? "约 " : ""}
+                              {contextUsage.estimated ? "约 " : ""}
                               {contextPercent}% 已用
                             </strong>
                             <b>
                               已用
-                              {reportedContextTokens === undefined ? "约 " : " "}
+                              {contextUsage.estimated ? "约 " : " "}
                               {formatTokenCount(contextTokens)} 标记，共{" "}
                               {formatTokenCount(contextLimit)}
                             </b>
@@ -1887,10 +1915,7 @@ export const TaskPage = memo(function TaskPage({
             </div>
           )}
           <Thread
-            components={{
-              AssistantMessageBefore: AssistantMessageRunSummary,
-              AssistantIndicator: AssistantProcessingIndicator,
-            }}
+            components={TASK_THREAD_COMPONENTS}
             composerAriaLabel="继续任务"
             composerPlaceholder="继续任务…"
             contentRef={conversationContentRef}
@@ -2115,14 +2140,16 @@ export const TaskPage = memo(function TaskPage({
                     id="context-usage-tooltip"
                     role="tooltip"
                   >
-                    <span>背景信息窗口：</span>
+                    <span>
+                      {isChatting ? "当前模型请求：" : "最近一次模型请求："}
+                    </span>
                     <strong>
-                      {reportedContextTokens === undefined ? "约 " : ""}
+                      {contextUsage.estimated ? "约 " : ""}
                       {contextPercent}% 已用
                     </strong>
                     <b>
                       已用
-                      {reportedContextTokens === undefined ? "约 " : " "}
+                      {contextUsage.estimated ? "约 " : " "}
                       {formatTokenCount(contextTokens)} 标记，共{" "}
                       {formatTokenCount(contextLimit)}
                     </b>
@@ -2292,9 +2319,59 @@ export const TaskPage = memo(function TaskPage({
         )}
       </div>
       </main>
+      </TaskMessageRenderContext.Provider>
     </AssistantRuntimeProvider>
   );
 });
+
+function TaskAssistantMessageRunSummary() {
+  const context = useTaskMessageRenderContext();
+  const index = useAuiState((state) => state.message.index);
+  const originalMessage = context.displayMessages[index];
+
+  if (!originalMessage) return null;
+
+  return (
+    <AgentRunSummary
+      startedAt={context.chatStartedAt}
+      answerStarted={Boolean(originalMessage.content.trim())}
+      durationMs={
+        originalMessage.durationMs ||
+        (index === context.displayMessages.length - 1
+          ? context.lastChatDurationMs
+          : undefined)
+      }
+      events={
+        index === context.displayMessages.length - 1
+          ? context.taskEvents
+          : EMPTY_TASK_EVENTS
+      }
+      workLog={originalMessage.workLog}
+      running={
+        (context.isChatting || context.isCompacting) &&
+        index === context.displayMessages.length - 1
+      }
+      stopped={
+        context.chatWasStopped &&
+        index === context.displayMessages.length - 1
+      }
+      onReviewChange={context.onReviewChange}
+      onOpenArtifact={context.onOpenArtifact}
+    />
+  );
+}
+
+function TaskAssistantProcessingIndicator() {
+  return null;
+}
+
+function useTaskMessageRenderContext(): TaskMessageRenderContextValue {
+  const context = useContext(TaskMessageRenderContext);
+  if (!context) {
+    throw new Error("Task message components require their render context");
+  }
+  return context;
+}
 
 function useSynchronousExternalStoreRuntime<T>(
   adapter: ExternalStoreAdapter<T>,
@@ -2380,6 +2457,10 @@ function modelDisplayName(model: string): string {
 
 function runtimeMessageId(index: number): string {
   return `lumora-message-${index}`;
+}
+
+function renderMessageId(message: ChatMessage, index: number): string {
+  return message.runtimeId ?? message.messageId ?? runtimeMessageId(index);
 }
 
 const permissionModeOptions: Array<{
@@ -2468,26 +2549,6 @@ function formatTokenCount(tokens: number): string {
   }
   const compact = tokens / 1_000;
   return `${compact >= 10 ? Math.round(compact) : compact.toFixed(1).replace(/\.0$/, "")}k`;
-}
-
-function estimateConversationTokens(messages: ChatMessage[]): number {
-  return messages.reduce(
-    (total, message) => total + 6 + estimateTextTokens(message.content),
-    0,
-  );
-}
-
-function estimateTextTokens(content: string): number {
-  let asciiCharacters = 0;
-  let nonAsciiCharacters = 0;
-  for (const character of content) {
-    if (character.codePointAt(0)! <= 0x7f) {
-      asciiCharacters += 1;
-    } else {
-      nonAsciiCharacters += 1;
-    }
-  }
-  return nonAsciiCharacters + Math.ceil(asciiCharacters / 4);
 }
 
 function formatMessageTime(createdAt?: string): string {

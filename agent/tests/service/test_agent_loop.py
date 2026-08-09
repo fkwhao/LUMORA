@@ -191,16 +191,24 @@ async def _assert_tool_lifecycle_before_final_answer() -> None:
 
     assert [event.type for event in events] == [
         "progress_message",
+        "usage",
         "tool_started",
         "tool_completed",
+        "usage",
         "text_delta",
         "usage",
         "completed",
     ]
-    assert events[2].output == "文件内容"
-    assert events[4].usage is not None
-    assert events[4].usage.total_tokens == 30
-    assert events[4].active_context_tokens == 15
+    assert events[3].output == "文件内容"
+    usage_events = [event for event in events if event.type == "usage"]
+    assert [event.usage.total_tokens for event in usage_events if event.usage] == [
+        12,
+        12,
+        30,
+    ]
+    assert usage_events[0].active_context_tokens == 10
+    assert usage_events[1].active_context_tokens > 10
+    assert usage_events[2].active_context_tokens == 15
     assert captured_messages[1][-1]["role"] == "tool"
     assert "文件内容" in str(captured_messages[1][-1]["content"])
 
@@ -250,8 +258,8 @@ async def _assert_invalid_tool_arguments_are_reported() -> None:
         )
     ]
 
-    assert events[0].type == "tool_failed"
-    assert events[0].arguments == {}
+    failed = next(event for event in events if event.type == "tool_failed")
+    assert failed.arguments == {}
     assert events[-1].type == "completed"
 
 

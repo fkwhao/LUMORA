@@ -414,6 +414,7 @@ export function createTaskStore(
         throw new Error("正在压缩上下文，请稍候");
       }
       const userMessage: ChatMessage = {
+        runtimeId: createOptimisticMessageId(),
         role: "user",
         content: normalizedContent,
         createdAt: new Date().toISOString(),
@@ -421,7 +422,11 @@ export function createTaskStore(
       const messages = [
         ...get().messages,
         userMessage,
-        { role: "assistant" as const, content: "" },
+        {
+          runtimeId: createOptimisticMessageId(),
+          role: "assistant" as const,
+          content: "",
+        },
       ];
       set({
         messages,
@@ -624,7 +629,11 @@ export function createTaskStore(
           content: normalizedContent,
           createdAt: new Date().toISOString(),
         },
-        { role: "assistant", content: "" },
+        {
+          runtimeId: createOptimisticMessageId(),
+          role: "assistant",
+          content: "",
+        },
       ];
       set({
         messages,
@@ -864,6 +873,10 @@ function applyEvent(
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "任务创建失败";
+}
+
+function createOptimisticMessageId(): string {
+  return `lumora-live-${crypto.randomUUID()}`;
 }
 
 function updateContextWorkLog(

@@ -112,7 +112,7 @@ describe("visible task flow", () => {
       "context-usage-tooltip",
     );
     expect(screen.getByRole("tooltip")).toHaveTextContent(
-      /背景信息窗口：约 0% 已用已用约 \d+ 标记，共 128k/,
+      /最近一次模型请求：约 0% 已用已用约 \d+ 标记，共 128k/,
     );
     const followUpInput = screen.getByRole("textbox", { name: "继续任务" });
     const permissionTrigger = screen.getByRole("button", {

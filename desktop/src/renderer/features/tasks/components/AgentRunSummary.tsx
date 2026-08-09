@@ -3,7 +3,6 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import {
@@ -26,6 +25,7 @@ interface AgentRunSummaryProps {
   durationMs?: number;
   events?: TaskEvent[];
   workLog?: WorkLogItem[];
+  answerStarted?: boolean;
   running: boolean;
   stopped?: boolean;
   onReviewChange?(item: WorkLogItem): void;
@@ -44,18 +44,18 @@ export const AgentRunSummary = memo(function AgentRunSummary({
   durationMs,
   events = [],
   workLog = [],
+  answerStarted = false,
   running,
   stopped = false,
   onReviewChange,
   onOpenArtifact,
 }: AgentRunSummaryProps) {
-  const [expanded, setExpanded] = useState(running);
+  const [expanded, setExpanded] = useState(running && !answerStarted);
   const [elapsedMs, setElapsedMs] = useState(() =>
     running && startedAt
       ? Math.max(0, Date.now() - startedAt)
       : durationMs ?? 0,
   );
-  const wasRunning = useRef(running);
   const phases = useMemo(
     () => buildWorkPhases(workLog.length > 0 ? workLog : taskEventsAsWorkLog(events)),
     [events, workLog],
@@ -76,41 +76,46 @@ export const AgentRunSummary = memo(function AgentRunSummary({
   }, [durationMs, running, startedAt]);
 
   useLayoutEffect(() => {
-    if (running) {
+    if (running && !answerStarted) {
       setExpanded(true);
-    } else if (wasRunning.current) {
+    } else if (running && answerStarted) {
       setExpanded(false);
     }
-    wasRunning.current = running;
-  }, [running]);
+  }, [answerStarted, running]);
+
+  const interactive = !running && hasDetails;
+  const activate = () => {
+    if (interactive) {
+      setExpanded((current) => !current);
+    }
+  };
 
   return (
     <section className={`agent-run${expanded ? " expanded" : ""}`}>
       <div className="agent-run-heading">
-        {running ? (
-          <div
-            aria-label={label}
-            className="agent-run-toggle is-running is-static"
-            role="status"
-          >
-            <ProcessingLattice />
-            <span>{label}</span>
-          </div>
-        ) : hasDetails ? (
-          <button
-            className="agent-run-toggle"
-            type="button"
-            aria-expanded={expanded}
-            onClick={() => setExpanded((current) => !current)}
-          >
-            <span>{label}</span>
+        <div
+          aria-expanded={interactive ? expanded : undefined}
+          aria-label={running ? label : undefined}
+          className={`agent-run-toggle${running ? " is-running" : ""}${interactive ? "" : " is-static"}`}
+          onClick={activate}
+          onKeyDown={(event) => {
+            if (
+              interactive &&
+              (event.key === "Enter" || event.key === " ")
+            ) {
+              event.preventDefault();
+              activate();
+            }
+          }}
+          role={running ? "status" : interactive ? "button" : undefined}
+          tabIndex={interactive ? 0 : undefined}
+        >
+          {running && <ProcessingLattice />}
+          <span>{label}</span>
+          {interactive && (
             <ChevronRight className="agent-run-chevron" size={15} />
-          </button>
-        ) : (
-          <div className="agent-run-toggle is-static">
-            <span>{label}</span>
-          </div>
-        )}
+          )}
+        </div>
       </div>
       {hasDetails && <div className="agent-run-events" aria-hidden={!expanded}>
         <div className="agent-run-events-inner">

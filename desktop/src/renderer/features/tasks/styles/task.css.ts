@@ -1195,14 +1195,14 @@ globalStyle(".agent-run-toggle.is-static", {
 });
 
 globalStyle(".agent-run-toggle.is-running", {
-  position: "relative",
+  cursor: "default",
 });
 
 globalStyle(
   ".agent-run-toggle.is-running > .lumora-processing-lattice",
   {
-    position: "absolute",
-    right: "calc(100% + 6px)",
+    position: "relative",
+    flex: "0 0 auto",
   },
 );
 
@@ -1245,6 +1245,9 @@ globalStyle(
     backgroundClip: "text",
     WebkitBackgroundClip: "text",
     animation: `${thinkingTextSweep} 1750ms linear infinite`,
+    contain: "paint",
+    transform: "translateZ(0)",
+    willChange: "background-position",
     "@media": {
       "(prefers-reduced-motion: reduce)": {
         color: "var(--muted)",
@@ -2462,6 +2465,12 @@ globalStyle(".context-usage-value", {
   transform: "rotate(-90deg)",
   transformBox: "fill-box",
   transformOrigin: "center",
+  transition: "stroke-dasharray 180ms ease",
+  "@media": {
+    "(prefers-reduced-motion: reduce)": {
+      transition: "none",
+    },
+  },
 });
 
 globalStyle(".context-usage-tooltip", {

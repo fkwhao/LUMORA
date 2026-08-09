@@ -309,6 +309,9 @@ async def _assert_agent_loop_pauses(tmp_path: Path) -> None:
     )
 
     assert (await anext(stream)).type == "progress_message"
+    usage = await anext(stream)
+    assert usage.type == "usage"
+    assert usage.active_context_tokens > 0
     requested = await anext(stream)
     assert requested.type == "tool_approval_requested"
     pending_next = asyncio.create_task(anext(stream))

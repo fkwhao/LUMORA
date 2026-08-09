@@ -145,6 +145,43 @@ describe("AgentRunSummary", () => {
     expect(screen.queryByText(/正在处理 0s/)).not.toBeInTheDocument();
   });
 
+  it("keeps the summary node stable and folds details before the answer starts", () => {
+    const workLog = [
+      {
+        itemId: "progress-stable",
+        kind: "progress" as const,
+        status: "completed" as const,
+        content: "我先检查现有实现。",
+      },
+    ];
+    const { rerender } = render(
+      <AgentRunSummary running workLog={workLog} />,
+    );
+    const runningSummary = screen.getByRole("status", {
+      name: /正在处理/,
+    });
+
+    rerender(
+      <AgentRunSummary answerStarted running workLog={workLog} />,
+    );
+    expect(document.querySelector(".agent-run-events")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+
+    rerender(
+      <AgentRunSummary
+        answerStarted
+        durationMs={2_000}
+        running={false}
+        workLog={workLog}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /已处理 2s/ })).toBe(
+      runningSummary,
+    );
+  });
+
   it("presents large-file search and patch calls as file work", () => {
     const onReviewChange = vi.fn();
     render(

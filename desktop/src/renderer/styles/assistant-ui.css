@@ -197,12 +197,16 @@
     var(--aui-foreground) 46%,
     var(--aui-muted-foreground) 74%
   );
+  background-position: 100% 50%;
   background-size: 220% 100%;
   background-clip: text;
   color: transparent;
   font-size: 13px;
   font-weight: 560;
   animation: lumora-processing-sweep 1.35s linear infinite;
+  contain: paint;
+  transform: translateZ(0);
+  will-change: background-position;
 }
 
 .lumora-processing-indicator {
@@ -255,8 +259,12 @@
 }
 
 @keyframes lumora-processing-sweep {
+  from {
+    background-position: 100% 50%;
+  }
+
   to {
-    background-position: -220% 0;
+    background-position: -50% 50%;
   }
 }
 

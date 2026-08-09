@@ -1,7 +1,7 @@
 import hljs from "highlight.js";
 import { Check, Copy } from "lucide-react";
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 interface MarkdownMessageProps {
@@ -87,6 +87,64 @@ function MarkdownCodeBlock({
   );
 }
 
+const MARKDOWN_COMPONENTS: Components = {
+  a({ node: _node, href, children, ...props }) {
+    const external = href?.startsWith("https://");
+    return (
+      <a
+        {...props}
+        href={href}
+        rel={external ? "noreferrer" : undefined}
+        target={external ? "_blank" : undefined}
+      >
+        {children}
+      </a>
+    );
+  },
+  input({ node: _node, ...props }) {
+    return <input {...props} disabled />;
+  },
+  table({ node: _node, children, ...props }) {
+    return (
+      <div className="markdown-table-scroll">
+        <table {...props}>{children}</table>
+      </div>
+    );
+  },
+  pre({ node: _node, children }) {
+    return <>{children}</>;
+  },
+  code({ node: _node, className, children, ...props }) {
+    const source = String(children).replace(/\n$/, "");
+    const language = /language-([\w-]+)/.exec(className ?? "")?.[1];
+    const fenced = Boolean(language) || source.includes("\n");
+    if (!fenced) {
+      return (
+        <code {...props} className={className}>
+          {children}
+        </code>
+      );
+    }
+
+    // highlight.js 会转义源代码，只输出包含高亮 span 的安全 HTML。
+    const highlighted =
+      language && hljs.getLanguage(language)
+        ? hljs.highlight(source, { language }).value
+        : hljs.highlightAuto(source).value;
+    return (
+      <MarkdownCodeBlock language={language} source={source}>
+        <code
+          {...props}
+          className={`hljs${language ? ` language-${language}` : ""}`}
+          dangerouslySetInnerHTML={{ __html: highlighted }}
+        />
+      </MarkdownCodeBlock>
+    );
+  },
+};
+
+const REMARK_PLUGINS = [remarkGfm];
+
 /** 渲染模型返回的 Markdown；禁用原始 HTML，避免模型内容直接注入 DOM。 */
 export const MarkdownMessage = memo(function MarkdownMessage({
   content,
@@ -94,63 +152,9 @@ export const MarkdownMessage = memo(function MarkdownMessage({
   return (
     <div className="markdown-body">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={REMARK_PLUGINS}
         skipHtml
-        components={{
-          a({ node: _node, href, children, ...props }) {
-            const external = href?.startsWith("https://");
-            return (
-              <a
-                {...props}
-                href={href}
-                rel={external ? "noreferrer" : undefined}
-                target={external ? "_blank" : undefined}
-              >
-                {children}
-              </a>
-            );
-          },
-          input({ node: _node, ...props }) {
-            return <input {...props} disabled />;
-          },
-          table({ node: _node, children, ...props }) {
-            return (
-              <div className="markdown-table-scroll">
-                <table {...props}>{children}</table>
-              </div>
-            );
-          },
-          pre({ node: _node, children }) {
-            return <>{children}</>;
-          },
-          code({ node: _node, className, children, ...props }) {
-            const source = String(children).replace(/\n$/, "");
-            const language = /language-([\w-]+)/.exec(className ?? "")?.[1];
-            const fenced = Boolean(language) || source.includes("\n");
-            if (!fenced) {
-              return (
-                <code {...props} className={className}>
-                  {children}
-                </code>
-              );
-            }
-
-            // highlight.js 会转义源代码，只输出包含高亮 span 的安全 HTML。
-            const highlighted =
-              language && hljs.getLanguage(language)
-                ? hljs.highlight(source, { language }).value
-                : hljs.highlightAuto(source).value;
-            return (
-              <MarkdownCodeBlock language={language} source={source}>
-                <code
-                  {...props}
-                  className={`hljs${language ? ` language-${language}` : ""}`}
-                  dangerouslySetInnerHTML={{ __html: highlighted }}
-                />
-              </MarkdownCodeBlock>
-            );
-          },
-        }}
+        components={MARKDOWN_COMPONENTS}
       >
         {content}
       </ReactMarkdown>

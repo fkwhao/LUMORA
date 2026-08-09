@@ -61,6 +61,8 @@ export interface ListModelsInput {
 
 export interface ChatMessage {
   messageId?: string;
+  /** Renderer-only identity kept stable while an optimistic message is persisted. */
+  runtimeId?: string;
   sequence?: number;
   parentMessageId?: string;
   messageDepth?: number;

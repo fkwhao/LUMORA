@@ -190,6 +190,16 @@ class AgentLoopRunner:
                     delta=turn.content.strip(),
                     model=resolved_model,
                 )
+            yield RunEvent(
+                type="usage",
+                model=resolved_model,
+                usage=RunUsage(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                ),
+                active_context_tokens=active_context_tokens,
+            )
             request_messages.append({
                 "role": "assistant",
                 "content": turn.content or None,
@@ -238,6 +248,16 @@ class AgentLoopRunner:
                 pending_tool_messages,
                 request_messages,
                 prompt.tools,
+            )
+            yield RunEvent(
+                type="usage",
+                model=resolved_model,
+                usage=RunUsage(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                ),
+                active_context_tokens=active_tokens,
             )
             should_compact, _threshold = self._context_planner.should_compact_tokens(
                 settings, active_tokens

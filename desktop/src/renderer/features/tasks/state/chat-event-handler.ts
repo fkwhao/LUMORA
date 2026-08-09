@@ -3,6 +3,7 @@ import type {
   LumoraModelApi,
 } from "../../../../shared/model-contract";
 import { workLogItemFromEvent } from "../../../../shared/work-log";
+import { reconcilePersistedMessages } from "./chat-message-reconciliation";
 import type { TaskState } from "./task-store";
 
 export function applyChatEvent(
@@ -109,29 +110,25 @@ export function applyChatEvent(
     ? Date.now() - chatStartedAt
     : undefined;
   if (event.type === "completed") {
+    set({
+      isChatting: false,
+      chatWasStopped: false,
+      chatStartedAt: undefined,
+      lastChatDurationMs,
+      pendingToolApproval: undefined,
+      isDecidingToolApproval: false,
+    });
     void modelApi
       .listMessages(taskId)
-      .then((messages) =>
+      .then((persistedMessages) =>
         set({
-          messages,
-          isChatting: false,
-          chatWasStopped: false,
-          chatStartedAt: undefined,
-          lastChatDurationMs,
-          pendingToolApproval: undefined,
-          isDecidingToolApproval: false,
+          messages: reconcilePersistedMessages(
+            get().messages,
+            persistedMessages,
+          ),
         }),
       )
-      .catch(() =>
-        set({
-          isChatting: false,
-          chatWasStopped: false,
-          chatStartedAt: undefined,
-          lastChatDurationMs,
-          pendingToolApproval: undefined,
-          isDecidingToolApproval: false,
-        }),
-      )
+      .catch(() => undefined)
       .finally(resolve);
     return;
   }
@@ -143,7 +140,10 @@ export function applyChatEvent(
         const messages =
           persistedMessages.at(-1)?.role === "assistant" ||
           liveAssistant?.role !== "assistant"
-            ? persistedMessages
+            ? reconcilePersistedMessages(
+                get().messages,
+                persistedMessages,
+              )
             : [...persistedMessages, liveAssistant];
         set({
           messages,
