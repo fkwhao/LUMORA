@@ -76,6 +76,7 @@ export function ConversationUsagePane({
   onWidthChange,
   onWidthCommit,
 }: ConversationUsagePaneProps) {
+  const paneRef = useRef<HTMLElement>(null);
   const dragStart = useRef<DragState | undefined>(undefined);
   const usage = aggregateMessageUsage(messages);
   const hitRate = cacheHitRate(usage);
@@ -105,6 +106,9 @@ export function ConversationUsagePane({
     };
     event.currentTarget.setPointerCapture?.(event.pointerId);
     document.body.classList.add("resizing-context-pane");
+    if (!open) {
+      document.body.classList.add("opening-context-pane-by-drag");
+    }
   }
 
   function resize(event: PointerEvent<HTMLDivElement>) {
@@ -119,14 +123,19 @@ export function ConversationUsagePane({
       ),
     );
     dragStart.current.currentWidth = nextWidth;
+    paneRef.current?.style.setProperty(
+      "--context-pane-width",
+      `${nextWidth}px`,
+    );
+    event.currentTarget.setAttribute("aria-valuenow", String(nextWidth));
     const nextOpen = dragStart.current.startedOpen
       ? !shouldCollapseContextPaneOnDrag(nextWidth)
       : shouldExpandContextPaneOnDrag(nextWidth);
     if (nextOpen !== dragStart.current.open) {
       dragStart.current.open = nextOpen;
-      onOpenChange(nextOpen);
+      paneRef.current?.classList.toggle("is-open", nextOpen);
+      paneRef.current?.setAttribute("aria-hidden", String(!nextOpen));
     }
-    if (nextOpen) onWidthChange(nextWidth);
   }
 
   function stopResize(event: PointerEvent<HTMLDivElement>) {
@@ -136,12 +145,14 @@ export function ConversationUsagePane({
       event.currentTarget.releasePointerCapture?.(event.pointerId);
     }
     document.body.classList.remove("resizing-context-pane");
+    document.body.classList.remove("opening-context-pane-by-drag");
     if (!drag) return;
     const settledWidth = drag.open
       ? clampContextPaneWidth(drag.currentWidth)
       : drag.startedOpen
         ? MIN_CONTEXT_PANE_WIDTH
         : drag.rememberedWidth;
+    onOpenChange(drag.open);
     onWidthChange(settledWidth);
     onWidthCommit(settledWidth);
   }
@@ -166,6 +177,7 @@ export function ConversationUsagePane({
 
   return (
     <aside
+      ref={paneRef}
       className={`conversation-usage-pane${open ? " is-open" : ""}`}
       style={style}
       aria-label="当前会话 Token 信息"
@@ -229,7 +241,6 @@ export function ConversationUsagePane({
           <UsageFact label="用户消息" value={userMessages.toLocaleString("zh-CN")} />
           <UsageFact label="助手消息" value={assistantMessages.toLocaleString("zh-CN")} />
           <UsageFact label="模型请求" value={modelRequests.toLocaleString("zh-CN")} />
-          <UsageFact label="总成本" value="未配置费率" />
           <UsageFact label="创建时间" value={formatDate(createdAt ?? dates[0])} />
           <UsageFact label="最后活动" value={formatDate(updatedAt ?? dates.at(-1))} />
         </section>
@@ -238,7 +249,10 @@ export function ConversationUsagePane({
           <header>
             <Gauge />
             <strong>上下文细分</strong>
-            <span>按本地记录估算 · {formatTokens(contextTokens)}</span>
+            <span>
+              {estimated ? "本地估算总量" : "最近请求总量"} · {formatTokens(contextTokens)} Token
+              · 细分为本地估算
+            </span>
           </header>
           <div className="context-breakdown-bar" aria-hidden="true">
             {breakdown.map((part) => (

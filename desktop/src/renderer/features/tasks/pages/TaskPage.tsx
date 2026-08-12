@@ -1607,7 +1607,9 @@ export const TaskPage = memo(function TaskPage({
                           <span
                             className="context-usage-ring"
                             role="button"
-                            aria-describedby="context-usage-tooltip"
+                            aria-describedby={
+                              usageOpen ? undefined : "context-usage-tooltip"
+                            }
                             aria-label="上下文已用"
                             aria-valuemin={0}
                             aria-valuemax={100}
@@ -2140,7 +2142,9 @@ export const TaskPage = memo(function TaskPage({
                   <span
                     className="context-usage-ring"
                     role="button"
-                    aria-describedby="context-usage-tooltip"
+                    aria-describedby={
+                      usageOpen ? undefined : "context-usage-tooltip"
+                    }
                     aria-label="上下文已用"
                     aria-valuemin={0}
                     aria-valuemax={100}

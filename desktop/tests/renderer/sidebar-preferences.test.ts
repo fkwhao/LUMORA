@@ -31,15 +31,16 @@ describe("sidebar resize boundaries", () => {
     localStorage.removeItem(CONTEXT_PANE_WIDTH_STORAGE_KEY);
     expect(loadContextPaneWidth()).toBe(DEFAULT_CONTEXT_PANE_WIDTH);
     expect(clampContextPaneWidth(200)).toBe(MIN_CONTEXT_PANE_WIDTH);
+    expect(MAX_CONTEXT_PANE_WIDTH).toBe(456);
     expect(clampContextPaneWidth(900)).toBe(MAX_CONTEXT_PANE_WIDTH);
-    expect(shouldCollapseContextPaneOnDrag(332)).toBe(true);
-    expect(shouldCollapseContextPaneOnDrag(333)).toBe(false);
+    expect(shouldCollapseContextPaneOnDrag(240)).toBe(true);
+    expect(shouldCollapseContextPaneOnDrag(241)).toBe(false);
     expect(shouldExpandContextPaneOnDrag(72)).toBe(false);
     expect(shouldExpandContextPaneOnDrag(73)).toBe(true);
 
     saveContextPaneWidth(618.4);
 
-    expect(loadContextPaneWidth()).toBe(618);
+    expect(loadContextPaneWidth()).toBe(MAX_CONTEXT_PANE_WIDTH);
     localStorage.removeItem(CONTEXT_PANE_WIDTH_STORAGE_KEY);
   });
 });

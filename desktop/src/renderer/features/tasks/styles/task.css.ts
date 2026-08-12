@@ -2484,10 +2484,6 @@ globalStyle(".context-usage-ring", {
   cursor: "pointer",
 });
 
-globalStyle(".context-usage-ring[aria-expanded='true'] .context-usage-value", {
-  stroke: "var(--blue)",
-});
-
 globalStyle(".context-usage-ring svg", {
   display: "block",
   width: "100%",
@@ -2573,7 +2569,7 @@ globalStyle(".context-usage-tooltip b", {
 });
 
 globalStyle(
-  ".context-usage-control:hover .context-usage-tooltip, .context-usage-control:focus-within .context-usage-tooltip",
+  ".context-usage-control:hover .context-usage-ring[aria-expanded='false'] + .context-usage-tooltip, .context-usage-control:focus-within .context-usage-ring[aria-expanded='false'] + .context-usage-tooltip",
   {
     opacity: "1",
     transform: "translate(-50%, 0)",
@@ -2748,6 +2744,7 @@ globalStyle(".review-pane", {
 globalStyle(".conversation-usage-pane", {
   position: "relative",
   display: "grid",
+  flex: "0 0 auto",
   width: "0",
   minWidth: "0",
   minHeight: "0",
@@ -2759,17 +2756,19 @@ globalStyle(".conversation-usage-pane", {
   containerType: "inline-size",
   opacity: "0",
   transform: "translateX(22px)",
+  willChange: "width, transform, opacity",
   transition:
-    "width 240ms cubic-bezier(0.22, 1, 0.36, 1), min-width 240ms cubic-bezier(0.22, 1, 0.36, 1), transform 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 150ms ease, border-color 150ms ease",
+    "width 380ms cubic-bezier(0.22, 1, 0.36, 1), transform 360ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease, border-color 200ms ease",
 });
 
 globalStyle(".conversation-usage-pane.is-open", {
   width: "var(--context-pane-width)",
-  minWidth: "var(--context-pane-width)",
   overflow: "visible",
   borderLeftColor: "var(--line)",
   opacity: "1",
   transform: "translateX(0)",
+  transition:
+    "width 240ms cubic-bezier(0.22, 1, 0.36, 1), transform 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 150ms ease, border-color 150ms ease",
 });
 
 globalStyle(".conversation-usage-pane:not(.is-open) > :not(.context-pane-resize-handle)", {
@@ -2782,7 +2781,11 @@ globalStyle(".conversation-usage-pane:not(.is-open) > :not(.context-pane-resize-
 globalStyle(".conversation-usage-pane.is-open > :not(.context-pane-resize-handle)", {
   visibility: "visible",
   opacity: "1",
-  transition: "opacity 180ms ease 45ms",
+  transition: "opacity 150ms ease 25ms",
+});
+
+globalStyle(".conversation-usage-pane.is-open > .conversation-usage-scroll", {
+  transition: "visibility 0s linear 65ms, opacity 145ms ease 65ms",
 });
 
 globalStyle(".context-pane-resize-handle", {
@@ -2836,6 +2839,22 @@ globalStyle("body.resizing-context-pane", {
 globalStyle("body.resizing-context-pane .conversation-usage-pane", {
   transition: "none",
 });
+
+globalStyle("body.resizing-context-pane .conversation-usage-pane:not(.is-open)", {
+  transition:
+    "width 380ms cubic-bezier(0.22, 1, 0.36, 1), transform 360ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease, border-color 200ms ease",
+});
+
+globalStyle(
+  "body.opening-context-pane-by-drag .conversation-usage-pane.is-open > .conversation-usage-scroll",
+  {
+    visibility: "hidden",
+    contentVisibility: "hidden",
+    opacity: "0",
+    pointerEvents: "none",
+    transition: "none",
+  },
+);
 
 globalStyle(".context-pane-header", {
   display: "flex",
@@ -2897,6 +2916,8 @@ globalStyle(".conversation-usage-scroll", {
   minHeight: "0",
   overflow: "auto",
   padding: "32px 36px 44px",
+  contentVisibility: "auto",
+  containIntrinsicSize: "auto 900px",
 });
 
 globalStyle(".context-stat-grid", {
@@ -3077,7 +3098,7 @@ globalStyle(".conversation-usage-scroll", {
 
 globalStyle(".context-breakdown-legend", {
   "@container": {
-    "contextPane (max-width: 500px)": {
+    "contextPane (max-width: 455px)": {
       gridTemplateColumns: "repeat(2, max-content)",
     },
   },

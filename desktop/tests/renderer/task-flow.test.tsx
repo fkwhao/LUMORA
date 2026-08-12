@@ -116,6 +116,7 @@ describe("visible task flow", () => {
       /最近一次模型请求：约 0% 已用已用约 \d+ 标记，共 128k/,
     );
     fireEvent.click(contextUsageButton);
+    expect(contextUsageButton).not.toHaveAttribute("aria-describedby");
     expect(screen.getByRole("complementary", {
       name: "当前会话 Token 信息",
     })).toBeVisible();
@@ -123,9 +124,9 @@ describe("visible task flow", () => {
     const contextResizeHandle = screen.getByRole("separator", {
       name: "调整上下文侧边栏宽度",
     });
-    expect(contextResizeHandle).toHaveAttribute("aria-valuenow", "560");
+    expect(contextResizeHandle).toHaveAttribute("aria-valuenow", "456");
     fireEvent.keyDown(contextResizeHandle, { key: "ArrowLeft" });
-    expect(contextResizeHandle).toHaveAttribute("aria-valuenow", "584");
+    expect(contextResizeHandle).toHaveAttribute("aria-valuenow", "456");
     fireEvent.click(screen.getByRole("button", { name: "关闭上下文统计" }));
     expect(contextResizeHandle.closest("aside")).toHaveAttribute(
       "aria-hidden",
