@@ -86,6 +86,7 @@ import { AgentRunSummary } from "../components/AgentRunSummary";
 import { DiffReviewPane, type FileChange } from "../components/DiffReviewPane";
 import { PlanTodoList } from "../components/PlanTodoList";
 import { resolveContextUsage } from "../state/context-usage";
+import { resolveQuestionRailTooltipPosition } from "../state/question-rail-tooltip";
 import type { TaskStore } from "../state/task-store";
 
 interface TaskPageProps {
@@ -1014,13 +1015,20 @@ export const TaskPage = memo(function TaskPage({
 
   function positionQuestionRailTooltip(element: HTMLButtonElement) {
     const bounds = element.getBoundingClientRect();
+    const containingBlock = element
+      .closest<HTMLElement>(".task-layout")
+      ?.getBoundingClientRect();
+    const position = resolveQuestionRailTooltipPosition(
+      bounds,
+      containingBlock,
+    );
     element.style.setProperty(
       "--question-rail-tooltip-top",
-      `${bounds.top + bounds.height / 2}px`,
+      `${position.top}px`,
     );
     element.style.setProperty(
       "--question-rail-tooltip-left",
-      `${bounds.right + 8}px`,
+      `${position.left}px`,
     );
   }
 
