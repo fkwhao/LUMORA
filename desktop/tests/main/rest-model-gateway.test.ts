@@ -21,6 +21,32 @@ afterEach(async () => {
 });
 
 describe("Java REST model gateway", () => {
+  it("loads local token usage statistics", async () => {
+    let receivedPath = "";
+    const baseUrl = await listen(async (request) => {
+      receivedPath = request.url ?? "";
+      return {
+        usage: { promptTokens: 10, completionTokens: 2, totalTokens: 12 },
+        peakDailyTokens: 12,
+        activeDays: 1,
+        currentStreak: 1,
+        longestStreak: 1,
+        requestCount: 1,
+        conversationCount: 1,
+        daily: [],
+      };
+    });
+    const gateway = new RestModelGateway({
+      baseUrl,
+      sessionToken: "test-token",
+    });
+
+    const statistics = await gateway.getUsageStatistics(365);
+
+    expect(receivedPath).toBe("/api/v1/usage/statistics?days=365");
+    expect(statistics.usage.totalTokens).toBe(12);
+  });
+
   it("retrieves the available model IDs through Java Core", async () => {
     let receivedPath = "";
     let receivedBody = "";

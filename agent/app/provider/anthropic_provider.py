@@ -14,6 +14,7 @@ from app.provider.hosted_web_search import (
     web_search_query,
 )
 from app.provider.protocol_provider import ProtocolProviderBase
+from app.provider.token_usage import add_token_usage, parse_anthropic_usage
 
 
 class AnthropicProvider(ProtocolProviderBase):
@@ -46,8 +47,7 @@ class AnthropicProvider(ProtocolProviderBase):
             stream=False,
         )
         base_messages = list(request_body["messages"])
-        prompt_tokens = 0
-        completion_tokens = 0
+        usage_parts: list[TokenUsageResponse] = []
         async with httpx.AsyncClient(timeout=120.0) as client:
             for continuation in range(self._MAX_SERVER_TOOL_CONTINUATIONS + 1):
                 response = await client.post(
@@ -57,15 +57,14 @@ class AnthropicProvider(ProtocolProviderBase):
                 )
                 response.raise_for_status()
                 payload = response.json()
-                usage = payload.get("usage") or {}
-                prompt_tokens += int(usage.get("input_tokens") or 0)
-                completion_tokens += int(usage.get("output_tokens") or 0)
+                usage_parts.append(
+                    parse_anthropic_usage(payload.get("usage") or {})
+                )
                 if payload.get("stop_reason") != "pause_turn":
                     turn = _parse_turn(payload, settings.model)
                     return _turn_with_usage(
                         turn,
-                        prompt_tokens=prompt_tokens,
-                        completion_tokens=completion_tokens,
+                        usage=add_token_usage(usage_parts),
                     )
                 if continuation >= self._MAX_SERVER_TOOL_CONTINUATIONS:
                     break
@@ -86,8 +85,7 @@ class AnthropicProvider(ProtocolProviderBase):
         model = settings.model
         reasoning_parts: list[str] = []
         searches: dict[str, dict[str, Any]] = {}
-        prompt_tokens = 0
-        completion_tokens = 0
+        usage_parts: list[TokenUsageResponse] = []
         request_body = _request_body(
             settings,
             messages,
@@ -126,8 +124,10 @@ class AnthropicProvider(ProtocolProviderBase):
                         if event_type == "message_start":
                             message = event.get("message") or {}
                             model = str(message.get("model") or model)
-                            prompt_tokens += int(
-                                (message.get("usage") or {}).get("input_tokens") or 0
+                            usage_parts.append(
+                                parse_anthropic_usage(
+                                    message.get("usage") or {}
+                                )
                             )
                         elif event_type == "content_block_start":
                             index = int(event.get("index") or 0)
@@ -292,8 +292,8 @@ class AnthropicProvider(ProtocolProviderBase):
                                 (event.get("delta") or {}).get("stop_reason")
                                 or stop_reason
                             )
-                            completion_tokens += int(
-                                (event.get("usage") or {}).get("output_tokens") or 0
+                            usage_parts.append(
+                                parse_anthropic_usage(event.get("usage") or {})
                             )
                         elif event_type == "error":
                             for search in searches.values():
@@ -361,11 +361,7 @@ class AnthropicProvider(ProtocolProviderBase):
                 content=content,
                 reasoning="".join(reasoning_parts),
                 model=model,
-                usage=TokenUsageResponse(
-                    promptTokens=prompt_tokens,
-                    completionTokens=completion_tokens,
-                    totalTokens=prompt_tokens + completion_tokens,
-                ),
+                usage=add_token_usage(usage_parts),
                 tool_calls=tool_calls,
             ),
         )
@@ -506,18 +502,11 @@ def _parse_turn(payload: dict[str, Any], fallback_model: str) -> ProviderTurn:
                     block.get("input") or {}, ensure_ascii=False, separators=(",", ":")
                 ),
             ))
-    usage = payload.get("usage") or {}
-    prompt_tokens = int(usage.get("input_tokens") or 0)
-    completion_tokens = int(usage.get("output_tokens") or 0)
     return ProviderTurn(
         content=_final_anthropic_text(text_blocks, search_block_indices),
         reasoning="".join(reasoning),
         model=str(payload.get("model") or fallback_model),
-        usage=TokenUsageResponse(
-            promptTokens=prompt_tokens,
-            completionTokens=completion_tokens,
-            totalTokens=prompt_tokens + completion_tokens,
-        ),
+        usage=parse_anthropic_usage(payload.get("usage") or {}),
         tool_calls=tuple(calls),
     )
 
@@ -653,17 +642,12 @@ def _ordered_anthropic_blocks(
 def _turn_with_usage(
     turn: ProviderTurn,
     *,
-    prompt_tokens: int,
-    completion_tokens: int,
+    usage: TokenUsageResponse,
 ) -> ProviderTurn:
     return ProviderTurn(
         content=turn.content,
         reasoning=turn.reasoning,
         model=turn.model,
-        usage=TokenUsageResponse(
-            promptTokens=prompt_tokens,
-            completionTokens=completion_tokens,
-            totalTokens=prompt_tokens + completion_tokens,
-        ),
+        usage=usage,
         tool_calls=turn.tool_calls,
     )

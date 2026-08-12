@@ -12,10 +12,12 @@ import type {
   SaveProviderModelInput,
   ProviderModel,
   ToolApprovalDecision,
+  TokenUsageStatistics,
   UpdateModelSettingsInput,
 } from "../../../shared/model-contract";
 
 export interface ModelGateway {
+  getUsageStatistics(days?: number): Promise<TokenUsageStatistics>;
   listProviders(): Promise<ModelProvider[]>;
   createProvider(input: SaveModelProviderInput): Promise<ModelProvider>;
   updateProvider(providerId: string, input: SaveModelProviderInput): Promise<ModelProvider>;

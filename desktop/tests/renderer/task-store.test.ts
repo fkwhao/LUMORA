@@ -461,6 +461,7 @@ function createApi(): LumoraTaskApi {
 
 function createModelApi(): LumoraModelApi {
   return {
+    getUsageStatistics: vi.fn(),
     listProviders: vi.fn(async () => []),
     createProvider: vi.fn(),
     updateProvider: vi.fn(),

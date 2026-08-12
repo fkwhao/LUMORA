@@ -267,10 +267,26 @@ public class AgentDtoMapper {
     }
 
     private TokenUsage toTokenUsage(AgentTokenUsageResponse response) {
+        int inputTokens = response.getInputTokens();
+        if (inputTokens == 0 && response.getPromptTokens() > 0
+                && !response.isCacheMetricsAvailable()) {
+            inputTokens = response.getPromptTokens();
+        }
+        int outputTokens = response.getOutputTokens();
+        if (outputTokens == 0 && response.getCompletionTokens() > 0
+                && response.getReasoningTokens() == 0) {
+            outputTokens = response.getCompletionTokens();
+        }
         return new TokenUsage(
                 response.getPromptTokens(),
                 response.getCompletionTokens(),
-                response.getTotalTokens()
+                response.getTotalTokens(),
+                inputTokens,
+                outputTokens,
+                response.getReasoningTokens(),
+                response.getCacheReadTokens(),
+                response.getCacheWriteTokens(),
+                response.isCacheMetricsAvailable()
         );
     }
 }

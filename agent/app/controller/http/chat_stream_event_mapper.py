@@ -11,6 +11,12 @@ class ChatStreamEventMapper:
                 promptTokens=event.usage.prompt_tokens,
                 completionTokens=event.usage.completion_tokens,
                 totalTokens=event.usage.total_tokens,
+                inputTokens=event.usage.input_tokens,
+                outputTokens=event.usage.output_tokens,
+                reasoningTokens=event.usage.reasoning_tokens,
+                cacheReadTokens=event.usage.cache_read_tokens,
+                cacheWriteTokens=event.usage.cache_write_tokens,
+                cacheMetricsAvailable=event.usage.cache_metrics_available,
             )
             if event.usage is not None
             else None

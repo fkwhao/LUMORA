@@ -67,9 +67,12 @@ class DatabaseMigrationTest {
 
         assertThat(businessTableCount).isEqualTo(11);
         assertThat(foreignKeysEnabled).isEqualTo(1);
-        assertThat(applicationChangeSetCount()).isEqualTo(21);
+        assertThat(applicationChangeSetCount()).isEqualTo(23);
         assertThat(conversationMessageColumns()).contains(
-                "parent_message_id", "message_depth", "active_path"
+                "parent_message_id", "message_depth", "active_path",
+                "input_tokens", "output_tokens", "reasoning_tokens",
+                "cache_read_tokens", "cache_write_tokens",
+                "cache_metrics_available"
         );
         assertThat(taskPlanStepPrimaryKeyColumns())
                 .containsExactly("plan_step_id");
@@ -91,7 +94,7 @@ class DatabaseMigrationTest {
         // 对同一数据库重复执行迁移，必须只校验历史而不能再次建表。
         liquibase.afterPropertiesSet();
 
-        assertThat(applicationChangeSetCount()).isEqualTo(21);
+        assertThat(applicationChangeSetCount()).isEqualTo(23);
     }
 
     private Integer applicationChangeSetCount() {
@@ -120,7 +123,9 @@ class DatabaseMigrationTest {
                     '018-normalize-application-setting-timestamps',
                     '019-conversation-message-branches',
                     '020-model-reasoning-efforts',
-                    '021-task-composer-preferences'
+                    '021-task-composer-preferences',
+                    '022-model-web-search-capability',
+                    '023-conversation-token-usage-details'
                 )
                 AND AUTHOR = 'lumora'
                 """,

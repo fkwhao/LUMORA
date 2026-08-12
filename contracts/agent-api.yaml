@@ -676,7 +676,16 @@ components:
     TokenUsage:
       type: object
       additionalProperties: false
-      required: [promptTokens, completionTokens, totalTokens]
+      required:
+        - promptTokens
+        - completionTokens
+        - totalTokens
+        - inputTokens
+        - outputTokens
+        - reasoningTokens
+        - cacheReadTokens
+        - cacheWriteTokens
+        - cacheMetricsAvailable
       properties:
         promptTokens:
           type: integer
@@ -687,6 +696,23 @@ components:
         totalTokens:
           type: integer
           minimum: 0
+        inputTokens:
+          type: integer
+          minimum: 0
+        outputTokens:
+          type: integer
+          minimum: 0
+        reasoningTokens:
+          type: integer
+          minimum: 0
+        cacheReadTokens:
+          type: integer
+          minimum: 0
+        cacheWriteTokens:
+          type: integer
+          minimum: 0
+        cacheMetricsAvailable:
+          type: boolean
     ContextCompactionResponse:
       type: object
       additionalProperties: false

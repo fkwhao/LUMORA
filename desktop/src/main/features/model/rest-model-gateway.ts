@@ -14,6 +14,7 @@ import type {
   SaveProviderModelInput,
   ProviderModel,
   ToolApprovalDecision,
+  TokenUsageStatistics,
   UpdateModelSettingsInput,
 } from "../../../shared/model-contract";
 import { workLogFromEvents } from "../../../shared/work-log";
@@ -38,6 +39,12 @@ export class RestModelGateway implements ModelGateway {
 
   getSettings(): Promise<ModelSettings> {
     return this.request("/api/v1/model/settings");
+  }
+
+  getUsageStatistics(days = 365): Promise<TokenUsageStatistics> {
+    return this.request(
+      `/api/v1/usage/statistics?days=${encodeURIComponent(days)}`,
+    );
   }
 
   listProviders(): Promise<ModelProvider[]> {

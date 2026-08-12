@@ -10,6 +10,7 @@ import {
   EyeOff,
   LockKeyhole,
   Palette,
+  UserRound,
   Sparkles,
   Pencil,
   Plus,
@@ -46,6 +47,7 @@ import { Switch } from "../../../components/ui/switch";
 import { AppearancePage } from "./AppearancePage";
 import { PersonalizationPage } from "./PersonalizationPage";
 import { McpSettingsPage } from "./McpSettingsPage";
+import { ProfilePage } from "./ProfilePage";
 import {
   SettingsConfirmDialog,
   SettingsSearchInput,
@@ -73,6 +75,7 @@ const apiFormatOptions: Array<{
 ];
 
 type SettingsSection =
+  | "profile"
   | "model"
   | "personalization"
   | "mcp"
@@ -90,11 +93,14 @@ export function SettingsPage({
   onDeleteAllTasks,
   notify,
 }: SettingsPageProps) {
-  const [section, setSection] = useState<SettingsSection>("model");
+  const [section, setSection] = useState<SettingsSection>("profile");
   const [settingsQuery, setSettingsQuery] = useState("");
   const [archiveQuery, setArchiveQuery] = useState("");
   const [pendingDelete, setPendingDelete] = useState<string | "all">();
   const normalizedSettingsQuery = settingsQuery.trim().toLowerCase();
+  const showProfile = "个人资料 Token 用量 统计 活动".toLowerCase().includes(
+    normalizedSettingsQuery,
+  );
   const showModel = "模型与 API".toLowerCase().includes(
     normalizedSettingsQuery,
   );
@@ -146,6 +152,14 @@ export function SettingsPage({
           onChange={setSettingsQuery}
         />
         <nav>
+          {showProfile && (
+            <SettingsNavItem
+              active={section === "profile"}
+              icon={UserRound}
+              label="个人资料"
+              onClick={() => setSection("profile")}
+            />
+          )}
           {showModel && (
             <SettingsNavItem
               active={section === "model"}
@@ -187,7 +201,7 @@ export function SettingsPage({
               onClick={() => setSection("archived")}
             />
           )}
-          {!showModel && !showPersonalization && !showMcp && !showAppearance
+          {!showProfile && !showModel && !showPersonalization && !showMcp && !showAppearance
             && !showArchived && (
             <p className="settings-search-empty">没有匹配的设置</p>
           )}
@@ -196,7 +210,9 @@ export function SettingsPage({
 
       <section className="settings-surface">
         <header className="settings-topbar" aria-hidden="true" />
-        {section === "model" ? (
+        {section === "profile" ? (
+          <ProfilePage api={api} />
+        ) : section === "model" ? (
           api ? (
             <ModelSettingsPanel api={api} />
           ) : (

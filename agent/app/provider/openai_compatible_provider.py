@@ -21,6 +21,7 @@ from app.harness.run_event import RunEvent, RunUsage
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.prompt.prompt_assembly import PromptAssembly
 from app.prompt.prompt_loader import PromptLoader
+from app.provider.token_usage import parse_chat_usage
 
 
 class OpenAICompatibleProvider:
@@ -248,6 +249,14 @@ class OpenAICompatibleProvider:
                             prompt_tokens=parsed_usage.prompt_tokens,
                             completion_tokens=parsed_usage.completion_tokens,
                             total_tokens=parsed_usage.total_tokens,
+                            input_tokens=parsed_usage.input_tokens,
+                            output_tokens=parsed_usage.output_tokens,
+                            reasoning_tokens=parsed_usage.reasoning_tokens,
+                            cache_read_tokens=parsed_usage.cache_read_tokens,
+                            cache_write_tokens=parsed_usage.cache_write_tokens,
+                            cache_metrics_available=(
+                                parsed_usage.cache_metrics_available
+                            ),
                         ),
                         active_context_tokens=(
                             parsed_usage.prompt_tokens
@@ -489,8 +498,4 @@ class OpenAICompatibleProvider:
 
     @staticmethod
     def _parse_usage(usage: dict[str, Any]) -> TokenUsageResponse:
-        return TokenUsageResponse(
-            promptTokens=int(usage.get("prompt_tokens") or 0),
-            completionTokens=int(usage.get("completion_tokens") or 0),
-            totalTokens=int(usage.get("total_tokens") or 0),
-        )
+        return parse_chat_usage(usage)

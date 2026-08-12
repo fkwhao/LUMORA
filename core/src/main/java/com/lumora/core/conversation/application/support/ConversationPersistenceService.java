@@ -184,6 +184,7 @@ public class ConversationPersistenceService {
                 parent == null ? 1 : parent.getMessageDepth() + 1
         );
         activity.setActivePath(true);
+        applyUsageDetails(activity, usage);
         try {
             activity.setWorkLogJson(objectMapper.writeValueAsString(
                     List.of(WorkLogEventProjector.project(event))
@@ -327,6 +328,7 @@ public class ConversationPersistenceService {
         assistantMessage.setParentMessageId(context.getCurrentUserMessageId());
         assistantMessage.setMessageDepth(parent.getMessageDepth() + 1);
         assistantMessage.setActivePath(true);
+        applyUsageDetails(assistantMessage, usage);
         assistantMessage.setActiveContextTokens(
                 accumulator.getActiveContextTokens()
         );
@@ -335,6 +337,20 @@ public class ConversationPersistenceService {
                 context.getConversationId()
         );
         touchConversation(conversation, context.getTaskId(), now);
+    }
+
+    private void applyUsageDetails(
+            ConversationMessage message,
+            TokenUsage usage
+    ) {
+        message.applyUsageDetails(
+                usage.getInputTokens(),
+                usage.getOutputTokens(),
+                usage.getReasoningTokens(),
+                usage.getCacheReadTokens(),
+                usage.getCacheWriteTokens(),
+                usage.isCacheMetricsAvailable()
+        );
     }
 
     private String serializeWorkLog(

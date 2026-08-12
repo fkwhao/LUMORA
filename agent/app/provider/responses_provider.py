@@ -13,6 +13,7 @@ from app.provider.hosted_web_search import (
     responses_web_searches,
 )
 from app.provider.protocol_provider import ProtocolProviderBase
+from app.provider.token_usage import parse_responses_usage
 
 
 class ResponsesProvider(ProtocolProviderBase):
@@ -567,13 +568,7 @@ def _final_response_message(payload: dict[str, Any]) -> tuple[str, str]:
 
 
 def _parse_usage(usage: dict[str, Any]) -> TokenUsageResponse:
-    prompt = int(usage.get("input_tokens") or 0)
-    completion = int(usage.get("output_tokens") or 0)
-    return TokenUsageResponse(
-        promptTokens=prompt,
-        completionTokens=completion,
-        totalTokens=int(usage.get("total_tokens") or prompt + completion),
-    )
+    return parse_responses_usage(usage)
 
 
 def _response_failure_message(event: dict[str, Any]) -> str:

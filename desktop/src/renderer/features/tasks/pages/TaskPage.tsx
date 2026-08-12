@@ -84,7 +84,12 @@ import { ApprovalDock } from "../components/ApprovalDock";
 import { ToolApprovalDialog } from "../components/ToolApprovalDialog";
 import { AgentRunSummary } from "../components/AgentRunSummary";
 import { DiffReviewPane, type FileChange } from "../components/DiffReviewPane";
+import { ConversationUsagePane } from "../components/ConversationUsagePane";
 import { PlanTodoList } from "../components/PlanTodoList";
+import {
+  loadContextPaneWidth,
+  saveContextPaneWidth,
+} from "../../layout/context-pane-preferences";
 import { resolveContextUsage } from "../state/context-usage";
 import { resolveQuestionRailTooltipPosition } from "../state/question-rail-tooltip";
 import type { TaskStore } from "../state/task-store";
@@ -159,7 +164,11 @@ export const TaskPage = memo(function TaskPage({
   const [composerText, setComposerText] = useState("");
   const [moreOpen, setMoreOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [usageOpen, setUsageOpen] = useState(false);
   const [reviewWidth, setReviewWidth] = useState(460);
+  const [contextPaneWidth, setContextPaneWidth] = useState(
+    loadContextPaneWidth,
+  );
   const [selectedChangeId, setSelectedChangeId] = useState<string>();
   const [modelSettings, setModelSettings] = useState<ModelSettings>();
   const [selectedModel, setSelectedModel] = useState("");
@@ -217,6 +226,7 @@ export const TaskPage = memo(function TaskPage({
     return undefined;
   }, [messages]);
   const openChangeReview = useCallback((item: WorkLogItem) => {
+    setUsageOpen(false);
     setSelectedChangeId(item.itemId);
     setReviewOpen(true);
   }, []);
@@ -1166,7 +1176,10 @@ export const TaskPage = memo(function TaskPage({
             type="button"
             aria-label="审阅文件变更"
             aria-expanded={reviewOpen}
-            onClick={() => setReviewOpen((open) => !open)}
+            onClick={() => {
+              setUsageOpen(false);
+              setReviewOpen((open) => !open);
+            }}
           >
             <FileDiff size={15} />
             审阅
@@ -1593,13 +1606,25 @@ export const TaskPage = memo(function TaskPage({
                         <span className="context-usage-control">
                           <span
                             className="context-usage-ring"
-                            role="meter"
+                            role="button"
                             aria-describedby="context-usage-tooltip"
                             aria-label="上下文已用"
                             aria-valuemin={0}
                             aria-valuemax={100}
                             aria-valuenow={contextPercent}
                             tabIndex={0}
+                            aria-expanded={usageOpen}
+                            onClick={() => {
+                              setReviewOpen(false);
+                              setUsageOpen((open) => !open);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                setReviewOpen(false);
+                                setUsageOpen((open) => !open);
+                              }
+                            }}
                           >
                             <svg
                               aria-hidden="true"
@@ -2114,13 +2139,25 @@ export const TaskPage = memo(function TaskPage({
                 <span className="context-usage-control order-1">
                   <span
                     className="context-usage-ring"
-                    role="meter"
+                    role="button"
                     aria-describedby="context-usage-tooltip"
                     aria-label="上下文已用"
                     aria-valuemin={0}
                     aria-valuemax={100}
                     aria-valuenow={contextPercent}
                     tabIndex={0}
+                    aria-expanded={usageOpen}
+                    onClick={() => {
+                      setReviewOpen(false);
+                      setUsageOpen((open) => !open);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setReviewOpen(false);
+                        setUsageOpen((open) => !open);
+                      }
+                    }}
                   >
                     <svg
                       aria-hidden="true"
@@ -2325,6 +2362,28 @@ export const TaskPage = memo(function TaskPage({
             onWidthChange={setReviewWidth}
           />
         )}
+        <ConversationUsagePane
+            open={usageOpen}
+            width={contextPaneWidth}
+            messages={displayMessages}
+            conversationTitle={task.goal}
+            provider={modelSettings?.providerName ?? ""}
+            model={selectedModel || configuredModel}
+            contextTokens={contextTokens}
+            contextLimit={contextLimit}
+            contextPercent={contextPercent}
+            estimated={contextUsage.estimated}
+            createdAt={task.createdAt}
+            updatedAt={task.updatedAt}
+            onClose={() => setUsageOpen(false)}
+            onExport={exportConversation}
+            onOpenChange={(open) => {
+              if (open) setReviewOpen(false);
+              setUsageOpen(open);
+            }}
+            onWidthChange={setContextPaneWidth}
+            onWidthCommit={saveContextPaneWidth}
+          />
       </div>
       </main>
       </TaskMessageRenderContext.Provider>

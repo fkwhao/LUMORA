@@ -113,6 +113,29 @@ export interface TokenUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  cacheMetricsAvailable?: boolean;
+}
+
+export interface DailyTokenUsage {
+  date: string;
+  usage: TokenUsage;
+  requestCount: number;
+}
+
+export interface TokenUsageStatistics {
+  usage: TokenUsage;
+  peakDailyTokens: number;
+  activeDays: number;
+  currentStreak: number;
+  longestStreak: number;
+  requestCount: number;
+  conversationCount: number;
+  daily: DailyTokenUsage[];
 }
 
 export interface ChatCompletion {
@@ -216,6 +239,7 @@ export interface ArtifactChunk {
 }
 
 export interface LumoraModelApi {
+  getUsageStatistics(days?: number): Promise<TokenUsageStatistics>;
   listProviders(): Promise<ModelProvider[]>;
   createProvider(input: SaveModelProviderInput): Promise<ModelProvider>;
   updateProvider(providerId: string, input: SaveModelProviderInput): Promise<ModelProvider>;

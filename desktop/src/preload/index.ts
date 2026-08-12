@@ -63,6 +63,8 @@ const api: LumoraApi = {
       ),
   },
   model: {
+    getUsageStatistics: (days?: number) =>
+      ipcRenderer.invoke("model:usage-statistics", days),
     listProviders: () => ipcRenderer.invoke("model:list-providers"),
     createProvider: (input: SaveModelProviderInput) =>
       ipcRenderer.invoke("model:create-provider", input),

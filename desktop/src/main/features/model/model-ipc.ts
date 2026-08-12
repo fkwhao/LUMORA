@@ -14,6 +14,7 @@ import type { ModelGateway } from "./model-gateway";
 
 export const modelIpcChannels = {
   listProviders: "model:list-providers",
+  usageStatistics: "model:usage-statistics",
   createProvider: "model:create-provider",
   updateProvider: "model:update-provider",
   activateProvider: "model:activate-provider",
@@ -41,6 +42,8 @@ export const modelIpcChannels = {
 export function registerModelIpc(gateway: ModelGateway): () => void {
   const subscriptions = new Map<string, () => void>();
   ipcMain.handle(modelIpcChannels.listProviders, () => gateway.listProviders());
+  ipcMain.handle(modelIpcChannels.usageStatistics, (_event, days?: number) =>
+    gateway.getUsageStatistics(validateStatisticsDays(days)));
   ipcMain.handle(modelIpcChannels.createProvider, (_event, input: SaveModelProviderInput) =>
     gateway.createProvider(validateProvider(input)));
   ipcMain.handle(modelIpcChannels.updateProvider, (_event, providerId: string, input: SaveModelProviderInput) =>
@@ -180,6 +183,7 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
 
   return () => {
     ipcMain.removeHandler(modelIpcChannels.listProviders);
+    ipcMain.removeHandler(modelIpcChannels.usageStatistics);
     ipcMain.removeHandler(modelIpcChannels.createProvider);
     ipcMain.removeHandler(modelIpcChannels.updateProvider);
     ipcMain.removeHandler(modelIpcChannels.activateProvider);
@@ -206,6 +210,14 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
     }
     subscriptions.clear();
   };
+}
+
+function validateStatisticsDays(value?: number): number {
+  if (value === undefined) return 365;
+  if (!Number.isInteger(value) || value < 7 || value > 3660) {
+    throw new TypeError("统计天数必须在 7 到 3660 之间");
+  }
+  return value;
 }
 
 function validateProvider(input: SaveModelProviderInput): SaveModelProviderInput {

@@ -107,13 +107,47 @@ describe("visible task flow", () => {
     expect(screen.queryByText("分析目录内容")).not.toBeInTheDocument();
     expect(screen.queryByText("整理文件")).not.toBeInTheDocument();
     expect(screen.queryByText("执行活动")).not.toBeInTheDocument();
-    expect(screen.getByRole("meter", { name: "上下文已用" })).toHaveAttribute(
+    const contextUsageButton = screen.getByRole("button", { name: "上下文已用" });
+    expect(contextUsageButton).toHaveAttribute(
       "aria-describedby",
       "context-usage-tooltip",
     );
     expect(screen.getByRole("tooltip")).toHaveTextContent(
       /最近一次模型请求：约 0% 已用已用约 \d+ 标记，共 128k/,
     );
+    fireEvent.click(contextUsageButton);
+    expect(screen.getByRole("complementary", {
+      name: "当前会话 Token 信息",
+    })).toBeVisible();
+    expect(screen.getByText("缓存命中率")).toBeVisible();
+    const contextResizeHandle = screen.getByRole("separator", {
+      name: "调整上下文侧边栏宽度",
+    });
+    expect(contextResizeHandle).toHaveAttribute("aria-valuenow", "560");
+    fireEvent.keyDown(contextResizeHandle, { key: "ArrowLeft" });
+    expect(contextResizeHandle).toHaveAttribute("aria-valuenow", "584");
+    fireEvent.click(screen.getByRole("button", { name: "关闭上下文统计" }));
+    expect(contextResizeHandle.closest("aside")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+    fireEvent.pointerDown(contextResizeHandle, {
+      pointerId: 1,
+      clientX: 1000,
+    });
+    fireEvent.pointerMove(contextResizeHandle, {
+      pointerId: 1,
+      clientX: 850,
+    });
+    fireEvent.pointerUp(contextResizeHandle, {
+      pointerId: 1,
+      clientX: 850,
+    });
+    expect(contextResizeHandle.closest("aside")).toHaveAttribute(
+      "aria-hidden",
+      "false",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "关闭上下文统计" }));
     const followUpInput = screen.getByRole("textbox", { name: "继续任务" });
     const permissionTrigger = screen.getByRole("button", {
       name: "选择权限模式",

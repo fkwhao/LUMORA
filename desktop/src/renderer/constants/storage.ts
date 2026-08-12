@@ -11,6 +11,9 @@ export const SIDEBAR_WIDTH_STORAGE_KEY =
 export const SIDEBAR_COLLAPSED_STORAGE_KEY =
   "lumora.desktop.sidebar-collapsed.v1";
 
+export const CONTEXT_PANE_WIDTH_STORAGE_KEY =
+  "lumora.desktop.context-pane-width.v1";
+
 export const APPEARANCE_PREFERENCES_STORAGE_KEY =
   "lumora.desktop.appearance-preferences.v1";
 

@@ -2481,7 +2481,11 @@ globalStyle(".context-usage-ring", {
   outline: "0",
   lineHeight: "0",
   contain: "size layout paint",
-  cursor: "help",
+  cursor: "pointer",
+});
+
+globalStyle(".context-usage-ring[aria-expanded='true'] .context-usage-value", {
+  stroke: "var(--blue)",
 });
 
 globalStyle(".context-usage-ring svg", {
@@ -2739,6 +2743,358 @@ globalStyle(".review-pane", {
   gridTemplateRows: "52px 44px auto minmax(0, 1fr)",
   borderLeft: "1px solid var(--line)",
   background: "var(--surface)",
+});
+
+globalStyle(".conversation-usage-pane", {
+  position: "relative",
+  display: "grid",
+  width: "0",
+  minWidth: "0",
+  minHeight: "0",
+  gridTemplateRows: "49px minmax(0, 1fr)",
+  overflow: "visible",
+  borderLeft: "1px solid transparent",
+  background: "var(--surface)",
+  containerName: "contextPane",
+  containerType: "inline-size",
+  opacity: "0",
+  transform: "translateX(22px)",
+  transition:
+    "width 240ms cubic-bezier(0.22, 1, 0.36, 1), min-width 240ms cubic-bezier(0.22, 1, 0.36, 1), transform 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 150ms ease, border-color 150ms ease",
+});
+
+globalStyle(".conversation-usage-pane.is-open", {
+  width: "var(--context-pane-width)",
+  minWidth: "var(--context-pane-width)",
+  overflow: "visible",
+  borderLeftColor: "var(--line)",
+  opacity: "1",
+  transform: "translateX(0)",
+});
+
+globalStyle(".conversation-usage-pane:not(.is-open) > :not(.context-pane-resize-handle)", {
+  visibility: "hidden",
+  pointerEvents: "none",
+  opacity: "0",
+  transition: "visibility 0s linear 240ms, opacity 120ms ease",
+});
+
+globalStyle(".conversation-usage-pane.is-open > :not(.context-pane-resize-handle)", {
+  visibility: "visible",
+  opacity: "1",
+  transition: "opacity 180ms ease 45ms",
+});
+
+globalStyle(".context-pane-resize-handle", {
+  position: "absolute",
+  zIndex: "4",
+  top: "0",
+  bottom: "0",
+  left: "-4px",
+  width: "8px",
+  cursor: "col-resize",
+  touchAction: "none",
+  outline: "none",
+});
+
+globalStyle(".conversation-usage-pane:not(.is-open) .context-pane-resize-handle", {
+  position: "fixed",
+  zIndex: "10",
+  top: "82px",
+  right: "0",
+  bottom: "0",
+  left: "auto",
+  width: "7px",
+  cursor: "w-resize",
+  pointerEvents: "auto",
+});
+
+globalStyle(".context-pane-resize-handle::after", {
+  position: "absolute",
+  top: "50%",
+  left: "3px",
+  width: "1px",
+  height: "min(62%, 520px)",
+  background:
+    "linear-gradient(to bottom, transparent, color-mix(in srgb, var(--muted) 70%, transparent) 48%, color-mix(in srgb, var(--muted) 70%, transparent) 52%, transparent)",
+  content: "\"\"",
+  opacity: "0",
+  transform: "translateY(-50%)",
+  transition: "opacity 120ms ease",
+});
+
+globalStyle(
+  ".context-pane-resize-handle:hover::after,\n.context-pane-resize-handle:focus-visible::after,\n.resizing-context-pane .context-pane-resize-handle::after",
+  { opacity: "1" },
+);
+
+globalStyle("body.resizing-context-pane", {
+  cursor: "col-resize",
+  userSelect: "none",
+});
+
+globalStyle("body.resizing-context-pane .conversation-usage-pane", {
+  transition: "none",
+});
+
+globalStyle(".context-pane-header", {
+  display: "flex",
+  alignItems: "center",
+  padding: "0 16px",
+  borderBottom: "1px solid var(--line)",
+});
+
+globalStyle(".context-pane-tab", {
+  display: "flex",
+  minWidth: "0",
+  height: "34px",
+  alignItems: "center",
+  gap: "9px",
+  padding: "0 6px 0 12px",
+  color: "var(--ink)",
+  borderRadius: "9px",
+  background: "var(--surface-soft)",
+});
+
+globalStyle(".context-pane-tab strong", {
+  fontSize: "12px",
+  fontWeight: "600",
+});
+
+globalStyle(".context-pane-tab button", {
+  display: "grid",
+  width: "23px",
+  height: "23px",
+  padding: "0",
+  placeItems: "center",
+  color: "var(--muted)",
+  border: "0",
+  borderRadius: "6px",
+  background: "transparent",
+  cursor: "pointer",
+});
+
+globalStyle(".context-pane-tab button:hover", {
+  color: "var(--ink)",
+  background: "color-mix(in srgb, var(--muted) 10%, transparent)",
+});
+
+globalStyle(".context-pane-tab button svg", {
+  width: "14px",
+  height: "14px",
+});
+
+globalStyle(".context-pane-mini-ring", {
+  display: "block",
+  width: "21px",
+  height: "21px",
+  borderRadius: "50%",
+  background:
+    "radial-gradient(circle, var(--surface-soft) 56%, transparent 59%), conic-gradient(var(--subtle) calc(var(--usage) * 1%), color-mix(in srgb, var(--subtle) 20%, transparent) 0)",
+});
+
+globalStyle(".conversation-usage-scroll", {
+  minHeight: "0",
+  overflow: "auto",
+  padding: "32px 36px 44px",
+});
+
+globalStyle(".context-stat-grid", {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  columnGap: "clamp(28px, 8cqw, 72px)",
+  rowGap: "25px",
+});
+
+globalStyle(".context-stat-grid > div", {
+  display: "grid",
+  minWidth: "0",
+  gap: "7px",
+});
+
+globalStyle(".context-stat-grid span", {
+  color: "var(--subtle)",
+  fontSize: "11px",
+});
+
+globalStyle(".context-stat-grid strong", {
+  overflow: "hidden",
+  fontSize: "12px",
+  fontWeight: "520",
+  fontVariantNumeric: "tabular-nums",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(".context-breakdown", {
+  marginTop: "42px",
+});
+
+globalStyle(".context-breakdown > header", {
+  display: "flex",
+  alignItems: "center",
+  gap: "8px",
+  marginBottom: "14px",
+});
+
+globalStyle(".context-breakdown > header svg", {
+  display: "none",
+  width: "14px",
+});
+
+globalStyle(".context-breakdown > header strong", {
+  fontSize: "12px",
+  fontWeight: "540",
+});
+
+globalStyle(".context-breakdown > header span", {
+  marginLeft: "auto",
+  color: "var(--subtle)",
+  fontSize: "9px",
+});
+
+globalStyle(".context-breakdown-bar", {
+  display: "flex",
+  width: "100%",
+  height: "8px",
+  overflow: "hidden",
+  borderRadius: "999px",
+  background: "var(--surface-soft)",
+});
+
+globalStyle(".context-segment", { display: "block", minWidth: "0" });
+globalStyle(".context-segment.user, .context-legend-dot.user", { background: "#23963b" });
+globalStyle(".context-segment.assistant, .context-legend-dot.assistant", { background: "#d66c27" });
+globalStyle(".context-segment.tools, .context-legend-dot.tools", { background: "#8b6612" });
+globalStyle(".context-segment.other, .context-legend-dot.other", { background: "#66686b" });
+
+globalStyle(".context-breakdown-legend", {
+  display: "grid",
+  gridTemplateColumns: "repeat(4, max-content)",
+  gap: "9px 16px",
+  marginTop: "13px",
+  color: "var(--subtle)",
+  fontSize: "9px",
+});
+
+globalStyle(".context-breakdown-legend span", {
+  display: "flex",
+  alignItems: "center",
+  gap: "6px",
+});
+
+globalStyle(".context-legend-dot", {
+  display: "block",
+  width: "7px",
+  height: "7px",
+  borderRadius: "50%",
+});
+
+globalStyle(".context-raw-messages", {
+  marginTop: "42px",
+});
+
+globalStyle(".context-raw-messages > header", {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "16px",
+  marginBottom: "13px",
+});
+
+globalStyle(".context-raw-messages > header > div", {
+  display: "flex",
+  alignItems: "center",
+  gap: "8px",
+});
+
+globalStyle(".context-raw-messages > header svg", { width: "14px", height: "14px" });
+globalStyle(".context-raw-messages > header strong", { fontSize: "12px", fontWeight: "540" });
+globalStyle(".context-raw-messages > header button", {
+  display: "flex",
+  alignItems: "center",
+  gap: "7px",
+  padding: "5px 0",
+  color: "var(--muted)",
+  border: "0",
+  background: "transparent",
+  cursor: "pointer",
+  fontSize: "10px",
+});
+
+globalStyle(".context-message-list", {
+  overflow: "hidden",
+  border: "1px solid var(--line)",
+  borderRadius: "10px",
+  background: "var(--surface)",
+});
+
+globalStyle(".context-message-list details + details", { borderTop: "1px solid var(--line)" });
+globalStyle(".context-message-list summary", {
+  display: "grid",
+  minHeight: "41px",
+  gridTemplateColumns: "16px max-content minmax(0, 1fr) max-content",
+  alignItems: "center",
+  gap: "5px",
+  padding: "0 12px",
+  cursor: "pointer",
+  listStyle: "none",
+});
+globalStyle(".context-message-list summary::-webkit-details-marker", { display: "none" });
+globalStyle(".context-message-list summary > svg", { width: "13px", color: "var(--subtle)" });
+globalStyle(".context-message-list summary strong", { fontSize: "10px", fontWeight: "560" });
+globalStyle(".context-message-list summary span", {
+  overflow: "hidden",
+  color: "var(--muted)",
+  fontSize: "9px",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+globalStyle(".context-message-list summary time", { color: "var(--subtle)", fontSize: "9px" });
+globalStyle(".context-message-list details > div", {
+  padding: "0 33px 13px",
+  color: "var(--muted)",
+  fontSize: "10px",
+  lineHeight: "1.55",
+});
+globalStyle(".context-message-list details p", { margin: "0 0 6px", whiteSpace: "pre-wrap" });
+globalStyle(".context-message-list details small", { color: "var(--subtle)", fontSize: "9px" });
+
+globalStyle(".context-stat-grid", {
+  "@container": {
+    "contextPane (max-width: 455px)": {
+      gridTemplateColumns: "minmax(0, 1fr)",
+      rowGap: "21px",
+    },
+  },
+});
+
+globalStyle(".conversation-usage-scroll", {
+  "@container": {
+    "contextPane (max-width: 455px)": { padding: "26px 25px 38px" },
+  },
+});
+
+globalStyle(".context-breakdown-legend", {
+  "@container": {
+    "contextPane (max-width: 500px)": {
+      gridTemplateColumns: "repeat(2, max-content)",
+    },
+  },
+});
+
+globalStyle(".context-message-list summary", {
+  "@container": {
+    "contextPane (max-width: 455px)": {
+      gridTemplateColumns: "16px max-content minmax(0, 1fr)",
+    },
+  },
+});
+
+globalStyle(".context-message-list summary time", {
+  "@container": {
+    "contextPane (max-width: 455px)": { display: "none" },
+  },
 });
 
 globalStyle(".tool-approval-backdrop", {

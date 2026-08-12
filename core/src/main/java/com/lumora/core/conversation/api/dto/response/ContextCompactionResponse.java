@@ -13,11 +13,7 @@ public record ContextCompactionResponse(
         return new ContextCompactionResponse(
                 value.beforeTokens(), value.afterTokens(),
                 value.throughSequence(), value.retainedFromSequence(),
-                new TokenUsageResponse(
-                        value.usage().getPromptTokens(),
-                        value.usage().getCompletionTokens(),
-                        value.usage().getTotalTokens()
-                )
+                TokenUsageResponse.fromModel(value.usage())
         );
     }
 }

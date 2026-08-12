@@ -24,7 +24,13 @@ public class ConversationMessageResponseConverter {
                 new TokenUsageResponse(
                         message.getPromptTokens(),
                         message.getCompletionTokens(),
-                        message.getTotalTokens()
+                        message.getTotalTokens(),
+                        message.getInputTokens(),
+                        message.getOutputTokens(),
+                        message.getReasoningTokens(),
+                        message.getCacheReadTokens(),
+                        message.getCacheWriteTokens(),
+                        message.isCacheMetricsAvailable()
                 ),
                 message.getActiveContextTokens(),
                 message.getDurationMs(),

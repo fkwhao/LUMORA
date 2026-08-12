@@ -5,6 +5,7 @@ from typing import Any
 from app.context.estimator import TokenEstimator
 from app.context.planner import ContextPlanner
 from app.dto.request.chat_completion_request import ChatMessageRequest
+from app.dto.response.chat_completion_response import TokenUsageResponse
 from app.execution.tool_call_executor import ToolCallExecutor
 from app.execution.tool_result_processor import ToolResultProcessor
 from app.harness.contracts import (
@@ -25,6 +26,7 @@ from app.permission.engine import PermissionEngine
 from app.permission.model import PermissionPolicy
 from app.permission.reviewer import ApprovalReviewer, ModelApprovalReviewer
 from app.prompt.prompt_assembly import PromptAssembly
+from app.provider.token_usage import add_token_usage, empty_token_usage
 from app.tool.base import ToolContext
 from app.tool.registry import ToolRegistry
 
@@ -86,7 +88,7 @@ class AgentLoopRunner:
                 for message in messages
             ],
         ]
-        prompt_tokens = completion_tokens = total_tokens = 0
+        cumulative_usage = empty_token_usage()
         active_context_tokens = 0
         resolved_model = settings.model
         active_summary = conversation_summary
@@ -202,9 +204,7 @@ class AgentLoopRunner:
                     )
             assert turn is not None
             resolved_model = turn.model
-            prompt_tokens += turn.usage.prompt_tokens
-            completion_tokens += turn.usage.completion_tokens
-            total_tokens += turn.usage.total_tokens
+            cumulative_usage = add_token_usage((cumulative_usage, turn.usage))
             active_context_tokens = turn.usage.prompt_tokens or (
                 self._token_estimator.estimate_messages(request_messages)
                 + self._token_estimator.estimate_tools(prompt.tools)
@@ -219,11 +219,7 @@ class AgentLoopRunner:
                 yield RunEvent(
                     type="usage",
                     model=resolved_model,
-                    usage=RunUsage(
-                        prompt_tokens=prompt_tokens,
-                        completion_tokens=completion_tokens,
-                        total_tokens=total_tokens,
-                    ),
+                    usage=_to_run_usage(cumulative_usage),
                     active_context_tokens=active_context_tokens,
                 )
                 yield RunEvent(type="completed", model=resolved_model)
@@ -243,11 +239,7 @@ class AgentLoopRunner:
             yield RunEvent(
                 type="usage",
                 model=resolved_model,
-                usage=RunUsage(
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    total_tokens=total_tokens,
-                ),
+                usage=_to_run_usage(cumulative_usage),
                 active_context_tokens=active_context_tokens,
             )
             request_messages.append({
@@ -299,11 +291,7 @@ class AgentLoopRunner:
             yield RunEvent(
                 type="usage",
                 model=resolved_model,
-                usage=RunUsage(
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    total_tokens=total_tokens,
-                ),
+                usage=_to_run_usage(cumulative_usage),
                 active_context_tokens=active_tokens,
             )
             should_compact, _threshold = self._context_planner.should_compact_tokens(
@@ -341,9 +329,9 @@ class AgentLoopRunner:
                             model=resolved_model,
                         )
                         continue
-                    prompt_tokens += compacted.usage.prompt_tokens
-                    completion_tokens += compacted.usage.completion_tokens
-                    total_tokens += compacted.usage.total_tokens
+                    cumulative_usage = add_token_usage(
+                        (cumulative_usage, compacted.usage)
+                    )
                     active_summary = compacted.message
                     prompt = self._prompt_supplier(active_summary)
                     request_messages = [
@@ -372,6 +360,20 @@ class AgentLoopRunner:
                         active_context_tokens=after_tokens,
                     )
         raise ValueError("工具调用轮次超过限制")
+
+
+def _to_run_usage(usage: TokenUsageResponse) -> RunUsage:
+    return RunUsage(
+        prompt_tokens=usage.prompt_tokens,
+        completion_tokens=usage.completion_tokens,
+        total_tokens=usage.total_tokens,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        reasoning_tokens=usage.reasoning_tokens,
+        cache_read_tokens=usage.cache_read_tokens,
+        cache_write_tokens=usage.cache_write_tokens,
+        cache_metrics_available=usage.cache_metrics_available,
+    )
 
 
 def _latest_user_request(messages: list[dict[str, Any]]) -> str:

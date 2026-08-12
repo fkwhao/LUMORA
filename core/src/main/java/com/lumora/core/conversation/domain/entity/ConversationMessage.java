@@ -37,6 +37,18 @@ public class ConversationMessage {
     private int completionTokens;
     @TableField("total_tokens")
     private int totalTokens;
+    @TableField("input_tokens")
+    private int inputTokens;
+    @TableField("output_tokens")
+    private int outputTokens;
+    @TableField("reasoning_tokens")
+    private int reasoningTokens;
+    @TableField("cache_read_tokens")
+    private int cacheReadTokens;
+    @TableField("cache_write_tokens")
+    private int cacheWriteTokens;
+    @TableField("cache_metrics_available")
+    private boolean cacheMetricsAvailable;
     @TableField("active_context_tokens")
     private int activeContextTokens;
     @TableField("duration_ms")
@@ -101,6 +113,8 @@ public class ConversationMessage {
         this.promptTokens = promptTokens;
         this.completionTokens = completionTokens;
         this.totalTokens = totalTokens;
+        this.inputTokens = promptTokens;
+        this.outputTokens = completionTokens;
         this.durationMs = durationMs;
         this.workLogJson = "[]";
         this.createdAt = createdAt;
@@ -189,6 +203,47 @@ public class ConversationMessage {
 
     public void setTotalTokens(int totalTokens) {
         this.totalTokens = totalTokens;
+    }
+
+    public int getInputTokens() { return inputTokens; }
+    public void setInputTokens(int inputTokens) {
+        this.inputTokens = Math.max(0, inputTokens);
+    }
+    public int getOutputTokens() { return outputTokens; }
+    public void setOutputTokens(int outputTokens) {
+        this.outputTokens = Math.max(0, outputTokens);
+    }
+    public int getReasoningTokens() { return reasoningTokens; }
+    public void setReasoningTokens(int reasoningTokens) {
+        this.reasoningTokens = Math.max(0, reasoningTokens);
+    }
+    public int getCacheReadTokens() { return cacheReadTokens; }
+    public void setCacheReadTokens(int cacheReadTokens) {
+        this.cacheReadTokens = Math.max(0, cacheReadTokens);
+    }
+    public int getCacheWriteTokens() { return cacheWriteTokens; }
+    public void setCacheWriteTokens(int cacheWriteTokens) {
+        this.cacheWriteTokens = Math.max(0, cacheWriteTokens);
+    }
+    public boolean isCacheMetricsAvailable() { return cacheMetricsAvailable; }
+    public void setCacheMetricsAvailable(boolean cacheMetricsAvailable) {
+        this.cacheMetricsAvailable = cacheMetricsAvailable;
+    }
+
+    public void applyUsageDetails(
+            int inputTokens,
+            int outputTokens,
+            int reasoningTokens,
+            int cacheReadTokens,
+            int cacheWriteTokens,
+            boolean cacheMetricsAvailable
+    ) {
+        setInputTokens(inputTokens);
+        setOutputTokens(outputTokens);
+        setReasoningTokens(reasoningTokens);
+        setCacheReadTokens(cacheReadTokens);
+        setCacheWriteTokens(cacheWriteTokens);
+        setCacheMetricsAvailable(cacheMetricsAvailable);
     }
 
     public int getActiveContextTokens() {

@@ -199,3 +199,12 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 023-conversation-token-usage-details
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V23__conversation_token_usage_details.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

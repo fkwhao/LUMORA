@@ -187,6 +187,14 @@ class ProtocolProviderBase(ABC):
                 prompt_tokens=completed_turn.usage.prompt_tokens,
                 completion_tokens=completed_turn.usage.completion_tokens,
                 total_tokens=completed_turn.usage.total_tokens,
+                input_tokens=completed_turn.usage.input_tokens,
+                output_tokens=completed_turn.usage.output_tokens,
+                reasoning_tokens=completed_turn.usage.reasoning_tokens,
+                cache_read_tokens=completed_turn.usage.cache_read_tokens,
+                cache_write_tokens=completed_turn.usage.cache_write_tokens,
+                cache_metrics_available=(
+                    completed_turn.usage.cache_metrics_available
+                ),
             ),
             active_context_tokens=(
                 completed_turn.usage.prompt_tokens or estimated_context

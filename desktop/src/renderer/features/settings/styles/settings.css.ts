@@ -1092,3 +1092,183 @@ globalStyle(".memory-reset-dialog > span", {
   color: "#d84945",
   background: "color-mix(in srgb, #d84945 10%, transparent)",
 });
+
+globalStyle(".profile-page", {
+  overflow: "auto",
+});
+
+globalStyle(".profile-content", {
+  width: "min(1040px, calc(100% - 96px))",
+  margin: "0 auto",
+  padding: "46px 0 72px",
+});
+
+globalStyle(".profile-identity", {
+  display: "grid",
+  gridTemplateColumns: "56px minmax(0, 1fr) auto",
+  alignItems: "center",
+  gap: "17px",
+  marginBottom: "34px",
+});
+
+globalStyle(".profile-avatar", {
+  display: "grid",
+  width: "56px",
+  height: "56px",
+  placeItems: "center",
+  color: "#53606e",
+  border: "1px solid #dce1e7",
+  borderRadius: "18px",
+  background: "linear-gradient(145deg, #f8f9fa, #e9edf1)",
+});
+
+globalStyle(".profile-avatar svg", { width: "27px", height: "27px" });
+globalStyle(".profile-identity h1", {
+  margin: "4px 0 3px",
+  fontSize: "23px",
+  fontWeight: "620",
+  letterSpacing: "-0.035em",
+});
+globalStyle(".profile-identity p", {
+  margin: 0,
+  color: "var(--muted)",
+  fontSize: "11px",
+});
+globalStyle(".profile-identity > button", {
+  display: "inline-flex",
+  height: "32px",
+  alignItems: "center",
+  gap: "7px",
+  padding: "0 11px",
+  color: "#606873",
+  border: "1px solid var(--line)",
+  borderRadius: "9px",
+  background: "var(--surface)",
+  cursor: "pointer",
+  fontSize: "10px",
+});
+globalStyle(".profile-identity > button svg", { width: "14px" });
+
+globalStyle(".profile-metrics", {
+  display: "grid",
+  gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
+  marginBottom: "38px",
+  border: "1px solid var(--line)",
+  borderRadius: "16px",
+  background: "color-mix(in srgb, var(--surface) 98%, var(--ink) 2%)",
+});
+globalStyle(".profile-metrics > div", {
+  display: "grid",
+  minHeight: "82px",
+  alignContent: "center",
+  justifyItems: "center",
+  gap: "6px",
+  borderRight: "1px solid var(--line)",
+});
+globalStyle(".profile-metrics > div:last-child", { borderRight: 0 });
+globalStyle(".profile-metrics strong", {
+  color: "var(--ink)",
+  fontSize: "17px",
+  fontWeight: "580",
+  fontVariantNumeric: "tabular-nums",
+});
+globalStyle(".profile-metrics span", { color: "var(--muted)", fontSize: "10px" });
+
+globalStyle(".profile-activity-card", { marginBottom: "34px" });
+globalStyle(".profile-activity-card > header", {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  marginBottom: "12px",
+});
+globalStyle(".profile-activity-card > header div", {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "7px",
+});
+globalStyle(".profile-activity-card > header svg", { width: "15px", color: "var(--muted)" });
+globalStyle(".profile-activity-card > header strong", { fontSize: "13px", fontWeight: "640" });
+globalStyle(".profile-activity-card > header span", { color: "var(--muted)", fontSize: "10px" });
+globalStyle(".token-heatmap", {
+  display: "grid",
+  gridAutoFlow: "column",
+  gridTemplateRows: "repeat(7, 11px)",
+  gridAutoColumns: "11px",
+  gap: "4px",
+  width: "100%",
+  overflow: "hidden",
+});
+globalStyle(".token-heatmap-day", {
+  display: "block",
+  width: "11px",
+  height: "11px",
+  borderRadius: "3px",
+  background: "#eef0f2",
+});
+globalStyle(".token-heatmap-day.level-1", { background: "#d8eafb" });
+globalStyle(".token-heatmap-day.level-2", { background: "#a9d4f8" });
+globalStyle(".token-heatmap-day.level-3", { background: "#68b5f2" });
+globalStyle(".token-heatmap-day.level-4", { background: "#2f95e5" });
+globalStyle(".profile-activity-card > footer", {
+  display: "flex",
+  justifyContent: "flex-end",
+  alignItems: "center",
+  gap: "5px",
+  marginTop: "10px",
+  color: "var(--subtle)",
+  fontSize: "9px",
+});
+globalStyle(".profile-activity-card > footer i", { width: "9px", height: "9px" });
+
+globalStyle(".profile-usage-grid", {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: "1px",
+  overflow: "hidden",
+  border: "1px solid var(--line)",
+  borderRadius: "14px",
+  background: "var(--line)",
+});
+globalStyle(".profile-usage-grid > div", {
+  display: "grid",
+  gap: "7px",
+  minHeight: "76px",
+  alignContent: "center",
+  padding: "0 18px",
+  background: "var(--surface)",
+});
+globalStyle(".profile-usage-grid span", { color: "var(--muted)", fontSize: "10px" });
+globalStyle(".profile-usage-grid strong", { fontSize: "13px", fontWeight: "590", fontVariantNumeric: "tabular-nums" });
+globalStyle(".profile-error", { color: "#c84640", fontSize: "11px" });
+
+globalStyle(".profile-content", {
+  "@media": {
+    "(max-width: 1120px)": {
+      width: "calc(100% - 48px)",
+    },
+  },
+});
+
+globalStyle(".profile-metrics", {
+  "@media": {
+    "(max-width: 1120px)": {
+      gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    },
+  },
+});
+
+globalStyle(".profile-metrics > div", {
+  "@media": {
+    "(max-width: 1120px)": {
+      borderBottom: "1px solid var(--line)",
+    },
+  },
+});
+
+globalStyle(".profile-usage-grid", {
+  "@media": {
+    "(max-width: 1120px)": {
+      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    },
+  },
+});

@@ -32,6 +32,28 @@ class RunUsage:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    cache_metrics_available: bool = False
+
+    def __post_init__(self) -> None:
+        if (
+            self.input_tokens == 0
+            and self.prompt_tokens > 0
+            and not self.cache_metrics_available
+            and self.cache_read_tokens == 0
+            and self.cache_write_tokens == 0
+        ):
+            object.__setattr__(self, "input_tokens", self.prompt_tokens)
+        if (
+            self.output_tokens == 0
+            and self.completion_tokens > 0
+            and self.reasoning_tokens == 0
+        ):
+            object.__setattr__(self, "output_tokens", self.completion_tokens)
 
 
 @dataclass(frozen=True, slots=True)

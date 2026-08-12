@@ -13,6 +13,8 @@ public final class ApiPathConstants {
             API_PREFIX + "/model/settings";
     public static final String MEMORY = API_PREFIX + "/memory";
     public static final String MCP = API_PREFIX + "/mcp";
+    public static final String USAGE_STATISTICS =
+            API_PREFIX + "/usage/statistics";
     public static final String MODEL_LIST = "/models";
     public static final String CHAT_COMPLETIONS =
             API_PREFIX + "/chat/completions";
