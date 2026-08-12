@@ -27,6 +27,7 @@ export interface ProviderModel {
   contextWindow: number;
   maxOutputTokens: number;
   reasoningEfforts: string[];
+  webSearchEnabled: boolean;
 }
 
 export interface SaveProviderModelInput {
@@ -34,6 +35,7 @@ export interface SaveProviderModelInput {
   contextWindow: number;
   maxOutputTokens: number;
   reasoningEfforts: string[];
+  webSearchEnabled: boolean;
 }
 
 export interface SaveModelProviderInput {
@@ -93,7 +95,7 @@ export interface ExecutionPlanStep {
 
 export interface WorkLogItem {
   itemId: string;
-  kind: "progress" | "tool" | "context" | "approval";
+  kind: "progress" | "tool" | "context" | "approval" | "search";
   status: WorkLogItemStatus;
   content?: string;
   toolCallId?: string;
@@ -148,6 +150,7 @@ export interface ChatRequestOptions {
 
 export type ChatStreamEventType =
   | "text_delta"
+  | "text_reset"
   | "reasoning_delta"
   | "progress_message"
   | "tool_started"
@@ -161,6 +164,10 @@ export type ChatStreamEventType =
   | "context_compaction_progress"
   | "context_compacted"
   | "context_compaction_failed"
+  | "web_search_started"
+  | "web_search_progress"
+  | "web_search_completed"
+  | "web_search_failed"
   | "usage"
   | "completed"
   | "failed";

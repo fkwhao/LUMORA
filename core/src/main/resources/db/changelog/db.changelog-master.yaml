@@ -190,3 +190,12 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 022-model-web-search-capability
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V22__model_web_search_capability.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

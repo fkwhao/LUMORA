@@ -10,18 +10,23 @@ class ModelConnectionSettings:
     model: str
     max_output_tokens: int | None = None
     context_window: int | None = None
+    api_format: str = "chat-completions"
+    web_search_enabled: bool = False
 
     def validate(self) -> None:
         provider_name = self.provider_name.strip()
         base_url = self.base_url.strip().rstrip("/")
         api_key = self.api_key.strip()
         model = self.model.strip()
+        api_format = self.api_format.strip().casefold()
         if not provider_name or not base_url or not api_key or not model:
             raise ValueError("模型供应商、API 地址、API Key 和模型名称均不能为空")
         if self.max_output_tokens is not None and self.max_output_tokens < 1:
             raise ValueError("最大输出 Token 必须大于 0")
         if self.context_window is not None and self.context_window < 1:
             raise ValueError("上下文窗口必须大于 0")
+        if api_format not in {"anthropic", "chat-completions", "responses"}:
+            raise ValueError("API 格式无效")
 
         parsed = urlparse(base_url)
         is_loopback_http = (

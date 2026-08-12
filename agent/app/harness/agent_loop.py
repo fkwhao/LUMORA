@@ -13,6 +13,10 @@ from app.harness.contracts import (
     TurnCompleter,
     TurnStreamer,
 )
+from app.harness.provider_event_mapper import (
+    is_web_search_event,
+    web_search_run_event,
+)
 from app.harness.run_event import RunEvent, RunUsage
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.permission.broker import ApprovalBroker
@@ -99,6 +103,7 @@ class AgentLoopRunner:
 
         for _iteration in range(20):
             content_was_streamed = False
+            stage_content_seen = False
             if self._stream_turn is None:
                 turn = await self._complete_turn(
                     settings,
@@ -121,8 +126,32 @@ class AgentLoopRunner:
                 ):
                     if turn_event.type == "reasoning_delta":
                         continue
+                    elif is_web_search_event(turn_event):
+                        yield web_search_run_event(turn_event)
                     elif turn_event.type == "tool_call_delta":
                         tool_call_seen = True
+                    elif turn_event.type in {"content_reset", "stage_content"}:
+                        if (
+                            turn_event.type == "stage_content"
+                            and turn_event.delta.strip()
+                        ):
+                            stage_content_seen = True
+                            yield RunEvent(
+                                type="progress_message",
+                                item_id=turn_event.item_id or str(uuid.uuid4()),
+                                delta=turn_event.delta.strip(),
+                                model=turn_event.model or resolved_model,
+                            )
+                        pending_content.clear()
+                        pending_chars = 0
+                        visible_content.clear()
+                        visible_chars = 0
+                        if content_was_streamed:
+                            yield RunEvent(
+                                type="text_reset",
+                                model=turn_event.model or resolved_model,
+                            )
+                        content_was_streamed = False
                     elif turn_event.type == "content_delta":
                         if content_was_streamed:
                             visible_content.append(turn_event.delta)
@@ -200,7 +229,11 @@ class AgentLoopRunner:
                 yield RunEvent(type="completed", model=resolved_model)
                 return
 
-            if turn.content.strip() and not content_was_streamed:
+            if (
+                turn.content.strip()
+                and not content_was_streamed
+                and not stage_content_seen
+            ):
                 yield RunEvent(
                     type="progress_message",
                     item_id=str(uuid.uuid4()),

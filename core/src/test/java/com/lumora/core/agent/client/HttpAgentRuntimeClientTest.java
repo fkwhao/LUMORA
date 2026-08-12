@@ -258,7 +258,8 @@ class HttpAgentRuntimeClientTest {
                         {
                           "providerName": "DeepSeek",
                           "baseUrl": "https://api.deepseek.com",
-                          "apiKey": "provider-secret"
+                          "apiKey": "provider-secret",
+                          "apiFormat": "responses"
                         }
                         """))
                 .andRespond(withSuccess("""
@@ -274,6 +275,7 @@ class HttpAgentRuntimeClientTest {
                 "DeepSeek",
                 "https://api.deepseek.com",
                 "provider-secret",
+                "responses",
                 "correlation-123"
         );
 

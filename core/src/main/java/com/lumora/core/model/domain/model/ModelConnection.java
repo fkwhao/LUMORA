@@ -11,6 +11,8 @@ public class ModelConnection {
     private final String apiKey;
     private final Integer maxOutputTokens;
     private final Integer contextWindow;
+    private final String apiFormat;
+    private final boolean webSearchEnabled;
 
     public ModelConnection(
             String providerName,
@@ -18,7 +20,8 @@ public class ModelConnection {
             String model,
             String apiKey
     ) {
-        this(providerName, baseUrl, model, apiKey, null, null);
+        this(providerName, baseUrl, model, apiKey, null, null,
+                "chat-completions", false);
     }
 
     public ModelConnection(
@@ -28,17 +31,35 @@ public class ModelConnection {
             String apiKey,
             Integer maxOutputTokens
     ) {
-        this(providerName, baseUrl, model, apiKey, maxOutputTokens, null);
+        this(providerName, baseUrl, model, apiKey, maxOutputTokens, null,
+                "chat-completions", false);
     }
 
     public ModelConnection(String providerName, String baseUrl, String model,
             String apiKey, Integer maxOutputTokens, Integer contextWindow) {
+        this(providerName, baseUrl, model, apiKey, maxOutputTokens,
+                contextWindow, "chat-completions", false);
+    }
+
+    public ModelConnection(String providerName, String baseUrl, String model,
+            String apiKey, Integer maxOutputTokens, Integer contextWindow,
+            String apiFormat) {
+        this(providerName, baseUrl, model, apiKey, maxOutputTokens,
+                contextWindow, apiFormat, false);
+    }
+
+    public ModelConnection(String providerName, String baseUrl, String model,
+            String apiKey, Integer maxOutputTokens, Integer contextWindow,
+            String apiFormat, boolean webSearchEnabled) {
         this.providerName = providerName;
         this.baseUrl = baseUrl;
         this.model = model;
         this.apiKey = apiKey;
         this.maxOutputTokens = maxOutputTokens;
         this.contextWindow = contextWindow;
+        this.apiFormat = apiFormat == null || apiFormat.isBlank()
+                ? "chat-completions" : apiFormat.trim();
+        this.webSearchEnabled = webSearchEnabled;
     }
 
     public String getProviderName() {
@@ -62,4 +83,8 @@ public class ModelConnection {
     }
 
     public Integer getContextWindow() { return contextWindow; }
+
+    public String getApiFormat() { return apiFormat; }
+
+    public boolean isWebSearchEnabled() { return webSearchEnabled; }
 }

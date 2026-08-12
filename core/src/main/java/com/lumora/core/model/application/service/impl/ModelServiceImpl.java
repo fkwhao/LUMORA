@@ -16,6 +16,7 @@ import com.lumora.core.conversation.domain.model.ChatStreamEvent;
 import com.lumora.core.conversation.domain.model.ContextCompaction;
 import com.lumora.core.model.domain.model.ModelConnection;
 import com.lumora.core.memory.domain.model.MemoryContextItem;
+import com.lumora.core.mcp.domain.model.McpServerRuntimeConfiguration;
 import com.lumora.core.model.domain.model.ModelSettings;
 import com.lumora.core.model.domain.model.ModelProvider;
 import com.lumora.core.model.domain.model.ProviderModel;
@@ -175,7 +176,7 @@ public class ModelServiceImpl implements ModelService {
             resolvedKey = secretProtector.unprotect(provider.getApiKeyCiphertext());
         }
         List<String> discovered = agentRuntimeClient.listModels(provider.getProviderName(),
-                provider.getBaseUrl(), resolvedKey,
+                provider.getBaseUrl(), resolvedKey, provider.getApiFormat(),
                 requireText(correlationId, "关联 ID"));
         Instant now = clock.instant();
         for (String modelId : discovered) {
@@ -193,7 +194,8 @@ public class ModelServiceImpl implements ModelService {
     @Transactional
     public ProviderModel createProviderModel(String providerId, String modelId,
             int contextWindow, int maxOutputTokens,
-            List<String> reasoningEfforts, String correlationId) {
+            List<String> reasoningEfforts, boolean webSearchEnabled,
+            String correlationId) {
         requireText(correlationId, "关联 ID");
         ModelConfiguration provider = requireProvider(providerId);
         String normalizedModel = requireText(modelId, "模型 ID");
@@ -205,7 +207,8 @@ public class ModelServiceImpl implements ModelService {
                 UUID.randomUUID().toString(), providerId, normalizedModel,
                 validateContextWindow(contextWindow),
                 validateMaxOutputTokens(maxOutputTokens),
-                encodeReasoningEfforts(reasoningEfforts), now, now);
+                encodeReasoningEfforts(reasoningEfforts), webSearchEnabled,
+                now, now);
         configurationModelMapper.insert(model);
         if (provider.getModelName() == null || provider.getModelName().isBlank()) {
             updateDefaultModel(provider, model);
@@ -218,6 +221,7 @@ public class ModelServiceImpl implements ModelService {
     public ProviderModel updateProviderModel(String providerId,
             String modelConfigurationId, String modelId, int contextWindow,
             int maxOutputTokens, List<String> reasoningEfforts,
+            boolean webSearchEnabled,
             String correlationId) {
         requireText(correlationId, "关联 ID");
         ModelConfiguration provider = requireProvider(providerId);
@@ -235,6 +239,7 @@ public class ModelServiceImpl implements ModelService {
         model.setContextWindow(validateContextWindow(contextWindow));
         model.setMaxOutputTokens(validateMaxOutputTokens(maxOutputTokens));
         model.setReasoningEfforts(encodeReasoningEfforts(reasoningEfforts));
+        model.setWebSearchEnabled(webSearchEnabled);
         model.setUpdatedAt(clock.instant());
         configurationModelMapper.updateById(model);
         if (oldModelId.equals(provider.getModelName())) {
@@ -279,7 +284,8 @@ public class ModelServiceImpl implements ModelService {
                 new ModelConnection(provider.getProviderName(), provider.getBaseUrl(),
                         model.getModelId(), secretProtector.unprotect(
                         provider.getApiKeyCiphertext()),
-                        model.getMaxOutputTokens()),
+                        model.getMaxOutputTokens(), model.getContextWindow(),
+                        provider.getApiFormat(), model.isWebSearchEnabled()),
                 requireText(correlationId, "关联 ID"));
         return true;
     }
@@ -531,6 +537,34 @@ public class ModelServiceImpl implements ModelService {
             String memorySummary,
             String workspacePath,
             String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<MemoryContextItem> memoryCandidates,
+            List<McpServerRuntimeConfiguration> mcpServers,
+            Consumer<ChatStreamEvent> eventConsumer
+    ) {
+        if (messages == null || messages.isEmpty()) {
+            throw new IllegalArgumentException("对话消息不能为空");
+        }
+        agentRuntimeClient.streamChat(
+                List.copyOf(messages), requireConnection(model), correlationId,
+                reasoningEffort, memorySummary, workspacePath, permissionMode,
+                taskId, conversationSummary, memoryCandidates == null
+                        ? List.of() : List.copyOf(memoryCandidates),
+                mcpServers == null ? List.of() : List.copyOf(mcpServers),
+                eventConsumer
+        );
+    }
+
+    @Override
+    public void streamChat(
+            List<ChatMessage> messages,
+            String correlationId,
+            String model,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
             Consumer<ChatStreamEvent> eventConsumer
     ) {
         if (messages == null || messages.isEmpty()) {
@@ -621,10 +655,13 @@ public class ModelServiceImpl implements ModelService {
                 ),
                 modelConfiguration == null
                         ? null : modelConfiguration.getMaxOutputTokens(),
-                modelConfiguration == null
-                        ? configuration.getContextWindow()
-                        : modelConfiguration.getContextWindow()
-        );
+                  modelConfiguration == null
+                          ? configuration.getContextWindow()
+                          : modelConfiguration.getContextWindow(),
+                  configuration.getApiFormat(),
+                  modelConfiguration != null
+                          && modelConfiguration.isWebSearchEnabled()
+          );
     }
 
     private ModelConfiguration loadConfiguration() {
@@ -701,7 +738,8 @@ public class ModelServiceImpl implements ModelService {
         return new ProviderModel(model.getModelConfigurationModelId(),
                 model.getModelId(), model.getContextWindow(),
                 model.getMaxOutputTokens(),
-                decodeReasoningEfforts(model.getReasoningEfforts()));
+                decodeReasoningEfforts(model.getReasoningEfforts()),
+                model.isWebSearchEnabled());
     }
 
     private void updateDefaultModel(ModelConfiguration provider,

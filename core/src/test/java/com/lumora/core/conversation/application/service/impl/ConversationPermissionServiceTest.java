@@ -7,6 +7,7 @@ import com.lumora.core.conversation.domain.model.ChatStreamEventType;
 import com.lumora.core.conversation.application.service.ArtifactService;
 import com.lumora.core.model.application.service.ModelService;
 import com.lumora.core.memory.application.service.MemoryService;
+import com.lumora.core.mcp.application.service.McpService;
 import com.lumora.core.conversation.application.support.ConversationContextSummaryService;
 import com.lumora.core.conversation.application.support.ConversationPersistenceService;
 import com.lumora.core.conversation.application.support.ConversationRunContext;
@@ -73,7 +74,7 @@ class ConversationPermissionServiceTest {
         doAnswer(invocation -> {
             @SuppressWarnings("unchecked")
             java.util.function.Consumer<ChatStreamEvent> consumer =
-                    invocation.getArgument(10);
+                    invocation.getArgument(11);
             consumer.accept(approvalRequested());
             approvalPublished.countDown();
             assertTrue(approvalDecided.await(5, TimeUnit.SECONDS));
@@ -97,6 +98,7 @@ class ConversationPermissionServiceTest {
                 eq("task-1"),
                 nullable(String.class),
                 anyList(),
+                anyList(),
                 any()
         );
         doAnswer(invocation -> {
@@ -107,6 +109,8 @@ class ConversationPermissionServiceTest {
                 anyString(),
                 anyString()
         );
+        McpService mcpService = mock(McpService.class);
+        when(mcpService.listEnabledServers()).thenReturn(List.of());
         ConversationServiceImpl service = new ConversationServiceImpl(
                 persistence,
                 modelService,
@@ -114,7 +118,8 @@ class ConversationPermissionServiceTest {
                 memoryCoordinator,
                 mock(ConversationContextSummaryService.class),
                 mock(ArtifactService.class),
-                mock(MemoryService.class)
+                mock(MemoryService.class),
+                mcpService
         );
 
         service.streamMessage(

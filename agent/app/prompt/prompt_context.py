@@ -9,6 +9,7 @@ class PromptContext:
     workspace_path: str | None = None
     project_instructions: tuple[str, ...] = ()
     available_tools: tuple[str, ...] = ()
+    mcp_tool_names: tuple[str, ...] = ()
     tool_definitions: tuple[dict[str, Any], ...] = ()
     memory_summary: str | None = None
     user_memory: tuple[str, ...] = ()

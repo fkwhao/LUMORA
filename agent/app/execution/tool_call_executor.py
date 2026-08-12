@@ -88,6 +88,14 @@ class ToolCallExecutor:
         try:
             tool, arguments = self._registry.validate(call.name, arguments)
             title = tool.display_title(arguments)
+            policy_workspace = (
+                tool_context.workspace_path
+                if tool_context.workspace_scoped
+                else None
+            )
+            workspace_metadata = (
+                str(policy_workspace) if policy_workspace is not None else ""
+            )
             call_signature = _tool_call_signature(call.name, arguments)
             if call_signature in self._blocked_call_signatures:
                 result_text = _automatic_block_result(
@@ -106,13 +114,13 @@ class ToolCallExecutor:
                     metadata={
                         "failureKind": "approval_retry_blocked",
                         "toolExecutionState": "not_started",
-                        "workspacePath": str(tool_context.workspace_path),
+                        "workspacePath": workspace_metadata,
                     },
                     model=model,
                 ), result_text
                 return
             effective_policy = self._permission_config_store.load_policy(
-                tool_context.workspace_path,
+                policy_workspace,
                 permission_policy,
             )
             evaluation = self._permission_engine.evaluate(
@@ -126,7 +134,7 @@ class ToolCallExecutor:
                 "permissionReason": evaluation.reason,
                 "riskLevel": evaluation.risk_level,
                 "reversible": evaluation.reversible,
-                "workspacePath": str(tool_context.workspace_path),
+                "workspacePath": workspace_metadata,
             }
             if evaluation.decision is PermissionDecision.DENY:
                 self._blocked_call_signatures.add(call_signature)
@@ -222,7 +230,7 @@ class ToolCallExecutor:
                             tool_name=call.name,
                             tool_category=tool.category.value,
                             arguments=arguments,
-                            workspace_path=tool_context.workspace_path,
+                            workspace_path=policy_workspace,
                             user_request=user_request,
                             assistant_context=assistant_context,
                             permission_layer=evaluation.layer,
@@ -354,9 +362,10 @@ class ToolCallExecutor:
                     if (
                         approval_decision is ApprovalDecision.ALLOW_ALWAYS
                         and not evaluation.grants_external_path
+                        and policy_workspace is not None
                     ):
                         self._permission_config_store.add_local_allow(
-                            tool_context.workspace_path,
+                            policy_workspace,
                             tool,
                             arguments,
                         )

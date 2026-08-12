@@ -18,6 +18,7 @@ public class AgentPromptContextRequest {
     private final String permissionMode;
     private final String taskId;
     private final String conversationSummary;
+    private final List<AgentMcpServerRequest> mcpServers;
 
     public AgentPromptContextRequest(
             String workspacePath,
@@ -71,6 +72,22 @@ public class AgentPromptContextRequest {
             String conversationSummary,
             List<AgentMemoryContextRequest> memoryCandidates
     ) {
+        this(workspacePath, projectInstructions, availableTools,
+                memorySummary, permissionMode, taskId, conversationSummary,
+                memoryCandidates, List.of());
+    }
+
+    public AgentPromptContextRequest(
+            String workspacePath,
+            List<String> projectInstructions,
+            List<String> availableTools,
+            String memorySummary,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<AgentMemoryContextRequest> memoryCandidates,
+            List<AgentMcpServerRequest> mcpServers
+    ) {
         this.workspacePath = workspacePath;
         this.projectInstructions = List.copyOf(projectInstructions);
         this.availableTools = List.copyOf(availableTools);
@@ -79,6 +96,7 @@ public class AgentPromptContextRequest {
         this.permissionMode = normalizePermissionMode(permissionMode);
         this.taskId = taskId;
         this.conversationSummary = conversationSummary;
+        this.mcpServers = List.copyOf(mcpServers);
     }
 
     public static AgentPromptContextRequest defaultContext() {
@@ -124,17 +142,9 @@ public class AgentPromptContextRequest {
         return new AgentPromptContextRequest(
                 workspacePath.trim(),
                 List.of(),
-                List.of(
-                        "update_plan",
-                        "list_files",
-                        "search_in_file",
-                        "read_file",
-                        "apply_patch",
-                        "write_file",
-                        "shell_command",
-                        "artifact_read",
-                        "artifact_search"
-                ),
+                // 空列表表示采用 Agent ToolRegistry 的工作区默认工具集；
+                // 非空列表仅用于显式收窄，避免 Java 与 Python 重复维护工具名。
+                List.of(),
                 memorySummary,
                 permissionMode
         );
@@ -159,6 +169,19 @@ public class AgentPromptContextRequest {
             String conversationSummary,
             List<AgentMemoryContextRequest> memoryCandidates
     ) {
+        return forWorkspace(memorySummary, workspacePath, permissionMode,
+                taskId, conversationSummary, memoryCandidates, List.of());
+    }
+
+    public static AgentPromptContextRequest forWorkspace(
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<AgentMemoryContextRequest> memoryCandidates,
+            List<AgentMcpServerRequest> mcpServers
+    ) {
         AgentPromptContextRequest base = forWorkspace(
                 memorySummary, workspacePath, permissionMode
         );
@@ -170,7 +193,8 @@ public class AgentPromptContextRequest {
                 permissionMode,
                 taskId,
                 conversationSummary,
-                memoryCandidates
+                memoryCandidates,
+                mcpServers
         );
     }
 
@@ -201,6 +225,8 @@ public class AgentPromptContextRequest {
     public String getTaskId() { return taskId; }
 
     public String getConversationSummary() { return conversationSummary; }
+
+    public List<AgentMcpServerRequest> getMcpServers() { return mcpServers; }
 
     private static String normalizePermissionMode(String value) {
         String normalized = value == null || value.isBlank()

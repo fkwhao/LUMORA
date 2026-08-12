@@ -8,6 +8,8 @@ import com.lumora.core.conversation.domain.model.ChatStreamEvent;
 import com.lumora.core.conversation.domain.model.ContextCompaction;
 import com.lumora.core.model.domain.model.ModelConnection;
 import com.lumora.core.memory.domain.model.MemoryContextItem;
+import com.lumora.core.mcp.domain.model.McpConnectionTest;
+import com.lumora.core.mcp.domain.model.McpServerRuntimeConfiguration;
 
 import java.util.List;
 import java.util.function.Consumer;
@@ -16,6 +18,13 @@ import java.util.function.Consumer;
  * Service 调用 Python Agent 的稳定接口，业务层不依赖 HTTP DTO。
  */
 public interface AgentRuntimeClient {
+
+    default McpConnectionTest testMcpServer(
+            McpServerRuntimeConfiguration configuration,
+            String correlationId
+    ) {
+        throw new UnsupportedOperationException("当前 Agent Runtime 不支持 MCP");
+    }
 
     void decideToolApproval(
             String approvalId,
@@ -29,6 +38,16 @@ public interface AgentRuntimeClient {
             String apiKey,
             String correlationId
     );
+
+    default List<String> listModels(
+            String providerName,
+            String baseUrl,
+            String apiKey,
+            String apiFormat,
+            String correlationId
+    ) {
+        return listModels(providerName, baseUrl, apiKey, correlationId);
+    }
 
     List<AgentMemoryCandidate> extractMemories(
             String userMessage,
@@ -170,5 +189,24 @@ public interface AgentRuntimeClient {
         streamChat(messages, connection, correlationId, reasoningEffort,
                 memorySummary, workspacePath, permissionMode, taskId,
                 conversationSummary, eventConsumer);
+    }
+
+    default void streamChat(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String correlationId,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<MemoryContextItem> memoryCandidates,
+            List<McpServerRuntimeConfiguration> mcpServers,
+            Consumer<ChatStreamEvent> eventConsumer
+    ) {
+        streamChat(messages, connection, correlationId, reasoningEffort,
+                memorySummary, workspacePath, permissionMode, taskId,
+                conversationSummary, memoryCandidates, eventConsumer);
     }
 }

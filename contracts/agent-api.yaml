@@ -185,6 +185,26 @@ paths:
               schema: { $ref: "#/components/schemas/MemoryExtractionResponse" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "502": { description: 上游模型调用失败 }
+  /api/v1/mcp/test:
+    post:
+      operationId: testMcpServer
+      description: 对远程 Streamable HTTP MCP Server 执行初始化、能力发现和可选 echo 测试。
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/McpServer" }
+      responses:
+        "200":
+          description: MCP Server 连接与工具发现成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/McpTestResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "502": { description: MCP Server 连接或协议调用失败 }
   /api/v1/tool-approvals/{approvalId}:
     post:
       operationId: decideToolApproval
@@ -331,6 +351,7 @@ components:
         availableTools:
           type: array
           items: { type: string }
+          description: 工作区存在且列表为空时采用 Python ToolRegistry 的默认工具集；非空时仅用于收窄。
         memorySummary:
           type: string
         memoryCandidates:
@@ -353,6 +374,60 @@ components:
           maxItems: 200
           items:
             $ref: "#/components/schemas/PermissionRule"
+        mcpServers:
+          type: array
+          maxItems: 20
+          description: 当前请求可使用的远程 Streamable HTTP MCP Server；Python 不持久化。
+          items:
+            $ref: "#/components/schemas/McpServer"
+    McpServer:
+      type: object
+      additionalProperties: false
+      required: [serverId, name, url]
+      properties:
+        serverId:
+          type: string
+          pattern: '^[A-Za-z0-9._-]+$'
+          maxLength: 80
+        name: { type: string, minLength: 1, maxLength: 120 }
+        enabled: { type: boolean, default: true }
+        url:
+          type: string
+          maxLength: 2000
+          pattern: '^https?://'
+        authType:
+          type: string
+          enum: [none, bearer, api_key, custom_header]
+          default: none
+        headerName:
+          type: string
+          maxLength: 100
+          pattern: "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"
+        credential:
+          type: string
+          maxLength: 4096
+          writeOnly: true
+    McpTestResponse:
+      type: object
+      additionalProperties: false
+      required: [connected, serverName, serverVersion, tools, resources, resourceTemplates, prompts]
+      properties:
+        connected: { type: boolean }
+        serverName: { type: string }
+        serverVersion: { type: string }
+        tools:
+          type: array
+          items: { type: string }
+        resources:
+          type: array
+          items: { type: string }
+        resourceTemplates:
+          type: array
+          items: { type: string }
+        prompts:
+          type: array
+          items: { type: string }
+        echoOutput: { type: string }
     PermissionRule:
       type: object
       additionalProperties: false
@@ -478,6 +553,14 @@ components:
           maxLength: 2048
           writeOnly: true
           description: 仅在本机 Java 到 Python 的当前请求内使用，不落盘。
+        apiFormat:
+          type: string
+          enum: [anthropic, chat-completions, responses]
+          default: chat-completions
+        webSearchEnabled:
+          type: boolean
+          default: false
+          description: 是否允许当前模型使用供应商托管的 Web Search 工具。
         maxOutputTokens:
           type: integer
           minimum: 1
@@ -523,12 +606,17 @@ components:
           type: string
           enum:
             - text_delta
+            - text_reset
             - reasoning_delta
             - progress_message
             - context_compaction_started
             - context_compaction_progress
             - context_compacted
             - context_compaction_failed
+            - web_search_started
+            - web_search_progress
+            - web_search_completed
+            - web_search_failed
             - tool_started
             - tool_completed
             - tool_failed

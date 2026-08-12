@@ -1,0 +1,83 @@
+versionCommands:
+  - cargo
+  - dotnet
+  - git
+  - go
+  - gradle
+  - java
+  - mvn
+  - node
+  - npm
+  - npx
+  - pnpm
+  - py
+  - pytest
+  - python
+  - ruff
+  - yarn
+
+readOnlyCommands:
+  - cat
+  - dir
+  - find
+  - get-childitem
+  - get-command
+  - get-content
+  - get-date
+  - get-item
+  - get-location
+  - get-process
+  - grep
+  - head
+  - ls
+  - pwd
+  - resolve-path
+  - rg
+  - select-string
+  - stat
+  - tail
+  - test-path
+  - type
+  - wc
+  - where
+  - which
+  - write-output
+
+readOnlyBlockedOptions:
+  find: [-delete, -exec, -execdir, -fls, -fprint, -fprintf, -ok, -okdir]
+  rg: [--generate, --pre, --pre-glob]
+
+git:
+  readOnlySubcommands:
+    - describe
+    - diff
+    - log
+    - ls-files
+    - ls-tree
+    - rev-parse
+    - show
+    - status
+  blockedOptions:
+    - --config-env
+    - --exec-path
+    - --ext-diff
+    - --git-dir
+    - --no-index
+    - --output
+    - --paginate
+    - --work-tree
+    - -c
+    - -p
+
+validation:
+  projectScripts: [build, check, lint, test, typecheck, verify]
+  mavenPhases: [checkstyle:check, compile, package, test, validate, verify]
+  gradleTasks: [assemble, build, check, test]
+  cargoTasks: [build, check, clippy, test]
+  goTasks: [build, test, vet]
+  dotnetTasks: [build, test]
+  blockedOptions:
+    pytest: [--basetemp, --cache-clear, --pyargs, -p]
+    ruff: [--add-noqa, --fix, --fix-only, --unsafe-fixes]
+    mypy: [--install-types]
+    go: [-exec, -toolexec]

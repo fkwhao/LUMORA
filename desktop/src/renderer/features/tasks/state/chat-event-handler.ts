@@ -55,7 +55,11 @@ export function applyChatEvent(
     event.type === "context_compaction_started" ||
     event.type === "context_compaction_progress" ||
     event.type === "context_compacted" ||
-    event.type === "context_compaction_failed"
+    event.type === "context_compaction_failed" ||
+    event.type === "web_search_started" ||
+    event.type === "web_search_progress" ||
+    event.type === "web_search_completed" ||
+    event.type === "web_search_failed"
   ) {
     const messages = [...get().messages];
     const last = messages.at(-1);
@@ -85,6 +89,19 @@ export function applyChatEvent(
       messages[messages.length - 1] = {
         ...last,
         content: last.content + event.delta,
+        model: event.model || last.model,
+      };
+      set({ messages });
+    }
+    return;
+  }
+  if (event.type === "text_reset") {
+    const messages = [...get().messages];
+    const last = messages.at(-1);
+    if (last?.role === "assistant") {
+      messages[messages.length - 1] = {
+        ...last,
+        content: "",
         model: event.model || last.model,
       };
       set({ messages });

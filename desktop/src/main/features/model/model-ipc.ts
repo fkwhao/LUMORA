@@ -235,6 +235,7 @@ function validateProviderModel(input: SaveProviderModelInput): SaveProviderModel
     contextWindow,
     maxOutputTokens,
     reasoningEfforts,
+    webSearchEnabled: input.webSearchEnabled === true,
   };
 }
 

@@ -10,6 +10,7 @@ class ChatStreamEventResponse(BaseModel):
 
     type: Literal[
         "text_delta",
+        "text_reset",
         "reasoning_delta",
         "progress_message",
         "tool_started",
@@ -23,6 +24,10 @@ class ChatStreamEventResponse(BaseModel):
         "context_compaction_progress",
         "context_compacted",
         "context_compaction_failed",
+        "web_search_started",
+        "web_search_progress",
+        "web_search_completed",
+        "web_search_failed",
         "usage",
         "completed",
         "failed",

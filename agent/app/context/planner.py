@@ -11,6 +11,15 @@ MIN_GROWTH_RESERVE = 4_000
 MAX_GROWTH_RESERVE = 20_000
 MIN_SUMMARY_OUTPUT = 4_000
 MAX_SUMMARY_OUTPUT = 20_000
+DEFAULT_CONTEXT_WINDOW = 128_000
+
+
+def summary_output_tokens(settings: ModelConnectionSettings) -> int:
+    context_window = settings.context_window or DEFAULT_CONTEXT_WINDOW
+    return min(
+        MAX_SUMMARY_OUTPUT,
+        max(MIN_SUMMARY_OUTPUT, context_window // 10),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,12 +63,9 @@ class ContextPlanner:
         settings: ModelConnectionSettings,
         estimated_tokens: int,
     ) -> int:
-        context_window = settings.context_window or 128_000
+        context_window = settings.context_window or DEFAULT_CONTEXT_WINDOW
         normal_output = settings.max_output_tokens or min(8_000, context_window // 8)
-        summary_output = min(
-            MAX_SUMMARY_OUTPUT,
-            max(MIN_SUMMARY_OUTPUT, context_window // 10),
-        )
+        summary_output = summary_output_tokens(settings)
         growth_reserve = min(
             MAX_GROWTH_RESERVE,
             max(MIN_GROWTH_RESERVE, context_window // 16),

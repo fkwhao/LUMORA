@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ChatMessageRequest(BaseModel):
@@ -22,6 +22,9 @@ class ModelConnectionRequest(BaseModel):
     base_url: str = Field(alias="baseUrl", min_length=1, max_length=500)
     model: str = Field(min_length=1, max_length=160)
     api_key: str = Field(alias="apiKey", min_length=1, max_length=2048)
+    api_format: Literal[
+        "anthropic", "chat-completions", "responses"
+    ] = Field(default="chat-completions", alias="apiFormat")
     max_output_tokens: int | None = Field(
         default=None,
         alias="maxOutputTokens",
@@ -33,6 +36,10 @@ class ModelConnectionRequest(BaseModel):
         alias="contextWindow",
         ge=1,
         le=10_000_000,
+    )
+    web_search_enabled: bool = Field(
+        default=False,
+        alias="webSearchEnabled",
     )
 
 
@@ -58,6 +65,55 @@ class MemoryContextRequest(BaseModel):
         default=None, alias="lastUsedTime"
     )
     updated_time: datetime = Field(alias="updatedTime")
+
+
+class McpServerRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    server_id: str = Field(
+        alias="serverId",
+        min_length=1,
+        max_length=80,
+        pattern=r"^[A-Za-z0-9._-]+$",
+    )
+    name: str = Field(min_length=1, max_length=120)
+    enabled: bool = True
+    url: str = Field(max_length=2000)
+    auth_type: Literal[
+        "none", "bearer", "api_key", "custom_header"
+    ] = Field(default="none", alias="authType")
+    header_name: str | None = Field(
+        default=None,
+        alias="headerName",
+        max_length=100,
+        pattern=r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$",
+    )
+    credential: str | None = Field(default=None, max_length=4096, repr=False)
+
+    @model_validator(mode="after")
+    def validate_transport_fields(self) -> "McpServerRequest":
+        if not self.url.strip().startswith(("http://", "https://")):
+            raise ValueError("远程 MCP Server 必须配置 HTTP(S) 地址")
+        if self.auth_type in {"api_key", "custom_header"} and not self.header_name:
+            raise ValueError("API Key 或自定义 Header 认证必须配置 Header 名称")
+        if self.auth_type != "none" and not self.credential:
+            raise ValueError("静态认证必须提供凭据")
+        if self.header_name and self.header_name.casefold() in {
+            "accept",
+            "authorization",
+            "connection",
+            "content-length",
+            "content-type",
+            "cookie",
+            "host",
+            "mcp-protocol-version",
+            "mcp-session-id",
+            "proxy-authorization",
+            "set-cookie",
+            "transfer-encoding",
+        }:
+            raise ValueError("该 Header 名称由 MCP 传输层保留")
+        return self
 
 
 class PromptContextRequest(BaseModel):
@@ -101,6 +157,11 @@ class PromptContextRequest(BaseModel):
         default_factory=list,
         alias="permissionRules",
         max_length=200,
+    )
+    mcp_servers: list[McpServerRequest] = Field(
+        default_factory=list,
+        alias="mcpServers",
+        max_length=20,
     )
 
 

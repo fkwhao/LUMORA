@@ -46,6 +46,17 @@ class PromptBuilderTest(unittest.TestCase):
         self.assertIn("当前未向模型注册任何可调用工具", prompt)
         self.assertNotIn("shell.execute", prompt)
 
+    def test_mcp_tools_are_presented_as_optional_capabilities(self) -> None:
+        prompt = PromptBuilder().build(PromptContext(
+            available_tools=("file.read", "mcp__remote__echo"),
+            mcp_tool_names=("mcp__remote__echo",),
+        )).system_prompt
+
+        self.assertIn("file.read", prompt)
+        self.assertIn("已连接 1 个可选 MCP 工具", prompt)
+        self.assertIn("连接只表示能力可用，不表示本轮需要调用", prompt)
+        self.assertNotIn("  - mcp__remote__echo", prompt)
+
     def test_routes_memory_and_tools_to_api_fields(self) -> None:
         assembly = PromptBuilder().build(
             PromptContext(

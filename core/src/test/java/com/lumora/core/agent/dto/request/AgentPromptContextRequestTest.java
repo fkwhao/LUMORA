@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AgentPromptContextRequestTest {
 
     @Test
-    void exposesDynamicPlanToolForWorkspaceRuns() {
+    void delegatesWorkspaceDefaultToolsToPythonRegistry() {
         AgentPromptContextRequest context =
                 AgentPromptContextRequest.forWorkspace(
                         null,
@@ -15,6 +15,6 @@ class AgentPromptContextRequestTest {
                         "request_approval"
                 );
 
-        assertTrue(context.getAvailableTools().contains("update_plan"));
+        assertTrue(context.getAvailableTools().isEmpty());
     }
 }

@@ -52,6 +52,25 @@ describe("chat event batcher", () => {
     expect(dispatched[0]?.delta).toBe("完成");
   });
 
+  it("flushes pending text before resetting a provisional answer", () => {
+    vi.useFakeTimers();
+    const dispatched: ChatStreamEvent[] = [];
+    const batcher = createChatEventBatcher((event) => dispatched.push(event));
+
+    batcher.push(textEvent("继续检索。"));
+    batcher.push({
+      type: "text_reset",
+      delta: "",
+      model: "test-model",
+      errorMessage: "",
+    });
+
+    expect(dispatched.map((event) => event.type)).toEqual([
+      "text_delta",
+      "text_reset",
+    ]);
+  });
+
   it("drops non-visible reasoning deltas", () => {
     const dispatch = vi.fn();
     const batcher = createChatEventBatcher(dispatch);

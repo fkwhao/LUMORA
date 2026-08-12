@@ -11,6 +11,35 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ConversationStreamAccumulatorTest {
 
     @Test
+    void resetsProvisionalAnswerBeforePersistingFinalText() {
+        ConversationStreamAccumulator accumulator =
+                new ConversationStreamAccumulator();
+        accumulator.accept(new ChatStreamEvent(
+                ChatStreamEventType.TEXT_DELTA,
+                "继续检索。",
+                "model",
+                null,
+                ""
+        ));
+        accumulator.accept(new ChatStreamEvent(
+                ChatStreamEventType.TEXT_RESET,
+                "",
+                "model",
+                null,
+                ""
+        ));
+        accumulator.accept(new ChatStreamEvent(
+                ChatStreamEventType.TEXT_DELTA,
+                "最终答案。",
+                "model",
+                null,
+                ""
+        ));
+
+        assertThat(accumulator.getContent()).isEqualTo("最终答案。");
+    }
+
+    @Test
     void replacesLiveApprovalReviewWithItsPersistedResult() {
         ConversationStreamAccumulator accumulator =
                 new ConversationStreamAccumulator();

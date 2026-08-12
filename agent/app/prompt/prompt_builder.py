@@ -127,12 +127,20 @@ class PromptBuilder:
         if context.workspace_path:
             lines.append(f"- 当前工作区：{context.workspace_path}")
 
-        if context.available_tools:
+        mcp_names = set(context.mcp_tool_names)
+        local_names = tuple(
+            name for name in context.available_tools if name not in mcp_names
+        )
+        if local_names:
             lines.append("- 当前可用工具：")
-            lines.extend(
-                f"  - {tool_name}" for tool_name in context.available_tools
+            lines.extend(f"  - {tool_name}" for tool_name in local_names)
+        if context.mcp_tool_names:
+            lines.append(
+                f"- 已连接 {len(context.mcp_tool_names)} 个可选 MCP 工具。"
+                "连接只表示能力可用，不表示本轮需要调用；仅在当前请求确实需要"
+                "相应远程能力时选择。"
             )
-        else:
+        if not context.available_tools:
             lines.append("- 当前未向模型注册任何可调用工具。")
 
         return "\n".join(lines)

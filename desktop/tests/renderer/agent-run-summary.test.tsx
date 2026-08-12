@@ -202,7 +202,7 @@ describe("AgentRunSummary", () => {
     expect(screen.queryByText(/正在处理 0s/)).not.toBeInTheDocument();
   });
 
-  it("keeps the summary node stable and folds details before the answer starts", () => {
+  it("keeps live details stable through provisional text and folds on completion", () => {
     const workLog = [
       {
         itemId: "progress-stable",
@@ -223,7 +223,27 @@ describe("AgentRunSummary", () => {
     );
     expect(document.querySelector(".agent-run-events")).toHaveAttribute(
       "aria-hidden",
-      "true",
+      "false",
+    );
+
+    rerender(
+      <AgentRunSummary
+        running
+        workLog={[
+          ...workLog,
+          {
+            itemId: "hosted-search-after-stage",
+            kind: "search",
+            status: "running",
+            toolName: "web_search",
+            arguments: { query: "official docs" },
+          },
+        ]}
+      />,
+    );
+    expect(document.querySelector(".agent-run-events")).toHaveAttribute(
+      "aria-hidden",
+      "false",
     );
 
     rerender(
@@ -236,6 +256,10 @@ describe("AgentRunSummary", () => {
     );
     expect(screen.getByRole("button", { name: /已处理 2s/ })).toBe(
       runningSummary,
+    );
+    expect(document.querySelector(".agent-run-events")).toHaveAttribute(
+      "aria-hidden",
+      "true",
     );
   });
 
@@ -276,6 +300,61 @@ describe("AgentRunSummary", () => {
     expect(onReviewChange).toHaveBeenCalledWith(
       expect.objectContaining({ itemId: "patch-1" }),
     );
+  });
+
+  it("keeps hosted web search inside the collapsed tool group and links real sources", () => {
+    render(
+      <AgentRunSummary
+        durationMs={2_000}
+        running={false}
+        workLog={[{
+          itemId: "hosted-search-1",
+          kind: "search",
+          status: "completed",
+          toolName: "web_search",
+          arguments: { query: "Responses API web search" },
+          metadata: {
+            sources: [{
+              title: "Web search guide",
+              url: "https://developers.openai.com/api/docs/guides/tools-web-search",
+            }],
+          },
+        }]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /已处理 2s/ }));
+    expect(screen.getByText("正在搜索网络资料")).toBeVisible();
+    expect(document.querySelector(".tool-call-list"))
+      .toHaveAttribute("aria-hidden", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "搜索网络资料" }));
+    expect(screen.getByText(/已搜索/)).toBeVisible();
+    expect(screen.getByRole("link", { name: /Web search guide/ }))
+      .toHaveAttribute(
+        "href",
+        "https://developers.openai.com/api/docs/guides/tools-web-search",
+      );
+  });
+
+  it("expands hosted web search calls while the search is running", () => {
+    render(
+      <AgentRunSummary
+        running
+        workLog={[{
+          itemId: "hosted-search-running",
+          kind: "search",
+          status: "running",
+          toolName: "web_search",
+          arguments: { query: "opencode official GUI" },
+        }]}
+      />,
+    );
+
+    expect(screen.getByText("正在搜索网络资料")).toBeVisible();
+    expect(screen.getByRole("button", { name: "搜索网络资料" }))
+      .toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(/opencode official GUI/)).toBeVisible();
   });
 
   it("explains reviewer fallback and does not mistake a parent test folder for tests", () => {

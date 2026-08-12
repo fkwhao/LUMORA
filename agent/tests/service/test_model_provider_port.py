@@ -6,12 +6,14 @@ from app.harness.ports.model_provider import (
     ModelProviderPort,
 )
 from app.provider.openai_compatible_provider import OpenAICompatibleProvider
+from app.provider.routing_provider import RoutingModelProvider
 from app.service.chat_service import ChatService
 from app.service.memory_extraction_service import MemoryExtractionService
 
 
 def test_openai_compatible_provider_implements_model_provider_port() -> None:
     assert isinstance(OpenAICompatibleProvider(), ModelProviderPort)
+    assert isinstance(RoutingModelProvider(), ModelProviderPort)
 
 
 def test_runtime_layers_depend_on_provider_ports() -> None:

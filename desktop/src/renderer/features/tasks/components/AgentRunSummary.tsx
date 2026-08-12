@@ -21,6 +21,7 @@ import type { WorkLogItem } from "../../../../shared/model-contract";
 import type { TaskEvent } from "../../../../shared/task-contract";
 import { isPlanWorkLogItem } from "../../../../shared/execution-plan";
 import { ProcessingLattice } from "./ProcessingLattice";
+import { WebSearch } from "./WebSearch";
 
 interface AgentRunSummaryProps {
   startedAt?: number;
@@ -78,9 +79,13 @@ export const AgentRunSummary = memo(function AgentRunSummary({
   }, [durationMs, running, startedAt]);
 
   useLayoutEffect(() => {
-    if (running && !answerStarted) {
+    // Keep the live work log mounted for the entire run. Hosted-search
+    // protocols can emit a provisional text item and then continue searching;
+    // treating that text as a committed answer used to collapse the work log
+    // for a moment and made the whole processing area appear to refresh.
+    if (running) {
       setExpanded(true);
-    } else if (running && answerStarted) {
+    } else if (answerStarted) {
       setExpanded(false);
     }
   }, [answerStarted, running]);
@@ -183,7 +188,14 @@ function ToolGroupEntry({
   onReviewChange?: (item: WorkLogItem) => void;
   onOpenArtifact?: (artifactId: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const searchOnly = items.length > 0 && items.every(
+    (item) => item.kind === "search",
+  );
+  const [expanded, setExpanded] = useState(running && searchOnly);
+
+  useEffect(() => {
+    if (running && searchOnly) setExpanded(true);
+  }, [running, searchOnly]);
 
   return (
     <section className={`tool-group${expanded ? " expanded" : ""}`}>
@@ -202,7 +214,9 @@ function ToolGroupEntry({
       </button>
       <div className="tool-call-list" aria-hidden={!expanded}>
         <div className="tool-call-list-inner">
-          {items.map((item) => (
+          {items.map((item) => item.kind === "search" ? (
+            <WebSearch item={item} key={item.itemId} />
+          ) : (
             <ToolCallItem
               item={item}
               key={item.itemId}
@@ -354,6 +368,7 @@ function phaseTitle(content?: string): string {
 }
 
 function fallbackPhaseTitle(item: WorkLogItem): string {
+  if (item.kind === "search") return "正在搜索网络资料";
   if (item.kind === "context") return "整理上下文";
   if (item.toolName === "read_file" || item.toolName === "search_in_file") {
     return "正在定位相关内容";
@@ -445,13 +460,17 @@ function toolCallLabel(item: WorkLogItem, detail: string) {
 
 function toolGroupLabel(items: WorkLogItem[]): string {
   const actionable = items.filter(
-    (item) => item.kind === "tool" || item.kind === "approval",
+    (item) => item.kind === "tool" || item.kind === "approval" || item.kind === "search",
   );
   const commands = actionable
     .map((item) => stringArgument(item, "command"))
     .filter(Boolean);
   const pathItems = actionable.filter((item) => stringArgument(item, "path"));
   const toolNames = new Set(actionable.map((item) => item.toolName));
+
+  if (actionable.length > 0 && actionable.every((item) => item.kind === "search")) {
+    return "搜索网络资料";
+  }
 
   if (toolNames.has("write_file") || toolNames.has("apply_patch")) {
     const onlyTestFiles =

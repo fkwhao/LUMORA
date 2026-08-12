@@ -6,11 +6,13 @@ from app.controller.http.approval_routes import ApprovalRoutes
 from app.controller.http.artifact_routes import ArtifactRoutes
 from app.controller.http.chat_routes import ChatRoutes
 from app.controller.http.errors import AgentHttpError
+from app.controller.http.mcp_routes import McpRoutes
 from app.controller.http.memory_routes import MemoryRoutes
 from app.controller.http.model_routes import ModelRoutes
 from app.controller.http.request_guard import HttpRequestGuard
 from app.controller.http.system_routes import SystemRoutes
 from app.service.chat_service import ChatService
+from app.service.mcp_service import McpService
 from app.service.memory_extraction_service import MemoryExtractionService
 from app.service.planner_service import PlannerService
 
@@ -35,6 +37,7 @@ class AgentHttpController:
             ArtifactRoutes(chat_service, guard),
             ModelRoutes(chat_service, guard),
             MemoryRoutes(memory_extraction_service, guard),
+            McpRoutes(McpService(), guard),
             ApprovalRoutes(chat_service, guard),
         )
         for route_group in route_groups:

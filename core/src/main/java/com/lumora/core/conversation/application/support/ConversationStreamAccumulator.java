@@ -24,6 +24,8 @@ public class ConversationStreamAccumulator {
     public void accept(ChatStreamEvent event) {
         if (event.getType() == ChatStreamEventType.TEXT_DELTA) {
             content.append(valueOrEmpty(event.getDelta()));
+        } else if (event.getType() == ChatStreamEventType.TEXT_RESET) {
+            content.setLength(0);
         } else if (event.getType() == ChatStreamEventType.FAILED) {
             throw new IllegalStateException(valueOrEmpty(
                     event.getErrorMessage()
@@ -41,7 +43,11 @@ public class ConversationStreamAccumulator {
                 || event.getType() == ChatStreamEventType.CONTEXT_COMPACTION_STARTED
                 || event.getType() == ChatStreamEventType.CONTEXT_COMPACTION_PROGRESS
                 || event.getType() == ChatStreamEventType.CONTEXT_COMPACTED
-                || event.getType() == ChatStreamEventType.CONTEXT_COMPACTION_FAILED) {
+                || event.getType() == ChatStreamEventType.CONTEXT_COMPACTION_FAILED
+                || event.getType() == ChatStreamEventType.WEB_SEARCH_STARTED
+                || event.getType() == ChatStreamEventType.WEB_SEARCH_PROGRESS
+                || event.getType() == ChatStreamEventType.WEB_SEARCH_COMPLETED
+                || event.getType() == ChatStreamEventType.WEB_SEARCH_FAILED) {
             mergeWorkLogEvent(event);
         }
 

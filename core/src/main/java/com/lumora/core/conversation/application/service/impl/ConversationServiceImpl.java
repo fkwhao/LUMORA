@@ -8,6 +8,7 @@ import com.lumora.core.conversation.application.service.ArtifactService;
 import com.lumora.core.conversation.application.service.ConversationService;
 import com.lumora.core.model.application.service.ModelService;
 import com.lumora.core.memory.application.service.MemoryService;
+import com.lumora.core.mcp.application.service.McpService;
 import com.lumora.core.conversation.application.support.ContextCompactionInput;
 import com.lumora.core.conversation.application.support.ConversationContextSummaryService;
 import com.lumora.core.conversation.application.support.ConversationPersistenceService;
@@ -49,6 +50,7 @@ public class ConversationServiceImpl implements ConversationService {
     private final ConversationContextSummaryService contextSummaryService;
     private final ArtifactService artifactService;
     private final MemoryService memoryService;
+    private final McpService mcpService;
     private final ConcurrentHashMap<String, FutureTask<Void>> activeRuns =
             new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, PendingToolApproval>
@@ -295,6 +297,7 @@ public class ConversationServiceImpl implements ConversationService {
                     context.getTaskId(),
                     context.getConversationSummary(),
                     context.getMemoryCandidates(),
+                    mcpService.listEnabledServers(),
                     event -> handleStreamEvent(
                             context,
                             accumulator,

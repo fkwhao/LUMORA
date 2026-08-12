@@ -8,6 +8,7 @@ import com.lumora.core.model.domain.model.ModelProvider;
 import com.lumora.core.model.domain.model.ProviderModel;
 import com.lumora.core.conversation.domain.model.ContextCompaction;
 import com.lumora.core.memory.domain.model.MemoryContextItem;
+import com.lumora.core.mcp.domain.model.McpServerRuntimeConfiguration;
 import com.lumora.core.agent.model.AgentMemoryCandidate;
 
 import java.util.List;
@@ -39,11 +40,13 @@ public interface ModelService {
 
     ProviderModel createProviderModel(String providerId, String modelId,
             int contextWindow, int maxOutputTokens,
-            List<String> reasoningEfforts, String correlationId);
+            List<String> reasoningEfforts, boolean webSearchEnabled,
+            String correlationId);
 
     ProviderModel updateProviderModel(String providerId, String modelConfigurationId,
             String modelId, int contextWindow, int maxOutputTokens,
-            List<String> reasoningEfforts, String correlationId);
+            List<String> reasoningEfforts, boolean webSearchEnabled,
+            String correlationId);
 
     void deleteProviderModel(String providerId, String modelConfigurationId,
             String correlationId);
@@ -209,5 +212,24 @@ public interface ModelService {
         streamChat(messages, correlationId, model, reasoningEffort,
                 memorySummary, workspacePath, permissionMode, taskId,
                 conversationSummary, eventConsumer);
+    }
+
+    default void streamChat(
+            List<ChatMessage> messages,
+            String correlationId,
+            String model,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<MemoryContextItem> memoryCandidates,
+            List<McpServerRuntimeConfiguration> mcpServers,
+            Consumer<ChatStreamEvent> eventConsumer
+    ) {
+        streamChat(messages, correlationId, model, reasoningEffort,
+                memorySummary, workspacePath, permissionMode, taskId,
+                conversationSummary, memoryCandidates, eventConsumer);
     }
 }

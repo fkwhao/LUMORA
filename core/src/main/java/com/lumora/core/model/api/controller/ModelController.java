@@ -121,6 +121,7 @@ public class ModelController {
         return ProviderModelResponse.fromModel(modelService.createProviderModel(
                 providerId, request.getModelId(), request.getContextWindow(),
                 request.getMaxOutputTokens(), request.getReasoningEfforts(),
+                request.isWebSearchEnabled(),
                 correlationId));
     }
 
@@ -135,7 +136,8 @@ public class ModelController {
         return ProviderModelResponse.fromModel(modelService.updateProviderModel(
                 providerId, modelConfigurationId, request.getModelId(),
                 request.getContextWindow(), request.getMaxOutputTokens(),
-                request.getReasoningEfforts(), correlationId));
+                request.getReasoningEfforts(), request.isWebSearchEnabled(),
+                correlationId));
     }
 
     @DeleteMapping("/providers/{providerId}/model-configurations/{modelConfigurationId}")

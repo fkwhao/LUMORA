@@ -22,6 +22,8 @@ public class ModelConfigurationModel {
     private int maxOutputTokens;
     @TableField("reasoning_efforts")
     private String reasoningEfforts;
+    @TableField("web_search_enabled")
+    private boolean webSearchEnabled;
     @TableField(value = "created_at", typeHandler = SqliteInstantTypeHandler.class)
     private Instant createdAt;
     @TableField(value = "updated_at", typeHandler = SqliteInstantTypeHandler.class)
@@ -33,12 +35,21 @@ public class ModelConfigurationModel {
             String modelId, int contextWindow, int maxOutputTokens,
             String reasoningEfforts,
             Instant createdAt, Instant updatedAt) {
+        this(id, configurationId, modelId, contextWindow, maxOutputTokens,
+                reasoningEfforts, false, createdAt, updatedAt);
+    }
+
+    public ModelConfigurationModel(String id, String configurationId,
+            String modelId, int contextWindow, int maxOutputTokens,
+            String reasoningEfforts, boolean webSearchEnabled,
+            Instant createdAt, Instant updatedAt) {
         this.modelConfigurationModelId = id;
         this.configurationId = configurationId;
         this.modelId = modelId;
         this.contextWindow = contextWindow;
         this.maxOutputTokens = maxOutputTokens;
         this.reasoningEfforts = reasoningEfforts;
+        this.webSearchEnabled = webSearchEnabled;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
     }
@@ -53,6 +64,8 @@ public class ModelConfigurationModel {
     public void setMaxOutputTokens(int maxOutputTokens) { this.maxOutputTokens = maxOutputTokens; }
     public String getReasoningEfforts() { return reasoningEfforts; }
     public void setReasoningEfforts(String reasoningEfforts) { this.reasoningEfforts = reasoningEfforts; }
+    public boolean isWebSearchEnabled() { return webSearchEnabled; }
+    public void setWebSearchEnabled(boolean webSearchEnabled) { this.webSearchEnabled = webSearchEnabled; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }

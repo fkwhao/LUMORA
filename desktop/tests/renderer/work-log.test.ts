@@ -57,3 +57,31 @@ describe("approval review work log", () => {
     });
   });
 });
+
+describe("hosted web search work log", () => {
+  it("keeps provider search state and clickable source metadata separate from local tools", () => {
+    const search = workLogItemFromEvent({
+      type: "web_search_completed",
+      delta: "",
+      model: "demo",
+      errorMessage: "",
+      itemId: "search-1",
+      toolCallId: "search-1",
+      toolName: "web_search",
+      title: "网络搜索",
+      arguments: { query: "OpenAI Responses web search" },
+      output: "已获取 1 个来源",
+      metadata: {
+        executionLocation: "provider",
+        sources: [{ title: "Web search guide", url: "https://example.com/guide" }],
+      },
+    });
+
+    expect(search).toMatchObject({
+      kind: "search",
+      status: "completed",
+      arguments: { query: "OpenAI Responses web search" },
+      metadata: { executionLocation: "provider" },
+    });
+  });
+});

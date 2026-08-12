@@ -28,6 +28,7 @@ import type {
   SaveProviderModelInput,
 } from "../../../../shared/model-contract";
 import type { LumoraMemoryApi } from "../../../../shared/memory-contract";
+import type { LumoraMcpApi } from "../../../../shared/mcp-contract";
 import type { TaskSummary } from "../../../../shared/task-contract";
 import {
   Dialog,
@@ -44,6 +45,7 @@ import {
 import { Switch } from "../../../components/ui/switch";
 import { AppearancePage } from "./AppearancePage";
 import { PersonalizationPage } from "./PersonalizationPage";
+import { McpSettingsPage } from "./McpSettingsPage";
 import {
   SettingsConfirmDialog,
   SettingsSearchInput,
@@ -52,6 +54,7 @@ import {
 interface SettingsPageProps {
   api?: LumoraModelApi;
   memoryApi?: LumoraMemoryApi;
+  mcpApi?: LumoraMcpApi;
   archivedTasks: TaskSummary[];
   onBack(): void;
   onRestoreTask(taskId: string): void;
@@ -72,12 +75,14 @@ const apiFormatOptions: Array<{
 type SettingsSection =
   | "model"
   | "personalization"
+  | "mcp"
   | "appearance"
   | "archived";
 
 export function SettingsPage({
   api,
   memoryApi,
+  mcpApi,
   archivedTasks,
   onBack,
   onRestoreTask,
@@ -97,6 +102,9 @@ export function SettingsPage({
     normalizedSettingsQuery,
   );
   const showPersonalization = "个性化 记忆 重置记忆".includes(
+    normalizedSettingsQuery,
+  );
+  const showMcp = "MCP 工具 Server Streamable HTTP".toLowerCase().includes(
     normalizedSettingsQuery,
   );
   const showArchived = "已归档任务".includes(normalizedSettingsQuery);
@@ -154,6 +162,14 @@ export function SettingsPage({
               onClick={() => setSection("personalization")}
             />
           )}
+          {showMcp && (
+            <SettingsNavItem
+              active={section === "mcp"}
+              icon={Cable}
+              label="MCP"
+              onClick={() => setSection("mcp")}
+            />
+          )}
           {showAppearance && (
             <SettingsNavItem
               active={section === "appearance"}
@@ -171,7 +187,7 @@ export function SettingsPage({
               onClick={() => setSection("archived")}
             />
           )}
-          {!showModel && !showPersonalization && !showAppearance
+          {!showModel && !showPersonalization && !showMcp && !showAppearance
             && !showArchived && (
             <p className="settings-search-empty">没有匹配的设置</p>
           )}
@@ -194,6 +210,8 @@ export function SettingsPage({
           )
         ) : section === "personalization" ? (
           <PersonalizationPage api={memoryApi} notify={notify} />
+        ) : section === "mcp" ? (
+          <McpSettingsPage api={mcpApi} notify={notify} />
         ) : section === "appearance" ? (
           <AppearancePage />
         ) : (
@@ -671,7 +689,7 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
             <label className="provider-field">
               <span>API 格式</span>
               <ApiFormatSelect value={apiFormat} onChange={setApiFormat} />
-              <small>当前仅保存界面选择，调用仍沿用现有兼容接口。</small>
+              <small>决定模型请求协议，以及可启用的服务商托管能力。</small>
             </label>
 
             <label className="provider-field">
@@ -749,6 +767,7 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
                           {(providerModel.reasoningEfforts ?? []).length > 0
                             ? ` · 推理 ${providerModel.reasoningEfforts.join(" / ")}`
                             : " · 无推理选项"}
+                          {providerModel.webSearchEnabled ? " · 联网搜索" : ""}
                         </small>
                       </div>
                       <div className="provider-model-actions">
@@ -832,6 +851,7 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
       </section>
       {editingModel && (
         <ModelConfigurationDialog
+          apiFormat={apiFormat}
           model={editingModel === "new" ? undefined : editingModel}
           suggestions={availableModels}
           onClose={() => setEditingModel(undefined)}
@@ -843,11 +863,13 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
 }
 
 function ModelConfigurationDialog({
+  apiFormat,
   model,
   suggestions,
   onClose,
   onSave,
 }: {
+  apiFormat: ApiFormat;
   model?: ProviderModel;
   suggestions: string[];
   onClose(): void;
@@ -865,6 +887,9 @@ function ModelConfigurationDialog({
   );
   const [reasoningEfforts, setReasoningEfforts] = useState<string[]>(
     model?.reasoningEfforts ?? [],
+  );
+  const [webSearchEnabled, setWebSearchEnabled] = useState(
+    model?.webSearchEnabled ?? false,
   );
   const [advancedOpen, setAdvancedOpen] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -916,6 +941,8 @@ function ModelConfigurationDialog({
         contextWindow: parsedContextWindow,
         maxOutputTokens: parsedMaxOutputTokens,
         reasoningEfforts: normalizedReasoningEfforts,
+        webSearchEnabled:
+          apiFormat === "chat-completions" ? false : webSearchEnabled,
       });
     } catch (saveError) {
       setDialogError(toMessage(saveError));
@@ -1066,6 +1093,27 @@ function ModelConfigurationDialog({
                   </button>
                 </div>
               )}
+            </section>
+
+            <section className="reasoning-capability-editor">
+              <header>
+                <div>
+                  <strong>服务商原生 Web Search</strong>
+                  <small>
+                    允许模型按需调用供应商托管的网络搜索；可能产生额外费用。
+                    {apiFormat === "chat-completions"
+                      ? " 当前 Chat Completions 适配暂不支持。"
+                      : ""}
+                  </small>
+                </div>
+                <Switch
+                  className="model-capability-switch"
+                  aria-label="该模型支持服务商原生 Web Search"
+                  checked={webSearchEnabled && apiFormat !== "chat-completions"}
+                  disabled={apiFormat === "chat-completions"}
+                  onCheckedChange={setWebSearchEnabled}
+                />
+              </header>
             </section>
           </div>
         )}

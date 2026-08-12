@@ -2,6 +2,7 @@ import asyncio
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 
 from app.dto.request.chat_completion_request import ChatMessageRequest
@@ -177,16 +178,235 @@ def test_more_specific_layer_and_later_rule_win(tmp_path: Path) -> None:
     assert "local" in result.reason
 
 
-def test_auto_approve_routes_shell_through_reviewer(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "command",
+    (
+        "pwd",
+        "Get-ChildItem -Force",
+        "rg TODO src",
+        "git status --short",
+        "git diff --check",
+        "git log -5 --oneline",
+        "git branch --show-current",
+        "python --version",
+        "python -m pytest tests",
+        "pytest tests",
+        "pnpm test",
+        "npm run lint",
+        ".\\mvnw.cmd test",
+        "./gradlew test",
+        "cargo check",
+        "go test ./...",
+        "dotnet build",
+        "ruff format --check .",
+        "mypy app",
+    ),
+)
+def test_auto_approve_fast_paths_known_safe_shell_commands(
+    tmp_path: Path,
+    command: str,
+) -> None:
     result = PermissionEngine().evaluate(
         _tool(category=ToolCategory.SHELL),
         ToolContext(tmp_path.resolve()),
-        {"command": "mvn test"},
+        {"command": command},
         PermissionPolicy(PermissionMode.AUTO_APPROVE),
     )
 
-    assert result.decision is PermissionDecision.ASK
-    assert result.layer == "mode"
+    assert result.decision is PermissionDecision.ALLOW, command
+    assert result.layer == "shell_classifier", command
+
+
+@pytest.mark.parametrize(
+    "command",
+    (
+        "git push origin main",
+        "git commit -m test",
+        "pnpm install",
+        "npm run deploy",
+        "python scripts/release.py",
+        "New-Item generated.txt",
+        "docker compose up",
+        "find . -exec Remove-Item {}",
+        "rg --pre processor TODO",
+        "git diff --output changes.txt",
+        "mvn test deploy:deploy",
+        "gradle test publish",
+        "pytest --basetemp . tests",
+        "ruff check --fix .",
+        "mypy --install-types app",
+        "go test -exec helper ./...",
+        "unknown-command --flag",
+    ),
+)
+def test_auto_approve_routes_unknown_or_mutating_shell_through_reviewer(
+    tmp_path: Path,
+    command: str,
+) -> None:
+    result = PermissionEngine().evaluate(
+        _tool(category=ToolCategory.SHELL),
+        ToolContext(tmp_path.resolve()),
+        {"command": command},
+        PermissionPolicy(PermissionMode.AUTO_APPROVE),
+    )
+
+    assert result.decision is PermissionDecision.ASK, command
+    assert result.layer == "mode", command
+
+
+@pytest.mark.parametrize(
+    "command",
+    (
+        "git status; git push origin main",
+        "git status && Remove-Item generated.txt",
+        "Get-ChildItem | Remove-Item",
+        "pytest > results.txt",
+        "Get-Content $(Resolve-Path secret.txt)",
+        'powershell -Command "Get-ChildItem"',
+    ),
+)
+def test_auto_approve_never_fast_paths_shell_composition(
+    tmp_path: Path,
+    command: str,
+) -> None:
+    result = PermissionEngine().evaluate(
+        _tool(category=ToolCategory.SHELL),
+        ToolContext(tmp_path.resolve()),
+        {"command": command},
+        PermissionPolicy(PermissionMode.AUTO_APPROVE),
+    )
+
+    assert result.decision is PermissionDecision.ASK, command
+    assert result.layer == "mode", command
+
+
+def test_auto_approve_read_command_must_stay_inside_workspace(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    engine = PermissionEngine()
+    tool = _tool(category=ToolCategory.SHELL)
+    policy = PermissionPolicy(PermissionMode.AUTO_APPROVE)
+
+    inside = engine.evaluate(
+        tool,
+        ToolContext(workspace.resolve()),
+        {"command": f'Get-Content "{workspace / "inside.txt"}"'},
+        policy,
+    )
+    outside = engine.evaluate(
+        tool,
+        ToolContext(workspace.resolve()),
+        {"command": f'Get-Content "{tmp_path / "outside.txt"}"'},
+        policy,
+    )
+    provider_path = engine.evaluate(
+        tool,
+        ToolContext(workspace.resolve()),
+        {"command": "Get-Content Env:API_KEY"},
+        policy,
+    )
+
+    assert inside.decision is PermissionDecision.ALLOW
+    assert outside.decision is PermissionDecision.ASK
+    assert provider_path.decision is PermissionDecision.ASK
+
+
+def test_explicit_shell_rule_precedes_auto_approve_classifier(
+    tmp_path: Path,
+) -> None:
+    engine = PermissionEngine()
+    tool = _tool(category=ToolCategory.SHELL)
+    context = ToolContext(tmp_path.resolve())
+
+    force_review = engine.evaluate(
+        tool,
+        context,
+        {"command": "git status"},
+        PermissionPolicy(
+            PermissionMode.AUTO_APPROVE,
+            (PermissionRule("Bash", "git status", PermissionDecision.ASK),),
+        ),
+    )
+    custom_allow = engine.evaluate(
+        tool,
+        context,
+        {"command": "company-check"},
+        PermissionPolicy(
+            PermissionMode.AUTO_APPROVE,
+            (PermissionRule("Bash", "company-check", PermissionDecision.ALLOW),),
+        ),
+    )
+
+    assert force_review.decision is PermissionDecision.ASK
+    assert force_review.layer == "rule"
+    assert custom_allow.decision is PermissionDecision.ALLOW
+    assert custom_allow.layer == "rule"
+
+
+def test_executor_skips_reviewer_for_safe_shell_fast_path(tmp_path: Path) -> None:
+    asyncio.run(_assert_safe_shell_fast_path_skips_reviewer(tmp_path))
+
+
+async def _assert_safe_shell_fast_path_skips_reviewer(tmp_path: Path) -> None:
+    executed = False
+
+    async def execute(_context, _input):
+        nonlocal executed
+        executed = True
+        return ToolResult("checks passed")
+
+    class NeverReviewer:
+        async def review(self, _settings, _request):
+            raise AssertionError("Safe shell commands must not call the reviewer")
+
+    registry = ToolRegistry(
+        (
+            function_tool(
+                name="shell",
+                description="run shell",
+                input_schema={
+                    "type": "object",
+                    "properties": {"command": {"type": "string"}},
+                    "required": ["command"],
+                    "additionalProperties": False,
+                },
+                execute=execute,
+                category=ToolCategory.SHELL,
+            ),
+        )
+    )
+    executor = ToolCallExecutor(
+        registry,
+        PermissionEngine(),
+        ApprovalBroker(),
+        PermissionConfigStore(tmp_path / "home"),
+        ToolResultProcessor(),
+        NeverReviewer(),
+    )
+
+    pairs = [
+        pair
+        async for pair in executor.execute(
+            ProviderToolCall("call-safe-shell", "shell", '{"command":"mvn test"}'),
+            ToolContext(tmp_path.resolve(), correlation_id="corr"),
+            "main-model",
+            ModelConnectionSettings(
+                "test", "https://example.com", "main-model", "key"
+            ),
+            PermissionPolicy(PermissionMode.AUTO_APPROVE),
+            0,
+            "运行测试",
+        )
+    ]
+
+    assert executed is True
+    assert [event.type for event, _result in pairs] == [
+        "tool_started",
+        "tool_completed",
+    ]
+    assert pairs[-1][0].metadata["permissionLayer"] == "shell_classifier"
 
 
 def test_auto_approve_allows_new_workspace_file_without_human_handoff(

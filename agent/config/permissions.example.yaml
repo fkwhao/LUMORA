@@ -1,6 +1,7 @@
 version: 1
 rules:
   # 确定性规则先于自动 Reviewer。deny 不能被其他层的 allow 覆盖。
+  # 内置 Shell 分级器已直接允许常见只读、测试、检查和构建命令；这里写团队特有边界。
   # 普通 git push 不在这里固定 ask，让 Reviewer 结合用户请求判断。
   - tool: Bash
     pattern: "git push*--force*"
@@ -9,8 +10,8 @@ rules:
     pattern: "git push*--delete*"
     decision: ask
   - tool: Bash
-    pattern: "python -m pytest*"
-    decision: allow
+    pattern: "npm run production-smoke*"
+    decision: ask
   - tool: Bash
     pattern: "*credential*"
     decision: deny

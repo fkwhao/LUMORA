@@ -1,5 +1,4 @@
 import fnmatch
-import re
 from pathlib import Path
 
 from app.permission.model import (
@@ -9,54 +8,21 @@ from app.permission.model import (
     PermissionPolicy,
     PermissionRule,
 )
+from app.permission.shell_classifier import ShellCommandClassifier
 from app.tool.base import Tool, ToolCategory, ToolContext, ToolInput
 
 _SHELL_ALIASES = frozenset({"bash", "shell", "shell_command"})
-_SOURCE_PRIORITY = {
-    "session": 0,
-    "user": 100,
-    "project": 200,
-    "local": 300,
-}
-_FORK_BOMB_PATTERN = re.compile(
-    r":\(\)\s*\{\s*:\|:\s*&\s*\}\s*;\s*:",
-    re.IGNORECASE,
-)
-_SHELL_TOKEN_PATTERN = re.compile(r'''"[^"]*"|'[^']*'|[^\s]+''')
-_DANGEROUS_ROOT_EXPRESSIONS = frozenset(
-    {
-        "/",
-        "/*",
-        "~",
-        "~/*",
-        "$home",
-        "$home/*",
-        "${home}",
-        "${home}/*",
-        "$env:userprofile",
-        "$env:userprofile\\*",
-        "%userprofile%",
-        "%userprofile%\\*",
-    }
-)
-_CATASTROPHIC_COMMANDS = frozenset(
-    {
-        "shutdown",
-        "shutdown.exe",
-        "reboot",
-        "format",
-        "format.com",
-        "restart-computer",
-        "stop-computer",
-    }
-)
-_FILE_DELETION_COMMANDS = frozenset(
-    {"rm", "remove-item", "ri", "del", "erase", "rd", "rmdir"}
-)
+_SOURCE_PRIORITY = {"session": 0, "user": 100, "project": 200, "local": 300}
 
 
 class PermissionEngine:
     """Evaluate one concrete tool call using the fixed permission layers."""
+
+    def __init__(
+        self,
+        shell_classifier: ShellCommandClassifier | None = None,
+    ) -> None:
+        self._shell_classifier = shell_classifier or ShellCommandClassifier()
 
     def evaluate(
         self,
@@ -87,10 +53,7 @@ class PermissionEngine:
             return PermissionEvaluation(
                 decision=rule.decision,
                 layer="rule",
-                reason=(
-                    f"匹配 {rule.source} 级权限规则："
-                    f"{rule.tool}({rule.pattern})"
-                ),
+                reason=f"匹配 {rule.source} 级权限规则：{rule.tool}({rule.pattern})",
                 risk_level=risk_level,
                 reversible=reversible,
             )
@@ -113,22 +76,27 @@ class PermissionEngine:
                 reversible=reversible,
             )
 
-        if (
-            policy.mode is PermissionMode.AUTO_APPROVE
-            and tool.category is ToolCategory.SHELL
-        ):
+        if policy.mode is PermissionMode.AUTO_APPROVE and tool.category is ToolCategory.SHELL:
+            classification = self._shell_classifier.safe_fast_path(
+                str(input_data.get("command") or ""), context.workspace_path
+            )
+            if classification is not None:
+                return PermissionEvaluation(
+                    PermissionDecision.ALLOW,
+                    "shell_classifier",
+                    f"确定性 Shell 分级器允许{classification.label}",
+                    risk_level=classification.risk_level,
+                    reversible=True,
+                )
             return PermissionEvaluation(
                 PermissionDecision.ASK,
                 "mode",
-                "Shell calls in automatic approval mode require reviewer evaluation",
+                "Shell 命令未命中确定性安全规则，需要智能审批模型判断",
                 risk_level=risk_level,
                 reversible=reversible,
             )
 
-        if (
-            policy.mode is PermissionMode.AUTO_APPROVE
-            and not destructive
-        ):
+        if policy.mode is PermissionMode.AUTO_APPROVE and not destructive:
             return PermissionEvaluation(
                 PermissionDecision.ALLOW,
                 "mode",
@@ -145,15 +113,13 @@ class PermissionEngine:
             reversible=reversible,
         )
 
-    @staticmethod
     def _dangerous_shell_denial(
-        tool: Tool,
-        input_data: ToolInput,
+        self, tool: Tool, input_data: ToolInput
     ) -> PermissionEvaluation | None:
         if tool.category is not ToolCategory.SHELL:
             return None
         command = str(input_data.get("command") or "")
-        if _is_catastrophic_shell_command(command):
+        if self._shell_classifier.is_catastrophic(command):
             return PermissionEvaluation(
                 PermissionDecision.DENY,
                 "blacklist",
@@ -180,11 +146,7 @@ class PermissionEngine:
         if not isinstance(raw_path, str) or not raw_path.strip():
             return None
         path = Path(raw_path.strip()).expanduser()
-        candidate = (
-            path.resolve()
-            if path.is_absolute()
-            else (context.workspace_path / path).resolve()
-        )
+        candidate = path.resolve() if path.is_absolute() else (context.workspace_path / path).resolve()
         try:
             candidate.relative_to(context.workspace_path)
             return None
@@ -193,9 +155,7 @@ class PermissionEngine:
                 PermissionDecision.ASK,
                 "path_sandbox",
                 f"文件路径超出工作区：{candidate}",
-                risk_level=(
-                    "HIGH" if destructive else "MEDIUM"
-                ),
+                risk_level="HIGH" if destructive else "MEDIUM",
                 reversible=reversible,
                 grants_external_path=True,
             )
@@ -218,17 +178,11 @@ class PermissionEngine:
             tool_matches = (
                 normalized_tool in _SHELL_ALIASES and actual_tool == "bash"
             ) or fnmatch.fnmatchcase(actual_tool.casefold(), normalized_tool)
-            if tool_matches and fnmatch.fnmatchcase(
-                value.casefold(),
-                rule.pattern.casefold(),
-            ):
+            if tool_matches and fnmatch.fnmatchcase(value.casefold(), rule.pattern.casefold()):
                 matching.append(rule)
         if not matching:
             return None
 
-        # Resolve each layer first so a later rule overrides an earlier rule
-        # in that same file. Then merge effective denies across layers: an
-        # allow from another layer can never reverse one of those denies.
         effective_by_source: dict[str, PermissionRule] = {}
         for rule in matching:
             current = effective_by_source.get(rule.source)
@@ -236,37 +190,25 @@ class PermissionEngine:
                 effective_by_source[rule.source] = rule
         effective = list(effective_by_source.values())
         denied = [
-            rule
-            for rule in effective
-            if rule.decision is PermissionDecision.DENY
+            rule for rule in effective if rule.decision is PermissionDecision.DENY
         ]
         candidates = denied or effective
         return max(
             candidates,
-            key=lambda rule: (
-                _SOURCE_PRIORITY.get(rule.source, 0),
-                rule.order,
-            ),
+            key=lambda rule: (_SOURCE_PRIORITY.get(rule.source, 0), rule.order),
         )
 
 
 def _is_effectively_destructive(
-    tool: Tool,
-    context: ToolContext,
-    input_data: ToolInput,
+    tool: Tool, context: ToolContext, input_data: ToolInput
 ) -> bool:
-    """Treat a new workspace file differently from overwriting one."""
     if tool.category is not ToolCategory.FILESYSTEM or tool.name != "write_file":
         return tool.is_destructive(input_data)
     raw_path = input_data.get("path")
     if not isinstance(raw_path, str) or not raw_path.strip():
         return tool.is_destructive(input_data)
     path = Path(raw_path.strip()).expanduser()
-    candidate = (
-        path.resolve()
-        if path.is_absolute()
-        else (context.workspace_path / path).resolve()
-    )
+    candidate = path.resolve() if path.is_absolute() else (context.workspace_path / path).resolve()
     try:
         candidate.relative_to(context.workspace_path)
     except ValueError:
@@ -286,79 +228,3 @@ def _risk_level(tool: Tool, destructive: bool) -> str:
     if tool.category is ToolCategory.SHELL:
         return "MEDIUM"
     return "LOW"
-
-
-def _is_catastrophic_shell_command(command: str) -> bool:
-    if _FORK_BOMB_PATTERN.search(command):
-        return True
-    for raw_segment in re.split(r"[;&|\r\n]+", command):
-        tokens = [
-            token.strip('"\'').casefold()
-            for token in _SHELL_TOKEN_PATTERN.findall(raw_segment)
-        ]
-        executable_index = _find_executable_index(tokens)
-        if executable_index is None:
-            continue
-        executable = tokens[executable_index]
-        arguments = tokens[executable_index + 1 :]
-        if executable in _CATASTROPHIC_COMMANDS:
-            return True
-        if executable not in _FILE_DELETION_COMMANDS:
-            continue
-
-        flags = "".join(
-            argument.lstrip("-/")
-            for argument in arguments
-            if argument.startswith(("-", "/"))
-            and argument not in {"/", "/*"}
-        )
-        targets = [
-            argument
-            for argument in arguments
-            if not argument.startswith(("-", "/")) or argument in {"/", "/*"}
-        ]
-        if not any(_is_dangerous_root(target) for target in targets):
-            continue
-        if executable == "rm" and "r" in flags and "f" in flags:
-            return True
-        if executable in {"remove-item", "ri"} and (
-            "recurse" in flags and "force" in flags
-        ):
-            return True
-        if executable in {"rd", "rmdir"} and "s" in flags and "q" in flags:
-            return True
-        if executable in {"del", "erase"} and "f" in flags:
-            return True
-    return False
-
-
-def _find_executable_index(tokens: list[str]) -> int | None:
-    if not tokens:
-        return None
-    index = 0
-    while index < len(tokens) and tokens[index] in {"&", "command"}:
-        index += 1
-    if index < len(tokens) and tokens[index] == "sudo":
-        index += 1
-        while index < len(tokens) and tokens[index].startswith("-"):
-            index += 1
-    if index < len(tokens) and tokens[index] == "env":
-        index += 1
-        while index < len(tokens) and tokens[index].startswith("-"):
-            index += 1
-        while index < len(tokens) and re.fullmatch(
-            r"[a-z_][a-z0-9_]*=.*",
-            tokens[index],
-            re.IGNORECASE,
-        ):
-            index += 1
-    return index if index < len(tokens) else None
-
-
-def _is_dangerous_root(value: str) -> bool:
-    normalized = value.rstrip("\\/") or value
-    if value in _DANGEROUS_ROOT_EXPRESSIONS:
-        return True
-    return bool(
-        re.fullmatch(r"[a-z]:(?:[\\/]\*)?", normalized, re.IGNORECASE)
-    )

@@ -9,6 +9,7 @@ import com.lumora.core.agent.dto.request.AgentPlanTaskRequest;
 import com.lumora.core.agent.dto.request.AgentMemoryExtractionRequest;
 import com.lumora.core.agent.dto.request.AgentModelConnectionRequest;
 import com.lumora.core.agent.dto.request.AgentModelListRequest;
+import com.lumora.core.agent.dto.request.AgentMcpServerRequest;
 import com.lumora.core.agent.dto.request.AgentToolApprovalDecisionRequest;
 import com.lumora.core.agent.dto.response.AgentChatCompletionResponse;
 import com.lumora.core.agent.dto.response.AgentPlanTaskResponse;
@@ -21,6 +22,8 @@ import com.lumora.core.conversation.domain.model.ChatStreamEvent;
 import com.lumora.core.conversation.domain.model.ContextCompaction;
 import com.lumora.core.model.domain.model.ModelConnection;
 import com.lumora.core.memory.domain.model.MemoryContextItem;
+import com.lumora.core.mcp.domain.model.McpConnectionTest;
+import com.lumora.core.mcp.domain.model.McpServerRuntimeConfiguration;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -41,6 +44,29 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
     private final AgentRuntimeSseClient sseClient;
     private final AgentDtoMapper dtoMapper;
     private final AgentClientExceptionMapper exceptionMapper;
+
+    @Override
+    public McpConnectionTest testMcpServer(
+            McpServerRuntimeConfiguration configuration,
+            String correlationId
+    ) {
+        var response = exceptionMapper.execute(
+                () -> httpApi.testMcpServer(
+                        correlationId,
+                        new AgentMcpServerRequest(configuration)
+                )
+        );
+        return new McpConnectionTest(
+                response.isConnected(),
+                response.getServerName(),
+                response.getServerVersion(),
+                response.getTools(),
+                response.getResources(),
+                response.getResourceTemplates(),
+                response.getPrompts(),
+                response.getEchoOutput()
+        );
+    }
 
     @Override
     public void decideToolApproval(
@@ -106,13 +132,26 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
             String apiKey,
             String correlationId
     ) {
+        return listModels(providerName, baseUrl, apiKey,
+                "chat-completions", correlationId);
+    }
+
+    @Override
+    public List<String> listModels(
+            String providerName,
+            String baseUrl,
+            String apiKey,
+            String apiFormat,
+            String correlationId
+    ) {
         AgentModelListResponse response = exceptionMapper.execute(
                 () -> httpApi.listModels(
                         correlationId,
                         new AgentModelListRequest(
                                 providerName,
                                 baseUrl,
-                                apiKey
+                                apiKey,
+                                apiFormat
                         )
                 )
         );
@@ -283,6 +322,32 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
                         messages, connection, reasoningEffort, memorySummary,
                         workspacePath, permissionMode, taskId,
                         conversationSummary, memoryCandidates
+                ),
+                eventConsumer
+        );
+    }
+
+    @Override
+    public void streamChat(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String correlationId,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<MemoryContextItem> memoryCandidates,
+            List<McpServerRuntimeConfiguration> mcpServers,
+            Consumer<ChatStreamEvent> eventConsumer
+    ) {
+        sseClient.streamChat(
+                correlationId,
+                dtoMapper.toChatRequest(
+                        messages, connection, reasoningEffort, memorySummary,
+                        workspacePath, permissionMode, taskId,
+                        conversationSummary, memoryCandidates, mcpServers
                 ),
                 eventConsumer
         );

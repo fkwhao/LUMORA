@@ -13,6 +13,10 @@ class PromptLoader:
         "40_response.md",
     )
     _SPECIALIZED_FILES: ClassVar[dict[str, str]] = {
+        "agent_history_compaction": "agent_history_compaction_system.md",
+        "approval_reviewer": "approval_reviewer.md",
+        "context_compaction_request": "context_compaction_request.md",
+        "context_compaction_system": "context_compaction_system.md",
         "memory_extraction": "memory_extraction.md",
     }
 

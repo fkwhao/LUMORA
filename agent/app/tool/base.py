@@ -20,6 +20,7 @@ class ToolCategory(StrEnum):
 @dataclass(frozen=True, slots=True)
 class ToolContext:
     workspace_path: Path
+    workspace_scoped: bool = True
     correlation_id: str = ""
     task_id: str = ""
     artifact_store: Any | None = field(default=None, repr=False)

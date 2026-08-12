@@ -10,6 +10,7 @@ import { useStore } from "zustand";
 
 import type { LumoraModelApi } from "../shared/model-contract";
 import type { LumoraMemoryApi } from "../shared/memory-contract";
+import type { LumoraMcpApi } from "../shared/mcp-contract";
 import type { LumoraTaskApi } from "../shared/task-contract";
 import type { ProjectDirectory } from "../shared/window-contract";
 import { AppSidebar } from "./components/AppSidebar";
@@ -45,6 +46,7 @@ interface AppProps {
   api?: LumoraTaskApi;
   modelApi?: LumoraModelApi;
   memoryApi?: LumoraMemoryApi;
+  mcpApi?: LumoraMcpApi;
 }
 
 type AppView = "work" | "conversationHub" | "settings" | PrototypeView;
@@ -60,10 +62,11 @@ interface NavigationState {
   index: number;
 }
 
-export function App({ api, modelApi, memoryApi }: AppProps) {
+export function App({ api, modelApi, memoryApi, mcpApi }: AppProps) {
   const resolvedTaskApi = api ?? window.lumora?.tasks;
   const resolvedModelApi = modelApi ?? window.lumora?.model;
   const resolvedMemoryApi = memoryApi ?? window.lumora?.memory;
+  const resolvedMcpApi = mcpApi ?? window.lumora?.mcp;
   if (!resolvedTaskApi) {
     return <DesktopBridgeError />;
   }
@@ -72,6 +75,7 @@ export function App({ api, modelApi, memoryApi }: AppProps) {
       api={resolvedTaskApi}
       modelApi={resolvedModelApi}
       memoryApi={resolvedMemoryApi}
+      mcpApi={resolvedMcpApi}
     />
   );
 }
@@ -80,9 +84,11 @@ function ConnectedApp({
   api,
   modelApi,
   memoryApi,
+  mcpApi,
 }: Required<Pick<AppProps, "api">> & {
   modelApi?: LumoraModelApi;
   memoryApi?: LumoraMemoryApi;
+  mcpApi?: LumoraMcpApi;
 }) {
   // Store 与能力边界绑定，切换测试 API 时不会泄漏旧任务订阅。
   const store = useMemo(
@@ -429,6 +435,7 @@ function ConnectedApp({
         <SettingsPage
           api={modelApi}
           memoryApi={memoryApi}
+          mcpApi={mcpApi}
           archivedTasks={archivedTasks}
           notify={notify}
           onBack={() =>

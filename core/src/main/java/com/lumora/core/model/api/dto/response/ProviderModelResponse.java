@@ -9,6 +9,7 @@ public class ProviderModelResponse {
     private final int contextWindow;
     private final int maxOutputTokens;
     private final List<String> reasoningEfforts;
+    private final boolean webSearchEnabled;
 
     private ProviderModelResponse(ProviderModel model) {
         modelConfigurationId = model.getModelConfigurationId();
@@ -16,6 +17,7 @@ public class ProviderModelResponse {
         contextWindow = model.getContextWindow();
         maxOutputTokens = model.getMaxOutputTokens();
         reasoningEfforts = model.getReasoningEfforts();
+        webSearchEnabled = model.isWebSearchEnabled();
     }
     public static ProviderModelResponse fromModel(ProviderModel model) {
         return new ProviderModelResponse(model);
@@ -25,4 +27,5 @@ public class ProviderModelResponse {
     public int getContextWindow() { return contextWindow; }
     public int getMaxOutputTokens() { return maxOutputTokens; }
     public List<String> getReasoningEfforts() { return reasoningEfforts; }
+    public boolean isWebSearchEnabled() { return webSearchEnabled; }
 }

@@ -39,6 +39,10 @@ class ToolRegistry:
     def names(self) -> tuple[str, ...]:
         return tuple(self._tools)
 
+    def copy(self) -> "ToolRegistry":
+        """Create a request-scoped registry while preserving tool order."""
+        return ToolRegistry(self._tools.values())
+
     def model_definitions(
         self,
         allowed_names: Iterable[str] | None = None,

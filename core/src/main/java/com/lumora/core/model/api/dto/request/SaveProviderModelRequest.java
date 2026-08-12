@@ -15,6 +15,7 @@ public class SaveProviderModelRequest {
     private int maxOutputTokens;
     @Size(max = 16)
     private List<@NotBlank @Size(max = 64) String> reasoningEfforts = List.of();
+    private boolean webSearchEnabled;
     public String getModelId() { return modelId; }
     public void setModelId(String modelId) { this.modelId = modelId; }
     public int getContextWindow() { return contextWindow; }
@@ -24,5 +25,9 @@ public class SaveProviderModelRequest {
     public List<String> getReasoningEfforts() { return reasoningEfforts; }
     public void setReasoningEfforts(List<String> reasoningEfforts) {
         this.reasoningEfforts = reasoningEfforts == null ? List.of() : reasoningEfforts;
+    }
+    public boolean isWebSearchEnabled() { return webSearchEnabled; }
+    public void setWebSearchEnabled(boolean webSearchEnabled) {
+        this.webSearchEnabled = webSearchEnabled;
     }
 }

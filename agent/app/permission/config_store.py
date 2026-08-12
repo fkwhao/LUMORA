@@ -27,23 +27,28 @@ class PermissionConfigStore:
 
     def load_policy(
         self,
-        workspace_path: Path,
+        workspace_path: Path | None,
         base_policy: PermissionPolicy,
     ) -> PermissionPolicy:
-        workspace = workspace_path.resolve()
+        workspace_rules: tuple[PermissionRule, ...] = ()
+        local_rules: tuple[PermissionRule, ...] = ()
+        if workspace_path is not None:
+            workspace = workspace_path.resolve()
+            workspace_rules = self._read_rules(
+                workspace / _CONFIG_DIRECTORY / _CONFIG_NAME,
+                "project",
+            )
+            local_rules = self._read_rules(
+                workspace / _CONFIG_DIRECTORY / _LOCAL_CONFIG_NAME,
+                "local",
+            )
         layered_rules = (
             *self._read_rules(
                 self._user_home / _CONFIG_DIRECTORY / _CONFIG_NAME,
                 "user",
             ),
-            *self._read_rules(
-                workspace / _CONFIG_DIRECTORY / _CONFIG_NAME,
-                "project",
-            ),
-            *self._read_rules(
-                workspace / _CONFIG_DIRECTORY / _LOCAL_CONFIG_NAME,
-                "local",
-            ),
+            *workspace_rules,
+            *local_rules,
             *(
                 PermissionRule(
                     tool=rule.tool,

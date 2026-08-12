@@ -3,6 +3,7 @@ from typing import Any, Literal, TypeAlias
 
 RunEventType: TypeAlias = Literal[
     "text_delta",
+    "text_reset",
     "reasoning_delta",
     "progress_message",
     "tool_started",
@@ -12,6 +13,10 @@ RunEventType: TypeAlias = Literal[
     "tool_approval_resolved",
     "approval_review_started",
     "approval_review_completed",
+    "web_search_started",
+    "web_search_progress",
+    "web_search_completed",
+    "web_search_failed",
     "context_compaction_started",
     "context_compaction_progress",
     "context_compacted",

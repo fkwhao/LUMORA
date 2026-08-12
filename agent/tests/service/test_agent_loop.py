@@ -73,6 +73,241 @@ def test_agent_loop_forwards_final_answer_deltas_in_tool_mode() -> None:
     asyncio.run(_assert_final_answer_deltas_are_forwarded())
 
 
+def test_agent_loop_resets_provisional_answer_before_final_stream() -> None:
+    asyncio.run(_assert_provisional_answer_is_reset())
+
+
+def test_agent_loop_preserves_provisional_answer_as_stage_content() -> None:
+    asyncio.run(_assert_provisional_answer_becomes_stage_content())
+
+
+def test_agent_loop_does_not_duplicate_stage_content_before_tool() -> None:
+    asyncio.run(_assert_stage_content_is_not_duplicated_before_tool())
+
+
+async def _assert_stage_content_is_not_duplicated_before_tool() -> None:
+    stage = "我先读取项目配置，再继续处理。"
+    call = ProviderToolCall(
+        call_id="read-1",
+        name="read_file",
+        arguments_json="{}",
+    )
+    turns = iter((
+        ProviderTurn(
+            content=stage,
+            reasoning="",
+            model="test-model",
+            usage=TokenUsageResponse(
+                promptTokens=4,
+                completionTokens=3,
+                totalTokens=7,
+            ),
+            tool_calls=(call,),
+        ),
+        ProviderTurn(
+            content="处理完成。",
+            reasoning="",
+            model="test-model",
+            usage=TokenUsageResponse(
+                promptTokens=6,
+                completionTokens=2,
+                totalTokens=8,
+            ),
+            tool_calls=(),
+        ),
+    ))
+
+    async def complete_turn(*_args):
+        raise AssertionError("存在流式回合能力时不应调用一次性完成接口")
+
+    async def stream_turn(*_args):
+        turn = next(turns)
+        if turn.tool_calls:
+            yield ProviderTurnEvent(
+                type="stage_content",
+                delta=stage,
+                item_id="stage-tool",
+                model="test-model",
+            )
+            yield ProviderTurnEvent(type="tool_call_delta", model="test-model")
+        else:
+            yield ProviderTurnEvent(
+                type="content_delta",
+                delta=turn.content,
+                model="test-model",
+            )
+        yield ProviderTurnEvent(type="completed", model="test-model", turn=turn)
+
+    async def execute(_context, _input):
+        return ToolResult("配置内容")
+
+    registry = ToolRegistry((
+        function_tool(
+            name="read_file",
+            description="读取文件",
+            input_schema={"type": "object", "properties": {}},
+            execute=execute,
+            read_only=True,
+        ),
+    ))
+    events = [
+        event
+        async for event in AgentLoopRunner(
+            complete_turn,
+            stream_turn=stream_turn,
+        ).stream(
+            _settings(),
+            PromptAssembly(()),
+            [ChatMessageRequest(role="user", content="读取配置")],
+            None,
+            registry,
+            ToolContext(Path(".")),
+        )
+    ]
+
+    progress = [event for event in events if event.type == "progress_message"]
+    assert len(progress) == 1
+    assert progress[0].delta == stage
+
+
+async def _assert_provisional_answer_becomes_stage_content() -> None:
+    stage = (
+        "我已经找到第一批资料，但还需要继续核实官方页面，"
+        "这段内容应当保留在处理步骤中。"
+    )
+    final = "这是后续检索完成后的最终答案。"
+
+    async def complete_turn(*_args):
+        raise AssertionError("存在流式回合能力时不应调用一次性完成接口")
+
+    async def stream_turn(*_args):
+        yield ProviderTurnEvent(
+            type="content_delta",
+            delta=stage,
+            model="test-model",
+        )
+        yield ProviderTurnEvent(
+            type="stage_content",
+            delta=stage,
+            item_id="stage-1",
+            model="test-model",
+        )
+        yield ProviderTurnEvent(
+            type="content_delta",
+            delta=final,
+            model="test-model",
+        )
+        yield ProviderTurnEvent(
+            type="completed",
+            model="test-model",
+            turn=ProviderTurn(
+                content=final,
+                reasoning="",
+                model="test-model",
+                usage=TokenUsageResponse(
+                    promptTokens=8,
+                    completionTokens=6,
+                    totalTokens=14,
+                ),
+                tool_calls=(),
+            ),
+        )
+
+    events = [
+        event
+        async for event in AgentLoopRunner(
+            complete_turn,
+            stream_turn=stream_turn,
+        ).stream(
+            _settings(),
+            PromptAssembly(()),
+            [ChatMessageRequest(role="user", content="继续")],
+            None,
+            ToolRegistry(),
+            ToolContext(Path(".")),
+        )
+    ]
+
+    progress = next(event for event in events if event.type == "progress_message")
+    assert progress.item_id == "stage-1"
+    assert progress.delta == stage
+    assert [event.type for event in events].count("text_reset") == 1
+    reset_index = next(
+        index for index, event in enumerate(events) if event.type == "text_reset"
+    )
+    assert final == "".join(
+        event.delta for event in events[reset_index + 1 :] if event.type == "text_delta"
+    )
+
+
+async def _assert_provisional_answer_is_reset() -> None:
+    provisional = (
+        "这是一段足够长、会跨过分类缓冲并显示出来的临时搜索结论，"
+        "随后模型仍然决定继续进行下一轮网络搜索。"
+    )
+    final = (
+        "这是重新搜索后的最终回答，它同样足够长并且会以流式方式显示出来，"
+        "同时不会保留前面尚未确认的临时结论。"
+    )
+
+    async def complete_turn(*_args):
+        raise AssertionError("存在流式回合能力时不应调用一次性完成接口")
+
+    async def stream_turn(*_args):
+        yield ProviderTurnEvent(
+            type="content_delta",
+            delta=provisional,
+            model="test-model",
+        )
+        yield ProviderTurnEvent(type="content_reset", model="test-model")
+        yield ProviderTurnEvent(
+            type="content_delta",
+            delta=final,
+            model="test-model",
+        )
+        yield ProviderTurnEvent(
+            type="completed",
+            model="test-model",
+            turn=ProviderTurn(
+                content=final,
+                reasoning="",
+                model="test-model",
+                usage=TokenUsageResponse(
+                    promptTokens=8,
+                    completionTokens=6,
+                    totalTokens=14,
+                ),
+                tool_calls=(),
+            ),
+        )
+
+    events = [
+        event
+        async for event in AgentLoopRunner(
+            complete_turn,
+            stream_turn=stream_turn,
+        ).stream(
+            _settings(),
+            PromptAssembly(()),
+            [ChatMessageRequest(role="user", content="继续")],
+            None,
+            ToolRegistry(),
+            ToolContext(Path(".")),
+        )
+    ]
+
+    assert [event.type for event in events].count("text_reset") == 1
+    reset_index = next(
+        index for index, event in enumerate(events) if event.type == "text_reset"
+    )
+    assert provisional in "".join(
+        event.delta for event in events[:reset_index] if event.type == "text_delta"
+    )
+    assert final == "".join(
+        event.delta for event in events[reset_index + 1 :] if event.type == "text_delta"
+    )
+
+
 async def _assert_final_answer_deltas_are_forwarded() -> None:
     deltas = (
         "这是项目模式下的第一段流式回答，",

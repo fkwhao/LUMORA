@@ -36,6 +36,31 @@ export function workLogItemFromEvent(
     };
   }
   if (
+    event.type === "web_search_started" ||
+    event.type === "web_search_progress" ||
+    event.type === "web_search_completed" ||
+    event.type === "web_search_failed"
+  ) {
+    return {
+      itemId: event.itemId || event.toolCallId || createId(),
+      kind: "search",
+      status:
+        event.type === "web_search_failed"
+          ? "failed"
+          : event.type === "web_search_completed"
+            ? "completed"
+            : "running",
+      toolCallId: event.toolCallId,
+      toolName: event.toolName || "web_search",
+      title: event.title || "网络搜索",
+      arguments: event.arguments,
+      content: event.delta,
+      output: event.output,
+      errorMessage: event.errorMessage,
+      metadata: event.metadata,
+    };
+  }
+  if (
     event.type === "context_compaction_started" ||
     event.type === "context_compaction_progress" ||
     event.type === "context_compacted" ||

@@ -35,7 +35,13 @@ class ApprovalReviewerPolicyStore:
     def __init__(self, user_home: Path | None = None) -> None:
         self._user_home = (user_home or Path.home()).expanduser().resolve()
 
-    def load(self, workspace_path: Path) -> ApprovalReviewerPolicy:
+    def load(self, workspace_path: Path | None) -> ApprovalReviewerPolicy:
+        if workspace_path is None:
+            return ApprovalReviewerPolicy(
+                user=self._read(
+                    self._user_home / _CONFIG_DIRECTORY / _POLICY_NAME
+                )
+            )
         workspace = workspace_path.resolve()
         return ApprovalReviewerPolicy(
             user=self._read(self._user_home / _CONFIG_DIRECTORY / _POLICY_NAME),

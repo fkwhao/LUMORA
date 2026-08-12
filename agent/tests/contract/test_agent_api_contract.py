@@ -39,6 +39,7 @@ def test_prompt_context_contract_contains_only_runtime_facts() -> None:
         "conversationSummary",
         "permissionMode",
         "permissionRules",
+        "mcpServers",
     }
 
     memory_schema = contract["components"]["schemas"]["MemoryContext"]
@@ -83,4 +84,5 @@ def test_http_route_split_preserves_public_paths_and_methods() -> None:
         "/api/v1/models": {"post"},
         "/api/v1/memory/extractions": {"post"},
         "/api/v1/tool-approvals/{approval_id}": {"post"},
+        "/api/v1/mcp/test": {"post"},
     }

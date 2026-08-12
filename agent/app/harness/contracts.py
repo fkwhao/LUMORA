@@ -11,6 +11,12 @@ from app.prompt.prompt_assembly import PromptAssembly
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderWebSource:
+    title: str
+    url: str
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderToolCall:
     call_id: str
     name: str
@@ -30,12 +36,22 @@ class ProviderTurn:
 class ProviderTurnEvent:
     type: Literal[
         "content_delta",
+        "content_reset",
+        "stage_content",
         "reasoning_delta",
         "tool_call_delta",
+        "web_search_started",
+        "web_search_progress",
+        "web_search_completed",
+        "web_search_failed",
         "completed",
     ]
     delta: str = ""
     model: str = ""
+    item_id: str = ""
+    query: str = ""
+    sources: tuple[ProviderWebSource, ...] = ()
+    error_message: str = ""
     turn: ProviderTurn | None = None
 
 

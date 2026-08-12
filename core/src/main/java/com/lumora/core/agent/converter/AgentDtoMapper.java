@@ -4,6 +4,7 @@ import com.lumora.core.agent.dto.request.AgentChatCompletionRequest;
 import com.lumora.core.agent.dto.request.AgentChatMessageRequest;
 import com.lumora.core.agent.dto.request.AgentModelConnectionRequest;
 import com.lumora.core.agent.dto.request.AgentMemoryContextRequest;
+import com.lumora.core.agent.dto.request.AgentMcpServerRequest;
 import com.lumora.core.agent.dto.request.AgentPromptContextRequest;
 import com.lumora.core.agent.dto.response.AgentChatCompletionResponse;
 import com.lumora.core.agent.dto.response.AgentContextCompactionResponse;
@@ -21,6 +22,7 @@ import com.lumora.core.conversation.domain.model.ChatStreamEvent;
 import com.lumora.core.conversation.domain.model.ContextCompaction;
 import com.lumora.core.model.domain.model.ModelConnection;
 import com.lumora.core.memory.domain.model.MemoryContextItem;
+import com.lumora.core.mcp.domain.model.McpServerRuntimeConfiguration;
 import com.lumora.core.conversation.domain.model.TokenUsage;
 import org.springframework.stereotype.Component;
 
@@ -126,6 +128,23 @@ public class AgentDtoMapper {
             String conversationSummary,
             List<MemoryContextItem> memoryCandidates
     ) {
+        return toChatRequest(messages, connection, reasoningEffort,
+                memorySummary, workspacePath, permissionMode, taskId,
+                conversationSummary, memoryCandidates, List.of());
+    }
+
+    public AgentChatCompletionRequest toChatRequest(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<MemoryContextItem> memoryCandidates,
+            List<McpServerRuntimeConfiguration> mcpServers
+    ) {
         List<AgentChatMessageRequest> requestMessages = messages.stream()
                 .map(message -> new AgentChatMessageRequest(
                         message.getRole(),
@@ -145,6 +164,8 @@ public class AgentDtoMapper {
                         conversationSummary,
                         memoryCandidates.stream()
                                 .map(AgentMemoryContextRequest::new)
+                                .toList(),
+                        mcpServers.stream().map(AgentMcpServerRequest::new)
                                 .toList()
                 ),
                 reasoningEffort

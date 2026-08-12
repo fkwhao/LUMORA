@@ -25,6 +25,7 @@ import {
   validateTaskPreferencesInput,
 } from "../shared/validation";
 import type { ResolvedAppearanceTheme } from "../shared/window-contract";
+import type { SaveMcpServerInput } from "../shared/mcp-contract";
 import type { ProjectDirectory } from "../shared/window-contract";
 
 const api: LumoraApi = {
@@ -206,6 +207,15 @@ const api: LumoraApi = {
       return ipcRenderer.invoke("memory:update-settings", enabled);
     },
     reset: () => ipcRenderer.invoke("memory:reset"),
+  },
+  mcp: {
+    listServers: () => ipcRenderer.invoke("mcp:list-servers"),
+    saveServer: (serverId: string, input: SaveMcpServerInput) =>
+      ipcRenderer.invoke("mcp:save-server", serverId, input),
+    deleteServer: (serverId: string) =>
+      ipcRenderer.invoke("mcp:delete-server", serverId),
+    testServer: (serverId: string) =>
+      ipcRenderer.invoke("mcp:test-server", serverId),
   },
   window: {
     setAppearance: (theme: ResolvedAppearanceTheme) => {

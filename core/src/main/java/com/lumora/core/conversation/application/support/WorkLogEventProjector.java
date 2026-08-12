@@ -62,7 +62,9 @@ public final class WorkLogEventProjector {
             "approvalReviewerModel",
             "approvalReviewFallback",
             "failureKind",
-            "toolExecutionState"
+            "toolExecutionState",
+            "executionLocation",
+            "sources"
     );
 
     private WorkLogEventProjector() {

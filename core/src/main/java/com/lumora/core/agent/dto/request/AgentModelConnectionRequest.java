@@ -10,6 +10,8 @@ public class AgentModelConnectionRequest {
     private final String apiKey;
     private final Integer maxOutputTokens;
     private final Integer contextWindow;
+    private final String apiFormat;
+    private final boolean webSearchEnabled;
 
     public AgentModelConnectionRequest(ModelConnection connection) {
         this.providerName = connection.getProviderName();
@@ -18,6 +20,8 @@ public class AgentModelConnectionRequest {
         this.apiKey = connection.getApiKey();
         this.maxOutputTokens = connection.getMaxOutputTokens();
         this.contextWindow = connection.getContextWindow();
+        this.apiFormat = connection.getApiFormat();
+        this.webSearchEnabled = connection.isWebSearchEnabled();
     }
 
     public String getProviderName() {
@@ -41,4 +45,8 @@ public class AgentModelConnectionRequest {
     }
 
     public Integer getContextWindow() { return contextWindow; }
+
+    public String getApiFormat() { return apiFormat; }
+
+    public boolean isWebSearchEnabled() { return webSearchEnabled; }
 }
