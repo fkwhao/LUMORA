@@ -26,12 +26,26 @@ describe("appearance settings", () => {
       ),
     ).toMatchObject({ theme: "dark" });
 
-    fireEvent.change(screen.getByLabelText("选择强调色"), {
-      target: { value: "#8b5cf6" },
+    fireEvent.click(screen.getByLabelText("UI 字体"));
+    const segoeOption = await screen.findByRole("option", { name: /Segoe UI/ });
+    fireEvent.pointerDown(segoeOption, { button: 0 });
+    fireEvent.pointerUp(segoeOption, { button: 0 });
+    fireEvent.click(segoeOption);
+    expect(
+      JSON.parse(
+        localStorage.getItem(APPEARANCE_PREFERENCES_STORAGE_KEY) ?? "{}",
+      ),
+    ).toMatchObject({ uiFont: "segoe" });
+
+    fireEvent.click(screen.getByRole("button", { name: "打开强调色选择器" }));
+    const colorInput = await screen.findByRole("textbox", { name: "强调色 HEX" });
+    fireEvent.input(colorInput, {
+      target: { value: "8B5CF6" },
     });
+    fireEvent.blur(colorInput);
     expect(
       document.documentElement.style.getPropertyValue("--blue"),
-    ).toBe("#8b5cf6");
+    ).toBe("#8B5CF6");
 
     localStorage.clear();
     applyAppearancePreferences(DEFAULT_APPEARANCE_PREFERENCES);

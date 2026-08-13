@@ -91,9 +91,12 @@ export type ThreadComponents = {
 export type ThreadProps = {
   components?: ThreadComponents | undefined;
   beforeComposer?: ReactNode;
+  composerPopup?: ReactNode;
   composerTools?: ReactNode;
   composerPlaceholder?: string;
   composerAriaLabel?: string;
+  composerInputRef?: Ref<HTMLTextAreaElement>;
+  onComposerTextChange?(value: string): void;
   contentRef?: Ref<HTMLDivElement>;
   viewportProps?: Omit<
     ComponentProps<typeof ThreadPrimitive.Viewport>,
@@ -116,9 +119,12 @@ const isNewChatView = (s: AssistantState) =>
 export const Thread: FC<ThreadProps> = ({
   components = EMPTY_COMPONENTS,
   beforeComposer,
+  composerPopup,
   composerTools,
   composerPlaceholder,
   composerAriaLabel,
+  composerInputRef,
+  onComposerTextChange,
   contentRef,
   viewportProps,
   showAttachmentButton,
@@ -130,9 +136,12 @@ export const Thread: FC<ThreadProps> = ({
       <ThreadRoot
         isEmpty={isEmpty}
         beforeComposer={beforeComposer}
+        composerPopup={composerPopup}
         composerTools={composerTools}
         composerPlaceholder={composerPlaceholder}
         composerAriaLabel={composerAriaLabel}
+        composerInputRef={composerInputRef}
+        onComposerTextChange={onComposerTextChange}
         contentRef={contentRef}
         viewportProps={viewportProps}
         showAttachmentButton={showAttachmentButton}
@@ -145,9 +154,12 @@ const ThreadRoot: FC<
   Pick<
     ThreadProps,
     | "beforeComposer"
+    | "composerPopup"
     | "composerTools"
     | "composerPlaceholder"
     | "composerAriaLabel"
+    | "composerInputRef"
+    | "onComposerTextChange"
     | "contentRef"
     | "viewportProps"
     | "showAttachmentButton"
@@ -155,9 +167,12 @@ const ThreadRoot: FC<
 > = ({
   isEmpty,
   beforeComposer,
+  composerPopup,
   composerTools,
   composerPlaceholder,
   composerAriaLabel,
+  composerInputRef,
+  onComposerTextChange,
   contentRef,
   viewportProps,
   showAttachmentButton,
@@ -217,9 +232,12 @@ const ThreadRoot: FC<
             <ThreadFollowupSuggestions />
             {beforeComposer}
             <Composer
+              popup={composerPopup}
               tools={composerTools}
               placeholder={composerPlaceholder}
               ariaLabel={composerAriaLabel}
+              inputRef={composerInputRef}
+              onTextChange={onComposerTextChange}
               showAttachmentButton={showAttachmentButton}
             />
             <AuiIf condition={(s) => isNewChatView(s) && s.composer.isEmpty}>
@@ -304,13 +322,25 @@ const ThreadSuggestionItem: FC = () => {
 };
 
 const Composer: FC<{
+  popup?: ReactNode;
   tools?: ReactNode;
   placeholder?: string;
   ariaLabel?: string;
+  inputRef?: Ref<HTMLTextAreaElement>;
+  onTextChange?(value: string): void;
   showAttachmentButton?: boolean;
-}> = ({ tools, placeholder, ariaLabel, showAttachmentButton }) => {
+}> = ({
+  popup,
+  tools,
+  placeholder,
+  ariaLabel,
+  inputRef,
+  onTextChange,
+  showAttachmentButton,
+}) => {
   return (
     <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
+      {popup}
       <ComposerPrimitive.AttachmentDropzone asChild>
         <div
           data-slot="aui_composer-shell"
@@ -318,12 +348,14 @@ const Composer: FC<{
         >
           <ComposerAttachments />
           <ComposerPrimitive.Input
+            ref={inputRef}
             placeholder={placeholder ?? "Send a message..."}
             className="aui-composer-input caret-primary placeholder:text-muted-foreground/80 max-h-32 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base outline-none"
             rows={1}
             autoFocus
             enterKeyHint="send"
             aria-label={ariaLabel ?? "Message input"}
+            onChange={(event) => onTextChange?.(event.target.value)}
           />
           <ComposerAction
             tools={tools}

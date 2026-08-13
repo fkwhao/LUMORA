@@ -1899,7 +1899,7 @@ globalStyle(".composer-popover > b", {
   fontWeight: "560",
 });
 
-globalStyle(".follow-up-composer .composer-popover > button", {
+globalStyle(".follow-up-composer .composer-popover > button, .aui-composer-root .composer-popover > button", {
   display: "grid",
   width: "100%",
   minHeight: "36px",
@@ -1925,12 +1925,12 @@ globalStyle(
   },
 );
 
-globalStyle(".follow-up-composer .composer-popover > button.is-selected", {
+globalStyle(".follow-up-composer .composer-popover > button.is-selected, .aui-composer-root .composer-popover > button.is-selected", {
   color: "var(--ink)",
   background: "transparent !important",
 });
 
-globalStyle(".follow-up-composer .composer-popover > button:hover", {
+globalStyle(".follow-up-composer .composer-popover > button:hover, .aui-composer-root .composer-popover > button:hover", {
   color: "var(--ink)",
   borderColor: "transparent !important",
   background: "color-mix(in srgb, var(--ink) 7%, transparent) !important",
@@ -2183,7 +2183,7 @@ globalStyle(".command-picker-popover", {
   borderRadius: "18px",
 });
 
-globalStyle(".follow-up-composer .command-picker-popover > button", {
+globalStyle(".follow-up-composer .command-picker-popover > button, .aui-composer-root .command-picker-popover > button", {
   minHeight: "52px",
   gridTemplateColumns: "22px minmax(0, 1fr)",
   padding: "8px 11px",
@@ -2747,6 +2747,57 @@ globalStyle(".conversation-usage-pane", {
   willChange: "width, transform, opacity",
   transition:
     "width 380ms cubic-bezier(0.22, 1, 0.36, 1), transform 360ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease, border-color 200ms ease",
+});
+
+globalStyle(".aui-composer-root .composer-add-panel", {
+  maxHeight: "min(390px, calc(100vh - 220px))",
+  gap: "3px",
+  overflowY: "auto",
+  borderColor: "color-mix(in oklab, var(--color-border) 60%, transparent)",
+  borderRadius: "var(--composer-radius)",
+  background: "var(--composer-bg) !important",
+  backdropFilter: "none !important",
+  boxShadow: "none !important",
+});
+
+globalStyle(".aui-composer-root .composer-add-panel > b", {
+  position: "sticky",
+  top: "0",
+  zIndex: "1",
+  margin: "-8px -8px 0",
+  padding: "12px 16px 8px",
+  background: "inherit",
+  fontSize: "12px",
+});
+
+globalStyle(".aui-composer-root .composer-add-panel > button", {
+  minHeight: "36px",
+  gridTemplateColumns: "22px minmax(0, 1fr)",
+  padding: "5px 11px",
+});
+
+globalStyle(".aui-composer-root .composer-add-panel button > span", {
+  display: "flex",
+  minWidth: "0",
+  alignItems: "baseline",
+  gap: "8px",
+  overflow: "hidden",
+  textAlign: "left",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(".aui-composer-root .composer-add-panel button strong", {
+  flex: "0 0 auto",
+  color: "var(--ink)",
+  fontSize: "12.5px",
+  fontWeight: "600",
+});
+
+globalStyle(".aui-composer-root .composer-add-panel button small", {
+  minWidth: "0",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
 });
 
 globalStyle(".conversation-usage-pane.is-open", {

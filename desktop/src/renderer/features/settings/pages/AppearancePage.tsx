@@ -1,6 +1,15 @@
+import {
+  ColorArea,
+  ColorField,
+  ColorPicker,
+  ColorSlider,
+  ColorSwatch,
+  Label,
+  ListBox,
+  Select,
+} from "@heroui/react";
 import { Check, Moon, Monitor, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
-
 import {
   applyAppearancePreferences,
   loadAppearancePreferences,
@@ -18,6 +27,24 @@ const THEME_OPTIONS: Array<{
   { value: "system", label: "跟随系统", icon: Monitor },
   { value: "light", label: "浅色", icon: Sun },
   { value: "dark", label: "深色", icon: Moon },
+];
+
+const UI_FONT_OPTIONS: Array<{
+  value: AppearancePreferences["uiFont"];
+  label: string;
+}> = [
+  { value: "system", label: "系统默认" },
+  { value: "segoe", label: "Segoe UI" },
+  { value: "yahei", label: "Microsoft YaHei" },
+];
+
+const CODE_FONT_OPTIONS: Array<{
+  value: AppearancePreferences["codeFont"];
+  label: string;
+}> = [
+  { value: "cascadia", label: "Cascadia Code" },
+  { value: "consolas", label: "Consolas" },
+  { value: "jetbrains", label: "JetBrains Mono" },
 ];
 
 export function AppearancePage() {
@@ -89,51 +116,36 @@ export function AppearancePage() {
 
         <section className="appearance-card" aria-label="显示选项">
           <AppearanceRow label="强调色" description="用于按钮、选中状态和链接。">
-            <label className="color-field">
-              <input
-                type="color"
-                aria-label="选择强调色"
-                value={preferences.accentColor}
-                onChange={(event) =>
-                  updatePreferences({ accentColor: event.target.value })
-                }
-              />
-              <span>{preferences.accentColor.toUpperCase()}</span>
-            </label>
+            <AccentColorPicker
+              value={preferences.accentColor}
+              onChange={(accentColor) => updatePreferences({ accentColor })}
+            />
           </AppearanceRow>
 
           <AppearanceRow label="UI 字体" description="应用界面使用的字体。">
-            <select
-              aria-label="UI 字体"
+            <AppearanceSelect
+              ariaLabel="UI 字体"
               value={preferences.uiFont}
-              onChange={(event) =>
+              options={UI_FONT_OPTIONS}
+              onChange={(uiFont) =>
                 updatePreferences({
-                  uiFont: event.target
-                    .value as AppearancePreferences["uiFont"],
+                  uiFont: uiFont as AppearancePreferences["uiFont"],
                 })
               }
-            >
-              <option value="system">系统默认</option>
-              <option value="segoe">Segoe UI</option>
-              <option value="yahei">Microsoft YaHei</option>
-            </select>
+            />
           </AppearanceRow>
 
           <AppearanceRow label="代码字体" description="代码块和 Diff 使用的等宽字体。">
-            <select
-              aria-label="代码字体"
+            <AppearanceSelect
+              ariaLabel="代码字体"
               value={preferences.codeFont}
-              onChange={(event) =>
+              options={CODE_FONT_OPTIONS}
+              onChange={(codeFont) =>
                 updatePreferences({
-                  codeFont: event.target
-                    .value as AppearancePreferences["codeFont"],
+                  codeFont: codeFont as AppearancePreferences["codeFont"],
                 })
               }
-            >
-              <option value="cascadia">Cascadia Code</option>
-              <option value="consolas">Consolas</option>
-              <option value="jetbrains">JetBrains Mono</option>
-            </select>
+            />
           </AppearanceRow>
 
           <AppearanceRow
@@ -185,6 +197,88 @@ export function AppearancePage() {
         </p>
       </div>
     </main>
+  );
+}
+
+function AppearanceSelect({
+  ariaLabel,
+  value,
+  options,
+  onChange,
+}: {
+  ariaLabel: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange(value: string): void;
+}) {
+  return (
+    <Select
+      aria-label={ariaLabel}
+      selectedKey={value}
+      onSelectionChange={(nextValue) => {
+        if (nextValue) onChange(String(nextValue));
+      }}
+    >
+      <Select.Trigger>
+        <Select.Value />
+        <Select.Indicator />
+      </Select.Trigger>
+      <Select.Popover placement="bottom end">
+        <ListBox>
+          {options.map((option) => (
+            <ListBox.Item
+              id={option.value}
+              textValue={option.label}
+              key={option.value}
+            >
+              <Label>{option.label}</Label>
+              <ListBox.ItemIndicator />
+            </ListBox.Item>
+          ))}
+        </ListBox>
+      </Select.Popover>
+    </Select>
+  );
+}
+
+function AccentColorPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange(value: string): void;
+}) {
+  return (
+    <ColorPicker
+      value={value}
+      onChange={(color) => onChange(color.toString("hex").toUpperCase())}
+    >
+      <ColorPicker.Trigger aria-label="打开强调色选择器">
+        <ColorSwatch />
+        <Label>{value.toUpperCase()}</Label>
+      </ColorPicker.Trigger>
+      <ColorPicker.Popover placement="bottom end">
+        <ColorArea
+          colorSpace="hsb"
+          xChannel="saturation"
+          yChannel="brightness"
+          aria-label="选择强调色"
+        >
+          <ColorArea.Thumb />
+        </ColorArea>
+        <ColorSlider channel="hue" colorSpace="hsb" aria-label="色相">
+          <ColorSlider.Track>
+            <ColorSlider.Thumb />
+          </ColorSlider.Track>
+        </ColorSlider>
+        <ColorField aria-label="强调色 HEX">
+          <ColorField.Group>
+            <ColorField.Prefix>#</ColorField.Prefix>
+            <ColorField.Input />
+          </ColorField.Group>
+        </ColorField>
+      </ColorPicker.Popover>
+    </ColorPicker>
   );
 }
 

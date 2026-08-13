@@ -377,6 +377,7 @@ export const TaskPage = memo(function TaskPage({
       const target = event.target as Element;
       if (
         !target.closest(".composer-menu-anchor") &&
+        !target.closest(".composer-context-trigger") &&
         !target.closest(".composer-popover") &&
         !target.closest('[data-slot="popover-content"]')
       ) {
@@ -1967,6 +1968,105 @@ export const TaskPage = memo(function TaskPage({
             components={TASK_THREAD_COMPONENTS}
             composerAriaLabel="继续任务"
             composerPlaceholder="继续任务…"
+            composerInputRef={followUpInputRef}
+            onComposerTextChange={(value) => {
+              setComposerText(value);
+              if (value.startsWith("/")) setComposerMenu("command");
+              else if (composerMenu === "command") setComposerMenu(null);
+            }}
+            composerPopup={
+              composerMenu === "context" ? (
+                <span
+                  className="composer-popover context-picker-popover composer-add-panel"
+                  role="menu"
+                  aria-label="添加"
+                >
+                  <b>添加</b>
+                  <button
+                    className="context-compact-command"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      runtime.thread.composer.setText("/compact");
+                      setComposerText("/compact");
+                      setComposerMenu(null);
+                      requestAnimationFrame(() =>
+                        followUpInputRef.current?.focus(),
+                      );
+                    }}
+                  >
+                    <Minimize2 size={17} />
+                    <span>
+                      <strong>压缩上下文</strong>
+                      <small>摘要较早消息（已使用 {contextPercent}%）</small>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => openLocalContext(false)}
+                  >
+                    <File size={17} />
+                    <span>
+                      <strong>文件</strong>
+                      <small>选择本地文件作为上下文</small>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => openLocalContext(true)}
+                  >
+                    <Folder size={17} />
+                    <span>
+                      <strong>文件夹</strong>
+                      <small>选择一个本地目录</small>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setComposerMenu(null);
+                      notify("持续目标接口待接入");
+                    }}
+                  >
+                    <Target size={17} />
+                    <span>
+                      <strong>目标</strong>
+                      <small>设置要持续追求的目标</small>
+                    </span>
+                  </button>
+                </span>
+              ) : composerMenu === "command" &&
+                composerText.startsWith("/") &&
+                "/compact".startsWith(composerText.trim().toLowerCase()) ? (
+                <span
+                  className="composer-popover command-picker-popover"
+                  role="menu"
+                  aria-label="斜杠指令"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      runtime.thread.composer.setText("/compact");
+                      setComposerText("/compact");
+                      setComposerMenu(null);
+                      requestAnimationFrame(() =>
+                        followUpInputRef.current?.focus(),
+                      );
+                    }}
+                  >
+                    <Minimize2 size={17} />
+                    <span>
+                      <strong>/compact</strong>
+                      <small>压缩上下文，保留近期原文</small>
+                    </span>
+                  </button>
+                </span>
+              ) : null
+            }
             contentRef={conversationContentRef}
             showAttachmentButton={false}
             viewportProps={{
@@ -1988,96 +2088,24 @@ export const TaskPage = memo(function TaskPage({
             }
             composerTools={
               <div className="flex min-w-0 items-center gap-1.5">
-                <Popover
-                  open={composerMenu === "context"}
-                  onOpenChange={(open) =>
-                    setComposerMenu(open ? "context" : null)
+                <button
+                  className={buttonVariants({
+                    variant: "ghost",
+                    size: "icon-xs",
+                    className: "composer-context-trigger",
+                  })}
+                  type="button"
+                  aria-label="添加上下文"
+                  aria-expanded={composerMenu === "context"}
+                  title="添加上下文"
+                  onClick={() =>
+                    setComposerMenu((open) =>
+                      open === "context" ? null : "context",
+                    )
                   }
                 >
-                  <PopoverTrigger
-                    className={buttonVariants({
-                      variant: "ghost",
-                      size: "icon-xs",
-                      className: "composer-context-trigger",
-                    })}
-                    aria-label="添加上下文"
-                    title="添加上下文"
-                  >
-                    <Plus />
-                  </PopoverTrigger>
-                  <PopoverContent
-                    side="top"
-                    align="start"
-                    sideOffset={10}
-                    className="composer-fast-popover w-72 gap-1.5 rounded-xl p-2"
-                  >
-                    <PopoverHeader className="px-2 py-1">
-                      <PopoverTitle>添加</PopoverTitle>
-                    </PopoverHeader>
-                    <Button
-                      className="h-auto w-full justify-start gap-3 px-2.5 py-2 text-start"
-                      type="button"
-                      variant="ghost"
-                      onClick={() => {
-                        runtime.thread.composer.setText("/compact");
-                        setComposerMenu(null);
-                      }}
-                    >
-                      <Minimize2 />
-                      <span className="flex flex-col items-start">
-                        <strong>压缩上下文</strong>
-                        <small className="text-muted-foreground">
-                          摘要较早消息（已使用 {contextPercent}%）
-                        </small>
-                      </span>
-                    </Button>
-                    <Button
-                      className="h-auto w-full justify-start gap-3 px-2.5 py-2 text-start"
-                      type="button"
-                      variant="ghost"
-                      onClick={() => openLocalContext(false)}
-                    >
-                      <File />
-                      <span className="flex flex-col items-start">
-                        <strong>文件</strong>
-                        <small className="text-muted-foreground">
-                          选择本地文件作为上下文
-                        </small>
-                      </span>
-                    </Button>
-                    <Button
-                      className="h-auto w-full justify-start gap-3 px-2.5 py-2 text-start"
-                      type="button"
-                      variant="ghost"
-                      onClick={() => openLocalContext(true)}
-                    >
-                      <Folder />
-                      <span className="flex flex-col items-start">
-                        <strong>文件夹</strong>
-                        <small className="text-muted-foreground">
-                          选择一个本地目录
-                        </small>
-                      </span>
-                    </Button>
-                    <Button
-                      className="h-auto w-full justify-start gap-3 px-2.5 py-2 text-start"
-                      type="button"
-                      variant="ghost"
-                      onClick={() => {
-                        setComposerMenu(null);
-                        notify("持续目标接口待接入");
-                      }}
-                    >
-                      <Target />
-                      <span className="flex flex-col items-start">
-                        <strong>目标</strong>
-                        <small className="text-muted-foreground">
-                          设置要持续追求的目标
-                        </small>
-                      </span>
-                    </Button>
-                  </PopoverContent>
-                </Popover>
+                  <Plus />
+                </button>
 
                 <Popover
                   open={composerMenu === "permission"}

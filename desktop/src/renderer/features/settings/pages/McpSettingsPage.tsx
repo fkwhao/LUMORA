@@ -20,6 +20,7 @@ import { Switch } from "../../../components/ui/switch";
 
 interface McpSettingsPageProps {
   api?: LumoraMcpApi;
+  embedded?: boolean;
   notify(message: string, tone?: "info" | "success"): void;
 }
 
@@ -30,7 +31,11 @@ interface McpDraft extends Omit<McpServer, "credentialConfigured"> {
   persistedCredentialConfigured: boolean;
 }
 
-export function McpSettingsPage({ api, notify }: McpSettingsPageProps) {
+export function McpSettingsPage({
+  api,
+  embedded = false,
+  notify,
+}: McpSettingsPageProps) {
   const [servers, setServers] = useState<McpServer[]>([]);
   const [draft, setDraft] = useState<McpDraft>();
   const [loading, setLoading] = useState(true);
@@ -145,12 +150,15 @@ export function McpSettingsPage({ api, notify }: McpSettingsPageProps) {
   }
 
   return (
-    <main className="settings-layout mcp-settings-layout">
+    <section
+      className={`mcp-settings-layout${embedded ? " is-embedded" : ""}`}
+      aria-label="MCP"
+    >
       <div className="mcp-settings-content">
         <header className="mcp-settings-header">
           <div>
-            <span className="eyebrow">远程能力</span>
-            <h1>MCP</h1>
+            {!embedded && <span className="eyebrow">远程能力</span>}
+            <h1>{embedded ? "MCP Server" : "MCP"}</h1>
             <p>连接 Streamable HTTP Server，使用 Tools、Resources 与 Prompts。</p>
           </div>
           <button type="button" disabled={!api || Boolean(draft)} onClick={() => setDraft(emptyDraft())}>
@@ -211,7 +219,7 @@ export function McpSettingsPage({ api, notify }: McpSettingsPageProps) {
         {error && <p className="mcp-settings-error">{error}</p>}
         <p className="mcp-settings-note">当前支持静态 Header 凭据；OAuth、市场与云端托管将在后续版本提供。</p>
       </div>
-    </main>
+    </section>
   );
 }
 

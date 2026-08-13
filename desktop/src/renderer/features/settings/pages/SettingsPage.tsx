@@ -14,6 +14,7 @@ import {
   Sparkles,
   Pencil,
   Plus,
+  Puzzle,
   RefreshCw,
   RotateCcw,
   Trash2,
@@ -46,7 +47,7 @@ import {
 import { Switch } from "../../../components/ui/switch";
 import { AppearancePage } from "./AppearancePage";
 import { PersonalizationPage } from "./PersonalizationPage";
-import { McpSettingsPage } from "./McpSettingsPage";
+import { PluginsSettingsPage } from "./PluginsSettingsPage";
 import { ProfilePage } from "./ProfilePage";
 import {
   SettingsConfirmDialog,
@@ -78,7 +79,7 @@ type SettingsSection =
   | "profile"
   | "model"
   | "personalization"
-  | "mcp"
+  | "plugins"
   | "appearance"
   | "archived";
 
@@ -110,7 +111,7 @@ export function SettingsPage({
   const showPersonalization = "个性化 记忆 重置记忆".includes(
     normalizedSettingsQuery,
   );
-  const showMcp = "MCP 工具 Server Streamable HTTP".toLowerCase().includes(
+  const showPlugins = "插件 MCP 技能 Skills 工具 Server Streamable HTTP".toLowerCase().includes(
     normalizedSettingsQuery,
   );
   const showArchived = "已归档任务".includes(normalizedSettingsQuery);
@@ -176,12 +177,12 @@ export function SettingsPage({
               onClick={() => setSection("personalization")}
             />
           )}
-          {showMcp && (
+          {showPlugins && (
             <SettingsNavItem
-              active={section === "mcp"}
-              icon={Cable}
-              label="MCP"
-              onClick={() => setSection("mcp")}
+              active={section === "plugins"}
+              icon={Puzzle}
+              label="插件"
+              onClick={() => setSection("plugins")}
             />
           )}
           {showAppearance && (
@@ -201,7 +202,7 @@ export function SettingsPage({
               onClick={() => setSection("archived")}
             />
           )}
-          {!showProfile && !showModel && !showPersonalization && !showMcp && !showAppearance
+          {!showProfile && !showModel && !showPersonalization && !showPlugins && !showAppearance
             && !showArchived && (
             <p className="settings-search-empty">没有匹配的设置</p>
           )}
@@ -226,8 +227,8 @@ export function SettingsPage({
           )
         ) : section === "personalization" ? (
           <PersonalizationPage api={memoryApi} notify={notify} />
-        ) : section === "mcp" ? (
-          <McpSettingsPage api={mcpApi} notify={notify} />
+        ) : section === "plugins" ? (
+          <PluginsSettingsPage api={mcpApi} notify={notify} />
         ) : section === "appearance" ? (
           <AppearancePage />
         ) : (

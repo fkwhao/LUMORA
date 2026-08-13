@@ -1,9 +1,126 @@
 import { globalStyle } from "@vanilla-extract/css";
 
+globalStyle(".plugins-settings-layout", {
+  color: "var(--ink)",
+});
+
+globalStyle(".plugins-settings-content", {
+  width: "min(960px, calc(100% - 96px))",
+  margin: "0 auto",
+  padding: "42px 0 72px",
+});
+
+globalStyle(".plugins-settings-header", {
+  display: "grid",
+  gridTemplateColumns: "42px minmax(0, 1fr)",
+  alignItems: "center",
+  gap: "14px",
+});
+
+globalStyle(".plugins-settings-mark", {
+  display: "grid",
+  width: "42px",
+  height: "42px",
+  placeItems: "center",
+  color: "var(--ink)",
+  border: "1px solid var(--line-strong)",
+  borderRadius: "13px",
+  background: "color-mix(in srgb, var(--ink) 4%, transparent)",
+});
+
+globalStyle(".plugins-settings-header h1", {
+  margin: "0",
+  fontSize: "27px",
+  fontWeight: "680",
+  letterSpacing: "-0.035em",
+});
+
+globalStyle(".plugins-settings-header p", {
+  margin: "7px 0 0",
+  color: "var(--muted)",
+  fontSize: "10px",
+});
+
+globalStyle(".plugins-settings-tabs", {
+  display: "flex",
+  alignItems: "center",
+  gap: "5px",
+  marginTop: "30px",
+  paddingBottom: "12px",
+  borderBottom: "1px solid var(--line)",
+});
+
+globalStyle(".plugins-settings-tabs button", {
+  display: "inline-flex",
+  minHeight: "34px",
+  alignItems: "center",
+  gap: "7px",
+  padding: "0 12px",
+  color: "var(--muted)",
+  border: "0",
+  borderRadius: "9px",
+  background: "transparent",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: "10px",
+  fontWeight: "620",
+});
+
+globalStyle(".plugins-settings-tabs button:hover", {
+  color: "var(--ink)",
+  background: "color-mix(in srgb, var(--ink) 5%, transparent)",
+});
+
+globalStyle(".plugins-settings-tabs button.active", {
+  color: "var(--ink)",
+  background: "color-mix(in srgb, var(--ink) 8%, transparent)",
+});
+
+globalStyle(".skills-settings-placeholder", {
+  display: "grid",
+  minHeight: "330px",
+  placeContent: "center",
+  justifyItems: "center",
+  marginTop: "24px",
+  color: "var(--muted)",
+  border: "1px dashed var(--line-strong)",
+  borderRadius: "15px",
+  background: "color-mix(in srgb, var(--surface) 98%, var(--ink) 2%)",
+  textAlign: "center",
+});
+
+globalStyle(".skills-settings-placeholder > span", {
+  display: "grid",
+  width: "48px",
+  height: "48px",
+  placeItems: "center",
+  border: "1px solid var(--line-strong)",
+  borderRadius: "14px",
+  background: "var(--surface)",
+});
+
+globalStyle(".skills-settings-placeholder strong", {
+  marginTop: "13px",
+  color: "var(--ink)",
+  fontSize: "12px",
+});
+
+globalStyle(".skills-settings-placeholder p", {
+  maxWidth: "380px",
+  margin: "7px 0 0",
+  fontSize: "9px",
+  lineHeight: "1.6",
+});
+
 globalStyle(".mcp-settings-content", {
   width: "min(920px, calc(100% - 96px))",
   margin: "0 auto",
   padding: "38px 0 70px",
+});
+
+globalStyle(".mcp-settings-layout.is-embedded .mcp-settings-content", {
+  width: "100%",
+  padding: "24px 0 0",
 });
 
 globalStyle(".mcp-settings-header", {

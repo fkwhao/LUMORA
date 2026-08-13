@@ -4,6 +4,7 @@
 @import "tailwindcss/preflight.css" layer(base);
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "tw-animate-css";
+@import "@heroui/styles";
 
 @custom-variant dark (&:is([data-theme="dark"] *));
 

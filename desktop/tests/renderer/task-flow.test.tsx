@@ -150,6 +150,15 @@ describe("visible task flow", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "关闭上下文统计" }));
     const followUpInput = screen.getByRole("textbox", { name: "继续任务" });
+    fireEvent.change(followUpInput, { target: { value: "/" } });
+    const slashCommandMenu = await screen.findByRole("menu", {
+      name: "斜杠指令",
+    });
+    expect(slashCommandMenu).toBeVisible();
+    fireEvent.click(screen.getByRole("menuitem", { name: /\/compact/ }));
+    await waitFor(() => expect(followUpInput).toHaveValue("/compact"));
+    expect(slashCommandMenu).not.toBeInTheDocument();
+    fireEvent.change(followUpInput, { target: { value: "" } });
     const permissionTrigger = screen.getByRole("button", {
       name: "选择权限模式",
     });

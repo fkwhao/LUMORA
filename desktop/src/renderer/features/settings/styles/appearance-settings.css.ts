@@ -206,44 +206,6 @@ globalStyle(".appearance-row small", {
   fontSize: "8px",
 });
 
-globalStyle(".appearance-row select", {
-  width: "190px",
-  height: "34px",
-  padding: "0 10px",
-  color: "var(--ink)",
-  border: "1px solid var(--line-strong)",
-  borderRadius: "8px",
-  outline: "none",
-  background: "var(--surface-soft)",
-  font: "inherit",
-  fontSize: "9px",
-});
-
-globalStyle(".color-field", {
-  display: "flex",
-  width: "150px",
-  height: "34px",
-  alignItems: "center",
-  gap: "8px",
-  padding: "0 10px",
-  color: "var(--ink)",
-  border: "1px solid var(--line-strong)",
-  borderRadius: "8px",
-  background: "var(--surface-soft)",
-  fontSize: "9px",
-});
-
-globalStyle(".color-field input", {
-  width: "18px",
-  height: "18px",
-  padding: "0",
-  overflow: "hidden",
-  border: "0",
-  borderRadius: "50%",
-  background: "transparent",
-  cursor: "pointer",
-});
-
 globalStyle(".appearance-switch", {
   position: "relative",
   width: "38px",
