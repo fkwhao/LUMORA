@@ -396,6 +396,9 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
   const [renamingProvider, setRenamingProvider] = useState(false);
   const [addingProvider, setAddingProvider] = useState(false);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [draftProviderModels, setDraftProviderModels] = useState<
+    SaveProviderModelInput[]
+  >([]);
   const [editingModel, setEditingModel] = useState<ProviderModel | "new">();
   const [testingModelId, setTestingModelId] = useState<string>();
   const [connectedModelId, setConnectedModelId] = useState<string>();
@@ -416,6 +419,7 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
     setApiFormat(provider.apiFormat);
     setApiKey("");
     setAvailableModels([]);
+    setDraftProviderModels([]);
     setAddingProvider(false);
     setRenamingProvider(false);
     setError(undefined);
@@ -445,6 +449,7 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
     setStatus("saving");
     setError(undefined);
     try {
+      const wasAddingProvider = addingProvider;
       const input = {
         providerName,
         baseUrl,
@@ -456,9 +461,49 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
       const updated = addingProvider
         ? await api.createProvider(input)
         : await api.updateProvider(selectedId!, input);
+      let modelSyncError: string | undefined;
+      if (wasAddingProvider && availableModels.length > 1) {
+        try {
+          await api.listProviderModels(
+            updated.providerId,
+            apiKey.trim() || undefined,
+          );
+        } catch (syncError) {
+          modelSyncError = toMessage(syncError);
+        }
+      }
+      if (wasAddingProvider && draftProviderModels.length > 0) {
+        try {
+          const loadedProviders = await api.listProviders();
+          const savedProvider = loadedProviders.find(
+            (provider) => provider.providerId === updated.providerId,
+          );
+          for (const draft of draftProviderModels) {
+            const savedModel = savedProvider?.models.find(
+              (providerModel) => providerModel.modelId === draft.modelId,
+            );
+            if (savedModel) {
+              await api.updateProviderModel(
+                updated.providerId,
+                savedModel.modelConfigurationId,
+                draft,
+              );
+            } else {
+              await api.createProviderModel(updated.providerId, draft);
+            }
+          }
+        } catch (syncError) {
+          modelSyncError = toMessage(syncError);
+        }
+      }
       await reloadProviders(updated.providerId);
       setApiKey("");
       setStatus("saved");
+      if (modelSyncError) {
+        setError(
+          `供应商已保存，但完整模型列表同步失败；你仍可手动添加模型。详情：${modelSyncError}`,
+        );
+      }
       window.setTimeout(() => setStatus("idle"), 1800);
     } catch (saveError) {
       setStatus("idle");
@@ -470,21 +515,45 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
     setIsListingModels(true);
     setError(undefined);
     try {
-      if (!selectedId || addingProvider) {
-        throw new Error("请先保存供应商，再获取模型列表");
-      }
-      const models = await api.listProviderModels(
-        selectedId,
-        apiKey.trim() || undefined,
-      );
+      const models = addingProvider
+        ? await api.listModels({
+            providerName,
+            baseUrl,
+            apiFormat,
+            apiKey: apiKey.trim(),
+          })
+        : await api.listProviderModels(
+            selectedId!,
+            apiKey.trim() || undefined,
+          );
       setAvailableModels(models);
-      await reloadProviders(selectedId);
+      if (addingProvider) {
+        if (!model.trim() && models[0]) {
+          setModel(models[0]);
+        }
+        if (models.length === 0) {
+          setError("未获取到可用模型，请手动填写模型名。");
+        }
+      } else {
+        await reloadProviders(selectedId);
+      }
     } catch (listError) {
-      setError(toMessage(listError));
+      setError(
+        `无法自动获取模型列表。该服务可能不支持模型列表接口，请手动填写模型名。详情：${toMessage(listError)}`,
+      );
     } finally {
       setIsListingModels(false);
     }
   }
+
+  const modelListDisabled = isListingModels || (
+    addingProvider
+      ? !providerName.trim() || !baseUrl.trim() || !apiKey.trim()
+      : !selectedId || (!apiKey.trim() && !selectedProvider?.apiKeyConfigured)
+  );
+  const modelListTitle = addingProvider && modelListDisabled
+    ? "请先填写供应商名称、Base URL 和 API Key"
+    : "获取模型列表";
 
   function beginAddingProvider() {
     setSelectedId(undefined);
@@ -493,6 +562,7 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
     setModel("");
     setApiKey("");
     setAvailableModels([]);
+    setDraftProviderModels([]);
     setAddingProvider(true);
     setRenamingProvider(true);
     setApiFormat("chat-completions");
@@ -514,6 +584,22 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
   }
 
   async function saveProviderModel(input: SaveProviderModelInput) {
+    if (addingProvider) {
+      setDraftProviderModels((current) => [
+        ...current.filter((draft) => draft.modelId !== input.modelId),
+        input,
+      ]);
+      setAvailableModels((current) =>
+        current.includes(input.modelId)
+          ? current
+          : [...current, input.modelId],
+      );
+      if (!model.trim()) {
+        setModel(input.modelId);
+      }
+      setEditingModel(undefined);
+      return;
+    }
     if (!selectedId) return;
     if (editingModel === "new") {
       await api.createProviderModel(selectedId, input);
@@ -583,11 +669,8 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
           className="model-settings-refresh"
           type="button"
           aria-label="获取模型列表"
-          title="获取模型列表"
-          disabled={
-            isListingModels || addingProvider || !selectedId ||
-            (!apiKey.trim() && !selectedProvider?.apiKeyConfigured)
-          }
+          title={modelListTitle}
+          disabled={modelListDisabled}
           onClick={() => void listModels()}
         >
           <RefreshCw
@@ -737,16 +820,20 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
               <header>
                 <div>
                   <span>模型列表</span>
-                  {(selectedProvider?.models.length ?? 0) > 0 && (
-                    <small>{selectedProvider?.models.length} 个已配置模型</small>
+                  {(addingProvider
+                    ? availableModels.length
+                    : selectedProvider?.models.length ?? 0) > 0 && (
+                    <small>
+                      {addingProvider
+                        ? `${availableModels.length} 个已获取模型`
+                        : `${selectedProvider?.models.length} 个已配置模型`}
+                    </small>
                   )}
                 </div>
                 <button
                   type="button"
-                  disabled={
-                    isListingModels || addingProvider || !selectedId ||
-                    (!apiKey.trim() && !selectedProvider?.apiKeyConfigured)
-                  }
+                  title={modelListTitle}
+                  disabled={modelListDisabled}
                   onClick={() => void listModels()}
                 >
                   <RefreshCw
@@ -759,16 +846,51 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
 
               <div className="provider-model-list">
                 {addingProvider ? (
-                  <div className="provider-model-row selected">
-                    <input
-                      list="available-models"
-                      value={model}
-                      onChange={(event) => setModel(event.target.value)}
-                      placeholder="输入初始模型 ID"
-                      required
-                    />
-                    <span>保存后可配置 Token</span>
-                  </div>
+                  <>
+                    <div className="provider-model-row provider-model-manual-row">
+                      <input
+                        list="available-models"
+                        value={model}
+                        onChange={(event) => setModel(event.target.value)}
+                        placeholder="输入初始模型 ID"
+                        aria-label="初始模型 ID"
+                        required
+                      />
+                      <span>也可手动填写</span>
+                    </div>
+                    {availableModels.map((availableModel) => (
+                      <button
+                        className={`provider-model-row${availableModel === model ? " selected" : ""}`}
+                        type="button"
+                        aria-label={`选择模型 ${availableModel}`}
+                        aria-pressed={availableModel === model}
+                        key={availableModel}
+                        onClick={() => setModel(availableModel)}
+                      >
+                        <div className="provider-model-identity">
+                          <strong>{availableModel}</strong>
+                          <small>
+                            {draftProviderModels.some(
+                              (draft) => draft.modelId === availableModel,
+                            )
+                              ? availableModel === model
+                                ? "已配置详细参数 · 将作为初始模型"
+                                : "已配置详细参数 · 点击设为初始模型"
+                              : availableModel === model
+                                ? "将作为初始模型"
+                                : "点击设为初始模型"}
+                          </small>
+                        </div>
+                        {availableModel === model && (
+                          <CircleCheck
+                            className="provider-model-selected-icon"
+                            size={15}
+                            aria-hidden="true"
+                          />
+                        )}
+                      </button>
+                    ))}
+                  </>
                 ) : selectedProvider?.models.length ? (
                   selectedProvider.models.map((providerModel) => (
                     <div
@@ -838,7 +960,6 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
               <div className="provider-model-controls">
                 <button
                   type="button"
-                  disabled={addingProvider}
                   onClick={() => setEditingModel("new")}
                 >
                   <Plus size={15} />

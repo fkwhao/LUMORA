@@ -12,12 +12,15 @@ Electron Main
 Java Local Core
   → localhost REST + SSE
 Python Agent Runtime
-  → OpenAI 兼容模型接口
+  → RoutingModelProvider
+      ├── Chat Completions
+      ├── OpenAI Responses
+      └── Anthropic Messages
 ```
 
 ### Electron Desktop
 
-- Renderer 负责任务、对话、计划、Changes 和设置界面。
+- Renderer 负责任务、对话、计划、Changes、Hosted Web Search、上下文/Token 统计和设置界面。
 - 多步骤任务的最近一次 `update_plan` 快照显示在对话区域右上角；清单收起后为紧凑
   胶囊，全部步骤完成后自动隐藏。计划仅用于透明展示，不增加等待用户确认的阶段。
 - Preload 只暴露按业务领域划分的白名单能力。
@@ -28,14 +31,14 @@ Python Agent Runtime
 
 - 使用传统的 `Controller → Service → Mapper` 分层。
 - 使用 MyBatis-Plus 管理基础数据库访问，复杂查询再使用明确 SQL。
-- SQLite 保存任务、会话、消息、计划步骤和审批等本地状态。
+- SQLite 保存任务、会话、消息、计划步骤、审批、模型/MCP 配置、Memory、上下文摘要、Artifact 索引和详细 TokenUsage 等本地状态。
 - Java 是任务、审批、工具调用和审计状态的最终权威。
 - 对 Electron 和 Python 分别使用独立 DTO，不暴露数据库实体。
 
 ### Python Agent Runtime
 
 - FastAPI 提供版本化 REST/SSE 接口。
-- 负责模型 Provider、流式响应解析、Agent Harness 和动态编排。
+- 负责三种模型协议的路由与适配、流式响应解析、Agent Harness、动态编排、远程 MCP 和 Hosted Web Search 事件转换。
 - 当前文件与命令工具由 Python Tool Registry 在 Java 授权的工作区和工具白名单内
   执行；未来浏览器、系统级能力仍应通过单独的受控 Capability 接入。
 - Python 不获得任意磁盘或系统凭据权限。文件路径必须位于工作区内，Shell 只允许
@@ -52,7 +55,7 @@ Python Agent Runtime
   DTO 与公开契约静默漂移。
 
 Python HTTP 层按资源拆分为 `chat_routes.py`、`artifact_routes.py`、`model_routes.py`、
-`memory_routes.py`、`approval_routes.py` 和 `system_routes.py`。`AgentHttpController` 只聚合
+`memory_routes.py`、`mcp_routes.py`、`approval_routes.py` 和 `system_routes.py`。`AgentHttpController` 只聚合
 版本化子路由；`HttpRequestGuard` 统一认证与协议错误映射，`AgentHttpError` 位于独立错误模块，
 `ChatStreamEventMapper` 独占内部 `RunEvent` 到公开 SSE DTO 的转换。公开路径与 HTTP 方法由
 OpenAPI 路由集合契约测试锁定。
@@ -72,13 +75,17 @@ transport/http
       ├── ToolRegistry / PermissionEngine
       └── ModelProviderPort
               ↑
-          OpenAICompatibleProvider（供应商协议适配器）
+          RoutingModelProvider
+              ├── OpenAICompatibleProvider
+              ├── ResponsesProvider
+              └── AnthropicProvider
 ```
 
 `ChatService` 依赖完整 `ModelProviderPort`，`MemoryExtractionService` 只依赖最小的
-`CompletionProviderPort`，`AgentHarness` 只依赖 `AgentTurnProviderPort`。具体
-`OpenAICompatibleProvider` 仅在 `main.py` 组合根实例化，可替换为 Responses、Anthropic、
-本地模型或测试 Fake Provider。Provider 不再创建或拥有 Agent Loop；它只实现模型发现、完成、
+`CompletionProviderPort`，`AgentHarness` 只依赖 `AgentTurnProviderPort`。`main.py` 在组合根
+实例化 `RoutingModelProvider`，再按模型配置中的 `apiFormat` 选择 Chat Completions、Responses
+或 Anthropic 适配器；本地模型和测试 Fake Provider 仍可通过同一 Port 替换。具体 Provider
+不再创建或拥有 Agent Loop；它只实现模型发现、完成、
 流式完成、单回合工具调用增量流和摘要能力。Provider 回合结构与回调契约集中在
 `app/harness/contracts.py`，Port 集中在 `app/harness/ports/model_provider.py`，从而避免 Provider
 反向依赖具体 `AgentLoopRunner`。`AgentHarness` 为每次运行创建独立 Runner，避免并发任务共享
@@ -116,9 +123,12 @@ Python 会话执行过程已经统一使用 transport-neutral 的简化 `RunEven
 序列化，公开事件枚举、内部事件枚举和 OpenAPI 由契约测试保持一致。当前公开类型主要包括：
 
 ```text
-text_delta / reasoning_delta / progress_message
+text_delta / text_reset / reasoning_delta / progress_message
 tool_started / tool_completed / tool_failed
 tool_approval_requested / tool_approval_resolved
+approval_review_started / approval_review_completed
+web_search_started / web_search_progress
+web_search_completed / web_search_failed
 context_compaction_started / context_compaction_progress
 context_compacted / context_compaction_failed
 usage / completed / failed
@@ -213,7 +223,10 @@ Java：任务、会话、消息、审批、工具调用、审计和业务投影
 Python：Agent 编排状态、模型适配和 Harness Checkpoint
 ```
 
-模型最终消息和 TokenUsage 写入 Java；模型 token 增量只用于实时展示。隐藏推理不
+模型最终消息和 TokenUsage 写入 Java；模型文本增量只用于实时展示。TokenUsage 在协议边界
+统一为 `promptTokens`、`completionTokens`、`totalTokens`、未缓存输入、普通输出、推理、缓存
+读取、缓存写入及缓存指标可用性。供应商未返回的推理或缓存明细保持为 0，并通过
+`cacheMetricsAvailable` 区分“真实为零”和“协议未提供缓存指标”。隐藏推理正文不
 写入数据库，也不返回 Renderer。工具事件持久化前会移除整文件写入正文；局部补丁仅
 保存有界的前后片段供右侧 Diff 审阅，同时截断其他参数、输出与错误，并限制单次回答
 的工作记录数量。
@@ -255,9 +268,25 @@ POST   /api/v1/model/settings/providers/{providerId}/model-configurations/{model
 第一项；删除供应商最后一个模型时自动禁用该供应商。模型连接测试会对指定模型发起
 最小非流式请求。现有 `GET/PUT /api/v1/model/settings` 继续映射
 当前启用项，保证对话与记忆提取链路向后兼容。`api_format` 当前允许
-`anthropic`、`chat-completions`、`responses`，但仅完成选择和持久化；实际模型请求
-仍由现有 Chat Completions Provider 执行。模型级最大输出 Token 会映射为
-Chat Completions 请求的 `max_tokens`；会话上下文占比按当前选中模型的上下文窗口计算。
+`anthropic`、`chat-completions`、`responses`，Python 的 `RoutingModelProvider` 会据此发送到
+`/messages`、`/chat/completions` 或 `/responses`。模型级最大输出 Token 分别映射到协议对应的
+请求字段；会话上下文占比按当前选中模型的上下文窗口计算。Hosted Web Search 是模型级显式
+能力，仅 Responses 与 Anthropic 适配器当前提供，Chat Completions 暂不启用。
+
+### MCP 与 Hosted Web Search
+
+远程 MCP Server 配置由 Desktop 设置页经白名单 IPC 写入 Java Core。Core 以
+`application_setting` 保存 Server 配置，使用 DPAPI 加密 Bearer/API Key/自定义 Header 凭据，
+并只在当前模型请求中把临时运行配置交给 Python。Python 按请求相关性发现远程 Streamable HTTP
+MCP 的 Tools、Resources、Resource Templates 与 Prompts；工具统一进入当前请求的 Tool Registry，
+继续接受 Schema 校验、权限判断、自动 Reviewer/HITL、事件投影和结果保护。远程内容一律视为
+不可信上下文。当前不支持本地 stdio MCP、OAuth、订阅和能力变更通知，完整边界见
+[MCP 远程能力接入](mcp-runtime-design.md)。
+
+Hosted Web Search 由模型供应商执行，不经过本地 Shell。Responses 使用原生 `web_search`，Anthropic
+使用原生 Web Search Tool；适配器把搜索状态、错误、引用和来源统一投影为 RunEvent 与工作记录。
+搜索能力按模型显式开启，普通连接测试、上下文压缩和后台专用模型调用不会携带搜索工具。完整
+支持矩阵见 [Hosted Web Search](hosted-web-search.md)。
 
 ### 会话消息生命周期
 
@@ -269,9 +298,15 @@ POST /api/v1/tasks/{taskId}/messages/stream
 POST /api/v1/tasks/{taskId}/messages/{messageId}/regenerate
 ```
 
-`ConversationMessage` 持久化消息顺序、角色、正文、模型、TokenUsage、发送时间和
-`duration_ms`。用户消息发送时间与 Assistant 回答耗时均由 Java 返回，Electron
+`ConversationMessage` 持久化消息顺序、角色、正文、模型、TokenUsage、最近请求的
+`activeContextTokens`、发送时间和 `duration_ms`。详细用量包括输入、输出、推理、缓存读写与
+缓存指标可用性；Java 的 `GET /api/v1/usage/statistics` 按本机已保存的 Assistant 消息聚合总量、
+每日用量、请求数、会话数、峰值和连续活跃天数。用户消息发送时间与 Assistant 回答耗时均由 Java 返回，Electron
 只维护流式生成期间的临时投影，因此应用重启后仍可恢复。
+
+任务页右侧上下文面板同时展示最近请求的上下文总量、会话累计用量和原始消息。用户、助手、
+工具调用与其他的上下文占比由 Renderer 根据本地消息和工作记录估算，只用于快速观察构成；
+个人资料页展示 Java 聚合的本机 Token 总量、每日热力图和缓存指标。两者都不上传到云端。
 
 Controller 不直接调用 Entity 的静态映射方法：任务和会话响应由独立 Converter
 完成；SSE 连接表属于 `controller/support`，持久化裁剪则由 conversation support

@@ -58,6 +58,7 @@ export interface UpdateModelSettingsInput {
 export interface ListModelsInput {
   providerName: string;
   baseUrl: string;
+  apiFormat?: ApiFormat;
   apiKey?: string;
 }
 

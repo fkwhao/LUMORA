@@ -5,9 +5,11 @@ import com.lumora.core.conversation.domain.model.ChatMessage;
 import com.lumora.core.conversation.domain.model.ChatStreamEvent;
 import com.lumora.core.conversation.domain.model.ChatStreamEventType;
 import com.lumora.core.conversation.application.service.ArtifactService;
-import com.lumora.core.model.application.service.ModelService;
+import com.lumora.core.conversation.application.model.ConversationRunRequest;
+import com.lumora.core.conversation.application.port.ContextCompactionPort;
+import com.lumora.core.conversation.application.port.ConversationRuntimePort;
+import com.lumora.core.conversation.application.port.ToolApprovalPort;
 import com.lumora.core.memory.application.service.MemoryService;
-import com.lumora.core.mcp.application.service.McpService;
 import com.lumora.core.conversation.application.support.ConversationContextSummaryService;
 import com.lumora.core.conversation.application.support.ConversationPersistenceService;
 import com.lumora.core.conversation.application.support.ConversationRunContext;
@@ -25,10 +27,7 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -48,7 +47,13 @@ class ConversationPermissionServiceTest {
         ConversationPersistenceService persistence = mock(
                 ConversationPersistenceService.class
         );
-        ModelService modelService = mock(ModelService.class);
+        ConversationRuntimePort conversationRuntime = mock(
+                ConversationRuntimePort.class
+        );
+        ContextCompactionPort contextCompactionPort = mock(
+                ContextCompactionPort.class
+        );
+        ToolApprovalPort toolApprovalPort = mock(ToolApprovalPort.class);
         MemoryExtractionCoordinator memoryCoordinator = mock(
                 MemoryExtractionCoordinator.class
         );
@@ -74,7 +79,7 @@ class ConversationPermissionServiceTest {
         doAnswer(invocation -> {
             @SuppressWarnings("unchecked")
             java.util.function.Consumer<ChatStreamEvent> consumer =
-                    invocation.getArgument(11);
+                    invocation.getArgument(1);
             consumer.accept(approvalRequested());
             approvalPublished.countDown();
             assertTrue(approvalDecided.await(5, TimeUnit.SECONDS));
@@ -87,39 +92,27 @@ class ConversationPermissionServiceTest {
                     ""
             ));
             return null;
-        }).when(modelService).streamChat(
-                anyList(),
-                anyString(),
-                nullable(String.class),
-                nullable(String.class),
-                nullable(String.class),
-                nullable(String.class),
-                eq("request_approval"),
-                eq("task-1"),
-                nullable(String.class),
-                anyList(),
-                anyList(),
-                any()
+        }).when(conversationRuntime).streamChat(
+                any(ConversationRunRequest.class), any()
         );
         doAnswer(invocation -> {
             approvalDecided.countDown();
             return null;
-        }).when(modelService).decideToolApproval(
+        }).when(toolApprovalPort).decideToolApproval(
                 anyString(),
                 anyString(),
                 anyString()
         );
-        McpService mcpService = mock(McpService.class);
-        when(mcpService.listEnabledServers()).thenReturn(List.of());
         ConversationServiceImpl service = new ConversationServiceImpl(
                 persistence,
-                modelService,
+                conversationRuntime,
+                contextCompactionPort,
+                toolApprovalPort,
                 executor,
                 memoryCoordinator,
                 mock(ConversationContextSummaryService.class),
                 mock(ArtifactService.class),
-                mock(MemoryService.class),
-                mcpService
+                mock(MemoryService.class)
         );
 
         service.streamMessage(
@@ -150,7 +143,7 @@ class ConversationPermissionServiceTest {
                 "allow_once"
         );
 
-        verify(modelService).decideToolApproval(
+        verify(toolApprovalPort).decideToolApproval(
                 "approval-1",
                 "allow_once",
                 "correlation-original"

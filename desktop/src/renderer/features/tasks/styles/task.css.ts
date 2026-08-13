@@ -2025,6 +2025,7 @@ globalStyle(".model-reasoning-trigger-effort", {
 
 globalStyle(".model-reasoning-popover", {
   position: "relative",
+  zIndex: "90",
   overflow: "visible",
   borderColor: "color-mix(in srgb, var(--ink) 11%, transparent)",
   background: "color-mix(in srgb, var(--surface) 99%, var(--ink) 1%)",
@@ -2076,6 +2077,7 @@ globalStyle(".model-reasoning-row > svg", {
 
 globalStyle(".model-reasoning-submenu", {
   position: "absolute",
+  zIndex: "91",
   bottom: "0",
   display: "grid",
   width: "238px",
@@ -2089,12 +2091,12 @@ globalStyle(".model-reasoning-submenu", {
   boxShadow: "0 14px 38px rgb(15 23 42 / 14%)",
 });
 
-globalStyle(".model-reasoning-submenu.is-model", {
+globalStyle(".model-reasoning-submenu.opens-left", {
   right: "calc(100% + 7px)",
   left: "auto",
 });
 
-globalStyle(".model-reasoning-submenu.is-reasoning", {
+globalStyle(".model-reasoning-submenu.opens-right", {
   right: "auto",
   left: "calc(100% + 7px)",
 });
@@ -2145,20 +2147,6 @@ globalStyle(".model-reasoning-option:hover", {
   background: "color-mix(in srgb, var(--ink) 14%, transparent) !important",
   boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--ink) 7%, transparent)",
 });
-
-globalStyle(
-  ".model-reasoning-submenu.is-model, .model-reasoning-submenu.is-reasoning",
-  {
-    "@media": {
-      "(max-width: 760px)": {
-        right: "0",
-        left: "auto",
-        bottom: "calc(100% + 7px)",
-        width: "220px",
-      },
-    },
-  },
-);
 
 globalStyle(".follow-up-composer .model-picker-popover > button", {
   minHeight: "34px",

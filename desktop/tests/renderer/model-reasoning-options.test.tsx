@@ -48,6 +48,7 @@ describe("model-specific reasoning options", () => {
     const modelMenu = await screen.findByRole("menu", { name: "选择模型" });
     expect(modelMenu).toBeInTheDocument();
     expect(modelMenu).toHaveClass("is-model");
+    expect(modelApi.listModels).not.toHaveBeenCalled();
 
     fireEvent.pointerEnter(
       screen.getByRole("button", { name: /^推理强度/ }),
@@ -135,11 +136,12 @@ function createHarness(reasoningEfforts: string[]) {
     decideApproval: vi.fn(),
   } as unknown as LumoraTaskApi;
   const modelApi = {
+    listModels: vi.fn(async () => ["remote-only-model"]),
     getSettings: vi.fn(async () => ({
       providerName: "DeepSeek",
       baseUrl: "https://api.deepseek.com",
       model: "deepseek-reasoner",
-      apiKeyConfigured: false,
+      apiKeyConfigured: true,
       contextWindow: 128_000,
       models: [
         {

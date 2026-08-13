@@ -32,11 +32,14 @@ Electron Renderer
 ## 当前能力
 
 - 创建或继续任务，由模型通过 `update_plan` 发布动态结构化计划并直接执行。
-- 使用 OpenAI-compatible 模型进行流式持续对话，支持模型选择和模型级推理强度。
+- 按模型配置真实路由 Chat Completions、OpenAI Responses 和 Anthropic Messages，支持流式持续对话、模型选择和模型级推理强度。
 - 在授权工作区内执行文件搜索、分段读取、局部补丁、完整写入和非交互 Shell 命令。
 - 使用结构化工作记录展示概括阶段和真实工具活动；模型隐藏推理不作为聊天正文展示。
-- 对敏感工具调用进行权限审批，并从工具记录打开局部 Diff 或大型结果 Artifact。
-- 自动或手动压缩较早上下文，并在 Java SQLite 中保存摘要、消息用量和活动上下文 Token。
+- 对敏感工具调用进行确定性分级、自动 Reviewer 或人工审批，并从工具记录打开局部 Diff 或大型结果 Artifact。
+- 接入远程 Streamable HTTP MCP 的 Tools、Resources、Resource Templates 与 Prompts，所有远程能力继续经过现有权限和审计链路。
+- 对支持的模型启用供应商托管 Web Search，并在工作过程中展示搜索状态、引用和来源。
+- 自动或手动压缩较早上下文，并在 Java SQLite 中保存摘要、活动上下文 Token 和输入、输出、推理、缓存等消息用量。
+- 在会话右侧查看上下文总量与本地估算细分，在个人资料页查看本机 Token 汇总、每日热力图和缓存指标。
 - 本地保存、归档和恢复任务会话；仅允许编辑最后一条用户消息并重新生成后续回答。
 - 支持 User、Project、Conversation 三层动态 Memory 和本地个性化开关。
 - Java 使用 MyBatis-Plus 将任务、计划、会话、模型配置、记忆、审批和 Artifact 索引写入 SQLite。

@@ -33,14 +33,18 @@ Windows DPAPI 加密的 API Key 密文，统一写入 Java SQLite。Python 只�
 中临时接收明文，不保存到 YAML、日志或数据库。旧的
 `agent/config/model-local.yml` 已不再使用。
 
-API 格式当前可保存 `anthropic`、`chat-completions` 和 `responses`，但运行时仍使用
-现有 Chat Completions Provider；该字段用于后续协议适配，不能据此认为另外两种协议
-已经接通。
+API 格式支持 `anthropic`、`chat-completions` 和 `responses`。Python Runtime 的
+`RoutingModelProvider` 会按该值分别调用 `/messages`、`/chat/completions` 或 `/responses`；
+三种适配器共用 Agent Harness、工具循环、审批、上下文压缩和 TokenUsage 归一化链路。
 
 每个自定义供应商可以保存多个模型 ID。上下文窗口和最大输出 Token 属于模型配置，
-不属于供应商公共字段；最大输出 Token 会作为 Chat Completions 的 `max_tokens` 发送。
+不属于供应商公共字段；最大输出 Token 会映射为所选协议对应的请求字段。
 设置页获取模型目录后会补齐本地模型记录，并允许逐项测试连接、编辑或删除。供应商可
 显式禁用；没有启用供应商时，聊天请求会提示先配置模型 API。
+
+Hosted Web Search 按模型显式开启：Responses 与 Anthropic 当前支持，Chat Completions 暂不
+启用。远程 MCP Server 在“设置 → MCP”维护，当前支持 Streamable HTTP、静态认证以及
+Tools/Resources/Resource Templates/Prompts；不支持本地 stdio 和 OAuth。
 
 ## Python
 

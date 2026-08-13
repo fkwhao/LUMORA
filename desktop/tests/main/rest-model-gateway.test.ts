@@ -63,6 +63,7 @@ describe("Java REST model gateway", () => {
     const models = await gateway.listModels({
       providerName: "DeepSeek",
       baseUrl: "https://api.deepseek.com",
+      apiFormat: "anthropic",
       apiKey: "provider-secret",
     });
 
@@ -70,6 +71,7 @@ describe("Java REST model gateway", () => {
     expect(JSON.parse(receivedBody)).toEqual({
       providerName: "DeepSeek",
       baseUrl: "https://api.deepseek.com",
+      apiFormat: "anthropic",
       apiKey: "provider-secret",
     });
     expect(models).toEqual(["deepseek-v4-flash", "deepseek-v4-pro"]);

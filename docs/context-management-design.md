@@ -33,10 +33,27 @@ estimationReserve 至少 1,024 Token。回合前尚无可对应的 Provider usag
 请求后新增的工具消息。供应商不返回 usage 时，自动退回完整本地估算，不把历史累计 usage
 误当成当前上下文大小。
 
-上下文占用与模型用量采用两个独立指标：`activeContextTokens` 表示最近一次模型请求实际携带的
-输入上下文，供压缩判断和界面圆环使用；`TokenUsage` 继续记录一次 Agent 运行内所有模型调用的
-`promptTokens`、`completionTokens` 与 `totalTokens` 累计值，持久化后用于使用统计、成本核算和
-后续云端计费。两者不得互相回退或替代。
+上下文占用与模型用量采用两个独立指标：`activeContextTokens` 表示最近一次模型请求携带的
+输入上下文规模，供压缩判断和界面圆环使用；`TokenUsage` 记录一次 Agent 运行内所有模型调用的
+累计用量，持久化后用于本机使用统计、成本核算和后续云端计费。两者不得互相回退或替代。
+
+`activeContextTokens` 优先采用供应商返回的 `promptTokens` / `input_tokens`。供应商未返回 usage
+时，Provider 会使用包含消息与工具定义的本地估算值写入同一字段，保证上下文占用和压缩判断仍
+可用。当前公开事件尚未携带独立的“该值是否估算”标志，因此历史记录只有该数值、无法在恢复后
+可靠区分来源；增加来源标志属于后续契约增强。在完全没有活动上下文值时，Renderer 才会根据
+本地可见会话文本退回更粗略的估算。
+
+统一 `TokenUsage` 当前包含：
+
+```text
+promptTokens / completionTokens / totalTokens
+inputTokens / outputTokens / reasoningTokens
+cacheReadTokens / cacheWriteTokens / cacheMetricsAvailable
+```
+
+协议适配器把 Chat Completions、Responses 与 Anthropic 的不同 usage 字段归一化。输入、输出与
+总量兼容性最高；推理和缓存明细仅在供应商返回时可用。缓存指标缺失时通过
+`cacheMetricsAvailable=false` 表达，界面显示“协议未返回”，不把缺失误解为真实的零缓存。
 
 压缩从历史尾部向前选择保留区：至少保留最近 5 条原文，并尽量覆盖最近 10,000 Token；其余
 较早消息交给模型生成结构化 Markdown 摘要。摘要要求保留用户目标、约束、决策、完成工作、
@@ -84,11 +101,18 @@ Artifact 判断前仍保留单结果 50,000 字符和单回合累计 200,000 字
 - Java：消息、摘要版本、Artifact 索引、任务归属、REST/SSE 契约。
 - Desktop：`/compact` 识别、处理步骤、Token 占比与 Artifact 分块查看。
 
+Java 将每条 Assistant 消息的详细 TokenUsage 和 `activeContextTokens` 写入 SQLite，并通过
+`GET /api/v1/usage/statistics` 聚合本机总量、每日用量、请求/会话数、峰值和连续活跃天数。
+Desktop 的个人资料页展示这些持久化统计；任务页右侧上下文面板展示最近请求的上下文总量、
+会话累计用量和原始消息。上下文面板中的“用户 / 助手 / 工具调用 / 其他”比例根据本地消息正文
+和工作记录估算，其中“其他”吸收系统 Prompt、工具 Schema、Memory、摘要及无法本地拆分的内容，
+只作为快速观察构成的参考。
+
 进程重启后 Java 从最新有效摘要恢复 `conversationSummary`，仅查询并发送其边界之后的原始消息。
 Artifact 由稳定 ID 重新定位，不依赖 Renderer 状态。
 
 ## 7. 当前限制与后续工作
 
-当前尚未实现模型专用 tokenizer、压缩连续失败熔断、摘要因历史重写而自动失效、Artifact 配额与
-过期清理、二进制 Artifact 预览。上述能力应在不改变公开 Artifact ID 和摘要边界协议的前提下
-增量加入。
+当前尚未实现模型专用 tokenizer、活动上下文值的精确/估算来源标志、精确的上下文分类计数、
+压缩连续失败熔断、摘要因历史重写而自动失效、Artifact 配额与过期清理、二进制 Artifact 预览。
+上述能力应在不改变公开 Artifact ID 和摘要边界协议的前提下增量加入。

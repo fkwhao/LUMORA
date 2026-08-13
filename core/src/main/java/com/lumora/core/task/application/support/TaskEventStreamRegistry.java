@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -34,7 +35,23 @@ public class TaskEventStreamRegistry {
         emitter.onCompletion(() -> remove(taskId, emitter));
         emitter.onTimeout(() -> remove(taskId, emitter));
         emitter.onError(ignored -> remove(taskId, emitter));
+        sendConnectedComment(taskId, emitter);
         return emitter;
+    }
+
+    /**
+     * Flush an SSE frame immediately so clients receive the HTTP response
+     * headers even when the task has no state event for a long time. A comment
+     * frame carries no task payload and is ignored by the desktop event parser.
+     */
+    private void sendConnectedComment(String taskId, SseEmitter emitter) {
+        try {
+            emitter.send(SseEmitter.event().comment("connected"));
+        } catch (IOException exception) {
+            remove(taskId, emitter);
+            emitter.completeWithError(exception);
+            throw new IllegalStateException("无法建立任务事件流", exception);
+        }
     }
 
     private void remove(String taskId, SseEmitter emitter) {

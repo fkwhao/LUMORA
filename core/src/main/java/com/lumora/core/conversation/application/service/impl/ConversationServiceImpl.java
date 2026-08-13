@@ -6,9 +6,11 @@ import com.lumora.core.conversation.domain.model.ChatStreamEventType;
 import com.lumora.core.conversation.domain.model.ContextCompaction;
 import com.lumora.core.conversation.application.service.ArtifactService;
 import com.lumora.core.conversation.application.service.ConversationService;
-import com.lumora.core.model.application.service.ModelService;
+import com.lumora.core.conversation.application.model.ConversationRunRequest;
+import com.lumora.core.conversation.application.port.ContextCompactionPort;
+import com.lumora.core.conversation.application.port.ConversationRuntimePort;
+import com.lumora.core.conversation.application.port.ToolApprovalPort;
 import com.lumora.core.memory.application.service.MemoryService;
-import com.lumora.core.mcp.application.service.McpService;
 import com.lumora.core.conversation.application.support.ContextCompactionInput;
 import com.lumora.core.conversation.application.support.ConversationContextSummaryService;
 import com.lumora.core.conversation.application.support.ConversationPersistenceService;
@@ -44,13 +46,14 @@ public class ConversationServiceImpl implements ConversationService {
     );
 
     private final ConversationPersistenceService persistenceService;
-    private final ModelService modelService;
+    private final ConversationRuntimePort conversationRuntimePort;
+    private final ContextCompactionPort contextCompactionPort;
+    private final ToolApprovalPort toolApprovalPort;
     private final ExecutorService executorService;
     private final MemoryExtractionCoordinator memoryExtractionCoordinator;
     private final ConversationContextSummaryService contextSummaryService;
     private final ArtifactService artifactService;
     private final MemoryService memoryService;
-    private final McpService mcpService;
     private final ConcurrentHashMap<String, FutureTask<Void>> activeRuns =
             new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, PendingToolApproval>
@@ -203,7 +206,7 @@ public class ConversationServiceImpl implements ConversationService {
         ContextCompactionInput input = persistenceService.prepareCompaction(
                 taskId
         );
-        ContextCompaction result = modelService.compactContext(
+        ContextCompaction result = contextCompactionPort.compactContext(
                 input.messages(), input.memorySummary(), taskId,
                 input.existingSummary(), model, correlationId
         );
@@ -261,7 +264,7 @@ public class ConversationServiceImpl implements ConversationService {
             throw new IllegalStateException("审批正在由其他请求处理");
         }
         try {
-            modelService.decideToolApproval(
+            toolApprovalPort.decideToolApproval(
                     normalizedApprovalId,
                     normalizedDecision,
                     pending.correlationId()
@@ -286,18 +289,19 @@ public class ConversationServiceImpl implements ConversationService {
         ConversationStreamAccumulator accumulator =
                 new ConversationStreamAccumulator();
         try {
-            modelService.streamChat(
-                    context.getModelMessages(),
-                    correlationId,
-                    model,
-                    reasoningEffort,
-                    context.getMemorySummary(),
-                    workspacePath,
-                    permissionMode,
-                    context.getTaskId(),
-                    context.getConversationSummary(),
-                    context.getMemoryCandidates(),
-                    mcpService.listEnabledServers(),
+            conversationRuntimePort.streamChat(
+                    new ConversationRunRequest(
+                            context.getModelMessages(),
+                            correlationId,
+                            model,
+                            reasoningEffort,
+                            context.getMemorySummary(),
+                            workspacePath,
+                            permissionMode,
+                            context.getTaskId(),
+                            context.getConversationSummary(),
+                            context.getMemoryCandidates()
+                    ),
                     event -> handleStreamEvent(
                             context,
                             accumulator,

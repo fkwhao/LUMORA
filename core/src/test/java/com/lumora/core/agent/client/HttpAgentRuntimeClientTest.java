@@ -8,11 +8,12 @@ import com.lumora.core.agent.config.AgentClientConfiguration;
 import com.lumora.core.agent.converter.AgentDtoMapper;
 import com.lumora.core.agent.exception.AgentRuntimeException;
 import com.lumora.core.agent.model.AgentPlanStep;
+import com.lumora.core.agent.model.AgentChatStreamRequest;
 import com.lumora.core.shared.api.constant.HttpContractConstants;
 import com.lumora.core.shared.config.CoreProperties;
 import com.lumora.core.conversation.domain.model.ChatCompletion;
 import com.lumora.core.conversation.domain.model.ChatMessage;
-import com.lumora.core.agent.model.AgentMemoryCandidate;
+import com.lumora.core.memory.domain.model.MemoryCandidate;
 import com.lumora.core.conversation.domain.model.ChatStreamEvent;
 import com.lumora.core.conversation.domain.model.ChatStreamEventType;
 import com.lumora.core.model.domain.model.ModelConnection;
@@ -321,7 +322,7 @@ class HttpAgentRuntimeClientTest {
                         }
                         """, MediaType.APPLICATION_JSON));
 
-        List<AgentMemoryCandidate> candidates = client.extractMemories(
+        List<MemoryCandidate> candidates = client.extractMemories(
                 "以后回答简洁一点",
                 "好的",
                 null,
@@ -372,11 +373,19 @@ class HttpAgentRuntimeClientTest {
         List<ChatStreamEvent> events = new ArrayList<>();
 
         client.streamChat(
-                List.of(new ChatMessage("user", "你好")),
-                CONNECTION,
-                "correlation-123",
-                "high",
-                "- [偏好] 用户偏好简洁回答",
+                new AgentChatStreamRequest(
+                        List.of(new ChatMessage("user", "你好")),
+                        CONNECTION,
+                        "correlation-123",
+                        "high",
+                        "- [偏好] 用户偏好简洁回答",
+                        null,
+                        "request_approval",
+                        null,
+                        null,
+                        List.of(),
+                        List.of()
+                ),
                 events::add
         );
 
@@ -422,13 +431,19 @@ class HttpAgentRuntimeClientTest {
         List<ChatStreamEvent> events = new ArrayList<>();
 
         client.streamChat(
-                List.of(new ChatMessage("user", "检查仓库")),
-                CONNECTION,
-                "correlation-123",
-                null,
-                null,
-                "F:/project/demo",
-                "request_approval",
+                new AgentChatStreamRequest(
+                        List.of(new ChatMessage("user", "检查仓库")),
+                        CONNECTION,
+                        "correlation-123",
+                        null,
+                        null,
+                        "F:/project/demo",
+                        "request_approval",
+                        null,
+                        null,
+                        List.of(),
+                        List.of()
+                ),
                 events::add
         );
 

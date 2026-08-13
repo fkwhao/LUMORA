@@ -1,14 +1,14 @@
 package com.lumora.core.memory.application.support;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.lumora.core.agent.model.AgentMemoryCandidate;
+import com.lumora.core.memory.domain.model.MemoryCandidate;
 import com.lumora.core.shared.config.CoreProperties;
 import com.lumora.core.memory.domain.entity.MemoryItem;
 import com.lumora.core.memory.domain.model.MemoryScopeType;
 import com.lumora.core.memory.domain.model.MemoryType;
 import com.lumora.core.memory.domain.model.MemoryWriteRequest;
 import com.lumora.core.memory.application.service.MemoryService;
-import com.lumora.core.model.application.service.ModelService;
+import com.lumora.core.memory.application.port.MemoryExtractionPort;
 import com.lumora.core.memory.application.support.MemoryExtractionCoordinator;
 import com.lumora.core.memory.application.support.ProjectInstructionService;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,14 +33,14 @@ class MemoryExtractionCoordinatorTest {
 
     private static final Instant NOW = Instant.parse("2026-08-03T03:00:00Z");
 
-    private ModelService modelService;
+    private MemoryExtractionPort memoryExtractionPort;
     private MemoryService memoryService;
     private MemoryExtractionCoordinator coordinator;
     private ProjectInstructionService projectInstructionService;
 
     @BeforeEach
     void setUp() {
-        modelService = mock(ModelService.class);
+        memoryExtractionPort = mock(MemoryExtractionPort.class);
         memoryService = mock(MemoryService.class);
         projectInstructionService = mock(ProjectInstructionService.class);
         when(memoryService.isEnabled()).thenReturn(true);
@@ -48,7 +48,7 @@ class MemoryExtractionCoordinatorTest {
         CoreProperties properties = new CoreProperties();
         properties.setMemoryAutoExtractionEnabled(true);
         coordinator = new MemoryExtractionCoordinator(
-                modelService,
+                memoryExtractionPort,
                 memoryService,
                 new ObjectMapper(),
                 Clock.fixed(NOW, ZoneOffset.UTC),
@@ -59,10 +59,10 @@ class MemoryExtractionCoordinatorTest {
 
     @Test
     void storesLongTermUserMemoryWithoutExpiry() {
-        when(modelService.extractMemories(
+        when(memoryExtractionPort.extractMemories(
                 anyString(), anyString(), nullable(String.class),
                 nullable(String.class), anyString()
-        )).thenReturn(List.of(new AgentMemoryCandidate(
+        )).thenReturn(List.of(new MemoryCandidate(
                 "USER",
                 "PREFERENCE",
                 "LONG_TERM",
@@ -100,10 +100,10 @@ class MemoryExtractionCoordinatorTest {
 
     @Test
     void storesShortTermConversationMemoryWithBoundedExpiry() {
-        when(modelService.extractMemories(
+        when(memoryExtractionPort.extractMemories(
                 anyString(), anyString(), nullable(String.class),
                 nullable(String.class), anyString()
-        )).thenReturn(List.of(new AgentMemoryCandidate(
+        )).thenReturn(List.of(new MemoryCandidate(
                 "CONVERSATION",
                 "SUMMARY",
                 "SHORT_TERM",
@@ -141,10 +141,10 @@ class MemoryExtractionCoordinatorTest {
 
     @Test
     void storesProjectMemoryInNormalizedWorkspaceScope() {
-        when(modelService.extractMemories(
+        when(memoryExtractionPort.extractMemories(
                 anyString(), anyString(), nullable(String.class),
                 nullable(String.class), anyString()
-        )).thenReturn(List.of(new AgentMemoryCandidate(
+        )).thenReturn(List.of(new MemoryCandidate(
                 "PROJECT",
                 "DECISION",
                 "LONG_TERM",
@@ -185,7 +185,7 @@ class MemoryExtractionCoordinatorTest {
 
     @Test
     void onlyLetsOneCandidateReuseTheSameLegacyMemoryId() {
-        when(modelService.extractMemories(
+        when(memoryExtractionPort.extractMemories(
                 anyString(), anyString(), nullable(String.class),
                 nullable(String.class), anyString()
         )).thenReturn(List.of(
@@ -224,10 +224,10 @@ class MemoryExtractionCoordinatorTest {
 
     @Test
     void archivesAnExplicitlyRevokedMemory() {
-        when(modelService.extractMemories(
+        when(memoryExtractionPort.extractMemories(
                 anyString(), anyString(), nullable(String.class),
                 nullable(String.class), anyString()
-        )).thenReturn(List.of(new AgentMemoryCandidate(
+        )).thenReturn(List.of(new MemoryCandidate(
                 "PROJECT",
                 "CONSTRAINT",
                 "LONG_TERM",
@@ -266,10 +266,10 @@ class MemoryExtractionCoordinatorTest {
 
     @Test
     void writesAProjectRuleToTheManagedInstructionFile() {
-        when(modelService.extractMemories(
+        when(memoryExtractionPort.extractMemories(
                 anyString(), anyString(), nullable(String.class),
                 nullable(String.class), anyString()
-        )).thenReturn(List.of(new AgentMemoryCandidate(
+        )).thenReturn(List.of(new MemoryCandidate(
                 "PROJECT",
                 "CONSTRAINT",
                 "LONG_TERM",
@@ -312,21 +312,21 @@ class MemoryExtractionCoordinatorTest {
 
     @Test
     void doesNotReactivateATargetArchivedEarlierInTheSameExtraction() {
-        AgentMemoryCandidate archived = new AgentMemoryCandidate(
+        MemoryCandidate archived = new MemoryCandidate(
                 "PROJECT", "DECISION", "LONG_TERM",
                 "项目不再限制编程语言", "project.language.constraint",
                 "当前项目", "programming_language", "不限制",
                 "memory-java", Map.of(), 0.98, 0.8, null,
                 "ARCHIVE", "MEMORY"
         );
-        AgentMemoryCandidate conflictingUpdate = new AgentMemoryCandidate(
+        MemoryCandidate conflictingUpdate = new MemoryCandidate(
                 "PROJECT", "DECISION", "LONG_TERM",
                 "项目可以引入其他语言", "project.language.constraint",
                 "当前项目", "programming_language", "不限制",
                 "memory-java", Map.of(), 0.95, 0.8, null,
                 "UPSERT", "MEMORY"
         );
-        when(modelService.extractMemories(
+        when(memoryExtractionPort.extractMemories(
                 anyString(), anyString(), nullable(String.class),
                 nullable(String.class), anyString()
         )).thenReturn(List.of(archived, conflictingUpdate));
@@ -346,13 +346,13 @@ class MemoryExtractionCoordinatorTest {
         verify(memoryService, org.mockito.Mockito.never()).remember(any());
     }
 
-    private static AgentMemoryCandidate candidate(
+    private static MemoryCandidate candidate(
             String dedupeKey,
             String predicate,
             String value,
             String targetMemoryId
     ) {
-        return new AgentMemoryCandidate(
+        return new MemoryCandidate(
                 "USER",
                 "DECISION",
                 "LONG_TERM",

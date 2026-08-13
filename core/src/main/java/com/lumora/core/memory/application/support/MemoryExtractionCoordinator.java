@@ -2,13 +2,13 @@ package com.lumora.core.memory.application.support;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.lumora.core.agent.model.AgentMemoryCandidate;
+import com.lumora.core.memory.domain.model.MemoryCandidate;
 import com.lumora.core.shared.config.CoreProperties;
 import com.lumora.core.memory.domain.model.MemoryScopeType;
 import com.lumora.core.memory.domain.model.MemoryType;
 import com.lumora.core.memory.domain.model.MemoryWriteRequest;
 import com.lumora.core.memory.application.service.MemoryService;
-import com.lumora.core.model.application.service.ModelService;
+import com.lumora.core.memory.application.port.MemoryExtractionPort;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,7 +40,7 @@ public class MemoryExtractionCoordinator {
             "(?m)^id=([A-Za-z0-9_-]{1,100});"
     );
 
-    private final ModelService modelService;
+    private final MemoryExtractionPort memoryExtractionPort;
     private final MemoryService memoryService;
     private final ObjectMapper objectMapper;
     private final Clock clock;
@@ -73,7 +73,7 @@ public class MemoryExtractionCoordinator {
                 || !memoryService.isEnabled()) {
             return 0;
         }
-        List<AgentMemoryCandidate> candidates = modelService.extractMemories(
+        List<MemoryCandidate> candidates = memoryExtractionPort.extractMemories(
                 userMessage,
                 assistantMessage,
                 existingMemorySummary,
@@ -86,7 +86,7 @@ public class MemoryExtractionCoordinator {
         Set<String> allowedTargetIds = existingMemoryIds(
                 existingMemorySummary
         );
-        for (AgentMemoryCandidate candidate : candidates) {
+        for (MemoryCandidate candidate : candidates) {
             try {
                 if ("PROJECT_INSTRUCTIONS".equals(candidate.getStorage())) {
                     if (applyProjectInstruction(candidate, projectScopeId)) {
@@ -130,7 +130,7 @@ public class MemoryExtractionCoordinator {
     }
 
     private MemoryWriteRequest toWriteRequest(
-            AgentMemoryCandidate candidate,
+            MemoryCandidate candidate,
             String conversationId,
             String projectScopeId,
             String sourceMessageId,
@@ -203,7 +203,7 @@ public class MemoryExtractionCoordinator {
     }
 
     private boolean applyProjectInstruction(
-            AgentMemoryCandidate candidate,
+            MemoryCandidate candidate,
             String projectScopeId
     ) {
         if (!"LONG_TERM".equals(candidate.getRetention())
@@ -228,7 +228,7 @@ public class MemoryExtractionCoordinator {
     }
 
     private boolean archiveMemory(
-            AgentMemoryCandidate candidate,
+            MemoryCandidate candidate,
             String conversationId,
             String projectScopeId,
             Set<String> claimedTargetIds,
@@ -300,7 +300,7 @@ public class MemoryExtractionCoordinator {
         return value;
     }
 
-    private long resolveTtl(AgentMemoryCandidate candidate) {
+    private long resolveTtl(MemoryCandidate candidate) {
         Long requested = candidate.getTtlSeconds();
         if (requested == null) {
             return DEFAULT_SHORT_TERM_TTL_SECONDS;

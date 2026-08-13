@@ -27,6 +27,7 @@ import {
   cacheHitRate,
   normalizeTokenUsage,
 } from "../state/token-usage";
+import { resolveContextBreakdown } from "../state/context-usage";
 
 interface ConversationUsagePaneProps {
   open: boolean;
@@ -90,7 +91,7 @@ export function ConversationUsagePane({
   const dates = messages
     .map((message) => message.createdAt)
     .filter((value): value is string => Boolean(value));
-  const breakdown = resolveContextBreakdown(messages, contextTokens);
+  const breakdown = resolveContextBreakdown(messages);
   const style = { "--context-pane-width": `${width}px` } as CSSProperties;
 
   function startResize(event: PointerEvent<HTMLDivElement>) {
@@ -249,10 +250,7 @@ export function ConversationUsagePane({
           <header>
             <Gauge />
             <strong>上下文细分</strong>
-            <span>
-              {estimated ? "本地估算总量" : "最近请求总量"} · {formatTokens(contextTokens)} Token
-              · 细分为本地估算
-            </span>
+            <span>{formatTokens(contextTokens)} Token</span>
           </header>
           <div className="context-breakdown-bar" aria-hidden="true">
             {breakdown.map((part) => (
@@ -309,42 +307,6 @@ export function ConversationUsagePane({
 
 function UsageFact({ label, value }: { label: string; value: string }) {
   return <div><span>{label}</span><strong title={value}>{value}</strong></div>;
-}
-
-function resolveContextBreakdown(messages: ChatMessage[], contextTokens: number) {
-  const user = messages
-    .filter((message) => message.role === "user")
-    .reduce((total, message) => total + estimateTextTokens(message.content), 0);
-  const assistant = messages
-    .filter((message) => message.role === "assistant")
-    .reduce((total, message) => total + estimateTextTokens(message.content), 0);
-  const tools = messages.reduce(
-    (total, message) => total + (
-      message.workLog?.length
-        ? estimateTextTokens(JSON.stringify(message.workLog))
-        : 0
-    ),
-    0,
-  );
-  const known = user + assistant + tools;
-  const denominator = Math.max(contextTokens, known, 1);
-  const other = Math.max(0, denominator - known);
-  return [
-    { kind: "user", label: "用户", percent: (user / denominator) * 100 },
-    { kind: "assistant", label: "助手", percent: (assistant / denominator) * 100 },
-    { kind: "tools", label: "工具调用", percent: (tools / denominator) * 100 },
-    { kind: "other", label: "其他", percent: (other / denominator) * 100 },
-  ];
-}
-
-function estimateTextTokens(content: string): number {
-  let ascii = 0;
-  let nonAscii = 0;
-  for (const character of content) {
-    if (character.codePointAt(0)! <= 0x7f) ascii += 1;
-    else nonAscii += 1;
-  }
-  return nonAscii + Math.ceil(ascii / 4);
 }
 
 function formatPercent(value: number): string {

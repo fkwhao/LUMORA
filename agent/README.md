@@ -4,12 +4,13 @@ Python 3.12 Agent 推理与编排运行时。
 
 ## 职责
 
-- 任务规划和 Agent 状态图。
+- Agent Harness、动态计划、模型—工具循环和上下文压缩。
 - Chat Completions、OpenAI Responses、Anthropic Messages 三种协议适配，
-  对话流式响应和模型设置。
-- 后续 Agent Harness、动态编排和中断恢复。
-- 文档理解与结果验证能力边界。
-- 通过 REST 接收 Java 的规划请求并返回结构化计划步骤。
+  对话流式响应、TokenUsage 归一化和模型设置。
+- 文件、Shell、Artifact 与远程 MCP 工具注册、结果保护和权限执行。
+- 确定性权限分级、自动审批 Reviewer 和人工审批暂停/恢复。
+- Responses 与 Anthropic 的供应商托管 Web Search 事件和来源转换。
+- 通过 REST/SSE 接收 Java 的会话请求并返回统一运行事件。
 
 ## 边界
 
@@ -32,11 +33,15 @@ python -m pip install -r requirements-dev.txt
 app/controller/http/   REST 请求、认证和错误转换
 app/dto/               REST 请求与响应模型
 app/security/          本机启动令牌校验
-app/service/           Agent 规划与编排业务
+app/harness/           Agent 生命周期、模型—工具循环、运行事件和 Provider Port
+app/execution/         工具调用、审批衔接、Artifact 外置和模型输入保护
+app/service/           会话、MCP、Memory 等应用用例
 app/model/             Pydantic 数据模型
-app/provider/          模型供应商适配、流式事件转换与独立 Agent 工具循环
+app/provider/          三种模型协议适配、路由、流式事件和 TokenUsage 归一化
 app/prompt/            分层 System Prompt、动态上下文和模板装配
 app/tool/              工具工厂、注册中心和受工作区限制的内置工具
+app/permission/        分层权限策略、Shell 分类与自动 Reviewer
+app/mcp/               远程 Streamable HTTP MCP 客户端和能力适配
 app/config/            YAML 运行配置
 app/exception/         运行时异常
 app/main.py            FastAPI 与 Uvicorn 生命周期

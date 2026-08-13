@@ -1,8 +1,8 @@
-package com.lumora.core.agent.model;
+package com.lumora.core.memory.domain.model;
 
 import java.util.Map;
 
-public class AgentMemoryCandidate {
+public class MemoryCandidate {
 
     private final String scope;
     private final String type;
@@ -20,7 +20,7 @@ public class AgentMemoryCandidate {
     private final String action;
     private final String storage;
 
-    public AgentMemoryCandidate(
+    public MemoryCandidate(
             String scope,
             String type,
             String retention,
@@ -56,7 +56,7 @@ public class AgentMemoryCandidate {
         this.storage = storage == null ? "MEMORY" : storage;
     }
 
-    public AgentMemoryCandidate(
+    public MemoryCandidate(
             String scope,
             String type,
             String retention,
@@ -76,7 +76,7 @@ public class AgentMemoryCandidate {
                 ttlSeconds, "UPSERT", "MEMORY");
     }
 
-    public AgentMemoryCandidate(
+    public MemoryCandidate(
             String scope,
             String type,
             String retention,

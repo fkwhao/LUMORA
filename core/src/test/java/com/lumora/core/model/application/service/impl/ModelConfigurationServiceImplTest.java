@@ -6,8 +6,9 @@ import com.lumora.core.model.infrastructure.persistence.ModelConfigurationMapper
 import com.lumora.core.model.infrastructure.persistence.ModelConfigurationModelMapper;
 import com.lumora.core.model.domain.model.ModelSettings;
 import com.lumora.core.model.domain.model.ModelProvider;
+import com.lumora.core.model.application.port.ModelProviderGateway;
 import com.lumora.core.shared.security.secret.SecretProtector;
-import com.lumora.core.model.application.service.impl.ModelServiceImpl;
+import com.lumora.core.model.application.service.impl.ModelConfigurationServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -23,21 +24,21 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-class ModelServiceImplTest {
+class ModelConfigurationServiceImplTest {
 
     private final AtomicReference<ModelConfiguration> stored =
             new AtomicReference<>();
     private ModelConfigurationMapper mapper;
     private ModelConfigurationModelMapper modelMapper;
     private SecretProtector protector;
-    private ModelServiceImpl service;
+    private ModelConfigurationServiceImpl service;
 
     @BeforeEach
     void setUp() {
         mapper = mock(ModelConfigurationMapper.class);
         modelMapper = mock(ModelConfigurationModelMapper.class);
         protector = mock(SecretProtector.class);
-        AgentRuntimeClient runtimeClient = mock(AgentRuntimeClient.class);
+        ModelProviderGateway providerGateway = mock(ModelProviderGateway.class);
         when(mapper.selectById("default")).thenAnswer(
                 invocation -> stored.get()
         );
@@ -53,11 +54,11 @@ class ModelServiceImplTest {
                 .thenReturn("dpapi-ciphertext");
         when(mapper.selectCount(null)).thenReturn(0L);
 
-        service = new ModelServiceImpl(
+        service = new ModelConfigurationServiceImpl(
                 mapper,
                 modelMapper,
                 protector,
-                runtimeClient,
+                providerGateway,
                 Clock.fixed(
                         Instant.parse("2026-07-30T01:02:03Z"),
                         ZoneOffset.UTC

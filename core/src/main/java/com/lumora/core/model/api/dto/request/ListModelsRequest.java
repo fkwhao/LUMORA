@@ -14,6 +14,8 @@ public class ListModelsRequest {
     @NotBlank(message = "API 地址不能为空")
     @Size(max = 500, message = "API 地址过长")
     private String baseUrl;
+    @NotBlank(message = "API 格式不能为空")
+    private String apiFormat;
     @Size(
             max = ModelConfigurationConstants.MAX_API_KEY_LENGTH,
             message = "API Key 过长"
@@ -34,6 +36,14 @@ public class ListModelsRequest {
 
     public void setBaseUrl(String baseUrl) {
         this.baseUrl = baseUrl;
+    }
+
+    public String getApiFormat() {
+        return apiFormat;
+    }
+
+    public void setApiFormat(String apiFormat) {
+        this.apiFormat = apiFormat;
     }
 
     public String getApiKey() {

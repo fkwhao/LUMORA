@@ -5,7 +5,7 @@ import com.lumora.core.shared.api.constant.HttpContractConstants;
 import com.lumora.core.conversation.api.dto.request.ChatCompletionRequest;
 import com.lumora.core.conversation.api.dto.response.ChatCompletionResponse;
 import com.lumora.core.conversation.domain.model.ChatMessage;
-import com.lumora.core.model.application.service.ModelService;
+import com.lumora.core.conversation.application.port.ConversationRuntimePort;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,7 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping(ApiPathConstants.CHAT_COMPLETIONS)
 public class ChatController {
 
-    private final ModelService modelService;
+    private final ConversationRuntimePort conversationRuntime;
 
     @PostMapping
     public ChatCompletionResponse complete(
@@ -28,7 +28,7 @@ public class ChatController {
             String correlationId
     ) {
         return ChatCompletionResponse.fromModel(
-                modelService.completeChat(
+                conversationRuntime.completeChat(
                         request.getMessages().stream()
                                 .map(message -> new ChatMessage(
                                         message.getRole(),

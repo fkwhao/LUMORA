@@ -25,20 +25,47 @@ public class ModelProviderResponse {
         active = provider.isActive();
         apiKeyConfigured = provider.isApiKeyConfigured();
         models = provider.getModels().stream()
-                .map(ProviderModelResponse::fromModel)
-                .toList();
+            .map(ProviderModelResponse::fromModel)
+            .toList();
     }
 
     public static ModelProviderResponse fromModel(ModelProvider provider) {
         return new ModelProviderResponse(provider);
     }
-    public String getProviderId() { return providerId; }
-    public String getProviderName() { return providerName; }
-    public String getBaseUrl() { return baseUrl; }
-    public String getModel() { return model; }
-    public int getContextWindow() { return contextWindow; }
-    public String getApiFormat() { return apiFormat; }
-    public boolean isActive() { return active; }
-    public boolean isApiKeyConfigured() { return apiKeyConfigured; }
-    public List<ProviderModelResponse> getModels() { return models; }
+
+    public String getProviderId() {
+        return providerId;
+    }
+
+    public String getProviderName() {
+        return providerName;
+    }
+
+    public String getBaseUrl() {
+        return baseUrl;
+    }
+
+    public String getModel() {
+        return model;
+    }
+
+    public int getContextWindow() {
+        return contextWindow;
+    }
+
+    public String getApiFormat() {
+        return apiFormat;
+    }
+
+    public boolean isActive() {
+        return active;
+    }
+
+    public boolean isApiKeyConfigured() {
+        return apiKeyConfigured;
+    }
+
+    public List<ProviderModelResponse> getModels() {
+        return models;
+    }
 }

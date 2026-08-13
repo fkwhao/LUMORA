@@ -12,9 +12,9 @@ from app.dto.response.memory_extraction_response import (
 from app.exception.provider_errors import ModelProviderError
 from app.harness.ports.model_provider import CompletionProviderPort
 from app.model.model_connection_settings import ModelConnectionSettings
+from app.prompt.project_instruction_loader import ProjectInstructionLoader
 from app.prompt.prompt_assembly import PromptAssembly
 from app.prompt.prompt_loader import PromptLoader
-from app.prompt.project_instruction_loader import ProjectInstructionLoader
 from app.prompt.prompt_segment import (
     PromptCachePolicy,
     PromptPriority,
@@ -52,6 +52,9 @@ class MemoryExtractionService:
             base_url=request.connection.base_url,
             model=request.connection.model,
             api_key=request.connection.api_key,
+            max_output_tokens=request.connection.max_output_tokens,
+            context_window=request.connection.context_window,
+            api_format=request.connection.api_format,
         )
         settings.validate()
         prompt = PromptAssembly((
@@ -133,13 +136,12 @@ class MemoryExtractionService:
                 candidate.ttl_seconds = None
             elif candidate.scope != "CONVERSATION":
                 raise ValueError("短期记忆只能属于当前会话")
-            if candidate.storage == "PROJECT_INSTRUCTIONS":
-                if (
-                    candidate.scope != "PROJECT"
-                    or candidate.retention != "LONG_TERM"
-                    or candidate.type not in {"CONSTRAINT", "DECISION"}
-                ):
-                    raise ValueError("项目指令候选的范围或类型无效")
+            if candidate.storage == "PROJECT_INSTRUCTIONS" and (
+                candidate.scope != "PROJECT"
+                or candidate.retention != "LONG_TERM"
+                or candidate.type not in {"CONSTRAINT", "DECISION"}
+            ):
+                raise ValueError("项目指令候选的范围或类型无效")
             if (
                 candidate.action == "ARCHIVE"
                 and candidate.storage == "MEMORY"

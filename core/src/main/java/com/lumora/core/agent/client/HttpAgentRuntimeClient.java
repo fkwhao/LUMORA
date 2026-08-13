@@ -15,13 +15,13 @@ import com.lumora.core.agent.dto.response.AgentChatCompletionResponse;
 import com.lumora.core.agent.dto.response.AgentPlanTaskResponse;
 import com.lumora.core.agent.dto.response.AgentModelListResponse;
 import com.lumora.core.agent.model.AgentPlanStep;
-import com.lumora.core.agent.model.AgentMemoryCandidate;
+import com.lumora.core.memory.domain.model.MemoryCandidate;
+import com.lumora.core.agent.model.AgentChatStreamRequest;
 import com.lumora.core.conversation.domain.model.ChatCompletion;
 import com.lumora.core.conversation.domain.model.ChatMessage;
 import com.lumora.core.conversation.domain.model.ChatStreamEvent;
 import com.lumora.core.conversation.domain.model.ContextCompaction;
 import com.lumora.core.model.domain.model.ModelConnection;
-import com.lumora.core.memory.domain.model.MemoryContextItem;
 import com.lumora.core.mcp.domain.model.McpConnectionTest;
 import com.lumora.core.mcp.domain.model.McpServerRuntimeConfiguration;
 import lombok.RequiredArgsConstructor;
@@ -47,309 +47,185 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
 
     @Override
     public McpConnectionTest testMcpServer(
-            McpServerRuntimeConfiguration configuration,
-            String correlationId
+        McpServerRuntimeConfiguration configuration,
+        String correlationId
     ) {
         var response = exceptionMapper.execute(
-                () -> httpApi.testMcpServer(
-                        correlationId,
-                        new AgentMcpServerRequest(configuration)
-                )
+            () -> httpApi.testMcpServer(
+                correlationId,
+                new AgentMcpServerRequest(configuration)
+            )
         );
         return new McpConnectionTest(
-                response.isConnected(),
-                response.getServerName(),
-                response.getServerVersion(),
-                response.getTools(),
-                response.getResources(),
-                response.getResourceTemplates(),
-                response.getPrompts(),
-                response.getEchoOutput()
+            response.isConnected(),
+            response.getServerName(),
+            response.getServerVersion(),
+            response.getTools(),
+            response.getResources(),
+            response.getResourceTemplates(),
+            response.getPrompts(),
+            response.getEchoOutput()
         );
     }
 
     @Override
     public void decideToolApproval(
-            String approvalId,
-            String decision,
-            String correlationId
+        String approvalId,
+        String decision,
+        String correlationId
     ) {
         exceptionMapper.executeVoid(() -> httpApi.decideToolApproval(
+            correlationId,
+            approvalId,
+            new AgentToolApprovalDecisionRequest(decision)
+        ));
+    }
+
+    @Override
+    public List<MemoryCandidate> extractMemories(
+        String userMessage,
+        String assistantMessage,
+        String existingMemorySummary,
+        ModelConnection connection,
+        String correlationId
+    ) {
+        return dtoMapper.toMemoryCandidates(exceptionMapper.execute(
+            () -> httpApi.extractMemories(
                 correlationId,
-                approvalId,
-                new AgentToolApprovalDecisionRequest(decision)
+                new AgentMemoryExtractionRequest(
+                    userMessage,
+                    assistantMessage,
+                    existingMemorySummary,
+                    new AgentModelConnectionRequest(connection)
+                )
+            )
         ));
     }
 
     @Override
-    public List<AgentMemoryCandidate> extractMemories(
-            String userMessage,
-            String assistantMessage,
-            String existingMemorySummary,
-            ModelConnection connection,
-            String correlationId
+    public List<MemoryCandidate> extractMemories(
+        String userMessage,
+        String assistantMessage,
+        String existingMemorySummary,
+        String workspacePath,
+        ModelConnection connection,
+        String correlationId
     ) {
         return dtoMapper.toMemoryCandidates(exceptionMapper.execute(
-                () -> httpApi.extractMemories(
-                        correlationId,
-                        new AgentMemoryExtractionRequest(
-                                userMessage,
-                                assistantMessage,
-                                existingMemorySummary,
-                                new AgentModelConnectionRequest(connection)
-                        )
+            () -> httpApi.extractMemories(
+                correlationId,
+                new AgentMemoryExtractionRequest(
+                    userMessage,
+                    assistantMessage,
+                    existingMemorySummary,
+                    workspacePath,
+                    new AgentModelConnectionRequest(connection)
                 )
-        ));
-    }
-
-    @Override
-    public List<AgentMemoryCandidate> extractMemories(
-            String userMessage,
-            String assistantMessage,
-            String existingMemorySummary,
-            String workspacePath,
-            ModelConnection connection,
-            String correlationId
-    ) {
-        return dtoMapper.toMemoryCandidates(exceptionMapper.execute(
-                () -> httpApi.extractMemories(
-                        correlationId,
-                        new AgentMemoryExtractionRequest(
-                                userMessage,
-                                assistantMessage,
-                                existingMemorySummary,
-                                workspacePath,
-                                new AgentModelConnectionRequest(connection)
-                        )
-                )
+            )
         ));
     }
 
     @Override
     public List<String> listModels(
-            String providerName,
-            String baseUrl,
-            String apiKey,
-            String correlationId
+        String providerName,
+        String baseUrl,
+        String apiKey,
+        String correlationId
     ) {
         return listModels(providerName, baseUrl, apiKey,
-                "chat-completions", correlationId);
+            "chat-completions", correlationId);
     }
 
     @Override
     public List<String> listModels(
-            String providerName,
-            String baseUrl,
-            String apiKey,
-            String apiFormat,
-            String correlationId
+        String providerName,
+        String baseUrl,
+        String apiKey,
+        String apiFormat,
+        String correlationId
     ) {
         AgentModelListResponse response = exceptionMapper.execute(
-                () -> httpApi.listModels(
-                        correlationId,
-                        new AgentModelListRequest(
-                                providerName,
-                                baseUrl,
-                                apiKey,
-                                apiFormat
-                        )
+            () -> httpApi.listModels(
+                correlationId,
+                new AgentModelListRequest(
+                    providerName,
+                    baseUrl,
+                    apiKey,
+                    apiFormat
                 )
+            )
         );
         return response.getModels();
     }
 
     @Override
     public List<AgentPlanStep> planTask(
-            String taskId,
-            String goal,
-            String correlationId
+        String taskId,
+        String goal,
+        String correlationId
     ) {
         AgentPlanTaskResponse response = exceptionMapper.execute(
-                () -> httpApi.planTask(
-                        correlationId,
-                        new AgentPlanTaskRequest(taskId, goal)
-                )
+            () -> httpApi.planTask(
+                correlationId,
+                new AgentPlanTaskRequest(taskId, goal)
+            )
         );
         return dtoMapper.toPlanSteps(response);
     }
 
     @Override
     public ChatCompletion completeChat(
-            List<ChatMessage> messages,
-            ModelConnection connection,
-            String correlationId
+        List<ChatMessage> messages,
+        ModelConnection connection,
+        String correlationId
     ) {
         AgentChatCompletionRequest request = dtoMapper.toChatRequest(
-                messages,
-                connection,
-                null
+            messages,
+            connection,
+            null
         );
         AgentChatCompletionResponse response = exceptionMapper.execute(
-                () -> httpApi.completeChat(correlationId, request)
+            () -> httpApi.completeChat(correlationId, request)
         );
         return dtoMapper.toChatCompletion(response);
     }
 
     @Override
     public ContextCompaction compactChat(
-            List<ChatMessage> messages,
-            ModelConnection connection,
-            String memorySummary,
-            String taskId,
-            String conversationSummary,
-            String correlationId
+        List<ChatMessage> messages,
+        ModelConnection connection,
+        String memorySummary,
+        String taskId,
+        String conversationSummary,
+        String correlationId
     ) {
         return dtoMapper.toContextCompaction(exceptionMapper.execute(
-                () -> httpApi.compactChat(
-                        correlationId,
-                        dtoMapper.toChatRequest(
-                                messages, connection, null, memorySummary,
-                                null, "request_approval", taskId,
-                                conversationSummary
-                        )
+            () -> httpApi.compactChat(
+                correlationId,
+                dtoMapper.toChatRequest(
+                    messages, connection, null, memorySummary,
+                    null, "request_approval", taskId,
+                    conversationSummary
                 )
+            )
         ));
     }
 
     @Override
     public void streamChat(
-            List<ChatMessage> messages,
-            ModelConnection connection,
-            String correlationId,
-            String reasoningEffort,
-            String memorySummary,
-            Consumer<ChatStreamEvent> eventConsumer
-    ) {
-        streamChat(
-                messages,
-                connection,
-                correlationId,
-                reasoningEffort,
-                memorySummary,
-                null,
-                eventConsumer
-        );
-    }
-
-    @Override
-    public void streamChat(
-            List<ChatMessage> messages,
-            ModelConnection connection,
-            String correlationId,
-            String reasoningEffort,
-            String memorySummary,
-            String workspacePath,
-            Consumer<ChatStreamEvent> eventConsumer
-    ) {
-        streamChat(
-                messages,
-                connection,
-                correlationId,
-                reasoningEffort,
-                memorySummary,
-                workspacePath,
-                "request_approval",
-                eventConsumer
-        );
-    }
-
-    @Override
-    public void streamChat(
-            List<ChatMessage> messages,
-            ModelConnection connection,
-            String correlationId,
-            String reasoningEffort,
-            String memorySummary,
-            String workspacePath,
-            String permissionMode,
-            Consumer<ChatStreamEvent> eventConsumer
+        AgentChatStreamRequest request,
+        Consumer<ChatStreamEvent> eventConsumer
     ) {
         sseClient.streamChat(
-                correlationId,
-                dtoMapper.toChatRequest(
-                        messages,
-                        connection,
-                        reasoningEffort,
-                        memorySummary,
-                        workspacePath,
-                        permissionMode
-                ),
-                eventConsumer
-        );
-    }
-
-    @Override
-    public void streamChat(
-            List<ChatMessage> messages,
-            ModelConnection connection,
-            String correlationId,
-            String reasoningEffort,
-            String memorySummary,
-            String workspacePath,
-            String permissionMode,
-            String taskId,
-            String conversationSummary,
-            Consumer<ChatStreamEvent> eventConsumer
-    ) {
-        sseClient.streamChat(
-                correlationId,
-                dtoMapper.toChatRequest(
-                        messages, connection, reasoningEffort, memorySummary,
-                        workspacePath, permissionMode, taskId,
-                        conversationSummary
-                ),
-                eventConsumer
-        );
-    }
-
-    @Override
-    public void streamChat(
-            List<ChatMessage> messages,
-            ModelConnection connection,
-            String correlationId,
-            String reasoningEffort,
-            String memorySummary,
-            String workspacePath,
-            String permissionMode,
-            String taskId,
-            String conversationSummary,
-            List<MemoryContextItem> memoryCandidates,
-            Consumer<ChatStreamEvent> eventConsumer
-    ) {
-        sseClient.streamChat(
-                correlationId,
-                dtoMapper.toChatRequest(
-                        messages, connection, reasoningEffort, memorySummary,
-                        workspacePath, permissionMode, taskId,
-                        conversationSummary, memoryCandidates
-                ),
-                eventConsumer
-        );
-    }
-
-    @Override
-    public void streamChat(
-            List<ChatMessage> messages,
-            ModelConnection connection,
-            String correlationId,
-            String reasoningEffort,
-            String memorySummary,
-            String workspacePath,
-            String permissionMode,
-            String taskId,
-            String conversationSummary,
-            List<MemoryContextItem> memoryCandidates,
-            List<McpServerRuntimeConfiguration> mcpServers,
-            Consumer<ChatStreamEvent> eventConsumer
-    ) {
-        sseClient.streamChat(
-                correlationId,
-                dtoMapper.toChatRequest(
-                        messages, connection, reasoningEffort, memorySummary,
-                        workspacePath, permissionMode, taskId,
-                        conversationSummary, memoryCandidates, mcpServers
-                ),
-                eventConsumer
+            request.correlationId(),
+            dtoMapper.toChatRequest(
+                request.messages(), request.connection(),
+                request.reasoningEffort(), request.memorySummary(),
+                request.workspacePath(), request.permissionMode(),
+                request.taskId(), request.conversationSummary(),
+                request.memoryCandidates(), request.mcpServers()
+            ),
+            eventConsumer
         );
     }
 }

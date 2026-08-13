@@ -92,6 +92,10 @@ import {
 } from "../../layout/context-pane-preferences";
 import { resolveContextUsage } from "../state/context-usage";
 import { resolveQuestionRailTooltipPosition } from "../state/question-rail-tooltip";
+import {
+  resolveModelSubmenuPlacement,
+  type ModelSubmenuPlacement,
+} from "../state/model-submenu-position";
 import type { TaskStore } from "../state/task-store";
 
 interface TaskPageProps {
@@ -172,7 +176,6 @@ export const TaskPage = memo(function TaskPage({
   const [selectedChangeId, setSelectedChangeId] = useState<string>();
   const [modelSettings, setModelSettings] = useState<ModelSettings>();
   const [selectedModel, setSelectedModel] = useState("");
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [reasoningEffort, setReasoningEffort] =
     useState<ComposerReasoningEffort>("");
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(
@@ -184,6 +187,8 @@ export const TaskPage = memo(function TaskPage({
   const [modelPickerSection, setModelPickerSection] = useState<
     "model" | "reasoning" | null
   >(null);
+  const [modelSubmenuPlacement, setModelSubmenuPlacement] =
+    useState<ModelSubmenuPlacement>("left");
   const [artifact, setArtifact] = useState<ArtifactChunk>();
   const [artifactLoading, setArtifactLoading] = useState(false);
   const [artifactError, setArtifactError] = useState<string>();
@@ -196,6 +201,7 @@ export const TaskPage = memo(function TaskPage({
   const questionRailScrollFrameRef = useRef<number | null>(null);
   const followUpInputRef = useRef<HTMLTextAreaElement>(null);
   const conversationFooterRef = useRef<HTMLDivElement>(null);
+  const modelPopoverRef = useRef<HTMLDivElement>(null);
   const composerMenuRef = useRef<HTMLFormElement>(null);
   const contextFileInputRef = useRef<HTMLInputElement>(null);
   const taskActionsRef = useRef<HTMLDivElement>(null);
@@ -208,6 +214,24 @@ export const TaskPage = memo(function TaskPage({
   const runtimeMessageCacheRef = useRef(
     new Map<string, RuntimeMessageCacheEntry>(),
   );
+
+  useLayoutEffect(() => {
+    if (composerMenu !== "model" || !modelPickerSection) return;
+    const updatePlacement = () => {
+      const popup = modelPopoverRef.current?.getBoundingClientRect();
+      if (!popup) return;
+      setModelSubmenuPlacement(
+        resolveModelSubmenuPlacement(
+          popup,
+          { left: 0, right: window.innerWidth },
+          modelPickerSection === "reasoning" ? "right" : "left",
+        ),
+      );
+    };
+    updatePlacement();
+    window.addEventListener("resize", updatePlacement);
+    return () => window.removeEventListener("resize", updatePlacement);
+  }, [composerMenu, contextPaneWidth, modelPickerSection, usageOpen]);
   const questionMessageCount = useMemo(
     () => messages.filter((message) => message.role === "user").length,
     [messages],
@@ -255,15 +279,6 @@ export const TaskPage = memo(function TaskPage({
             : settings.model;
         setModelSettings(settings);
         setSelectedModel(nextModel);
-        if (settings.apiKeyConfigured) {
-          void modelApi
-            .listModels({
-              providerName: settings.providerName,
-              baseUrl: settings.baseUrl,
-            })
-            .then(setAvailableModels)
-            .catch(() => undefined);
-        }
       })
       .catch(() => undefined);
     return () => {
@@ -1109,7 +1124,6 @@ export const TaskPage = memo(function TaskPage({
     ...new Set(
       [
         configuredModel,
-        ...availableModels,
         ...(modelSettings?.models.map((model) => model.modelId) ?? []),
         ...messages.map((message) => message.model ?? ""),
       ].filter(Boolean),
@@ -2234,6 +2248,7 @@ export const TaskPage = memo(function TaskPage({
                     <ChevronDown className="size-3.5 shrink-0 opacity-60" />
                   </PopoverTrigger>
                   <PopoverContent
+                    ref={modelPopoverRef}
                     side="top"
                     align="end"
                     sideOffset={6}
@@ -2264,7 +2279,7 @@ export const TaskPage = memo(function TaskPage({
 
                     {modelPickerSection && (
                       <div
-                        className={`model-reasoning-submenu is-${modelPickerSection}`}
+                        className={`model-reasoning-submenu is-${modelPickerSection} opens-${modelSubmenuPlacement}`}
                         role="menu"
                         aria-label={
                           modelPickerSection === "model"

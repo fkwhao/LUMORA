@@ -1,6 +1,7 @@
 import { ipcMain } from "electron";
 
 import type {
+  ApiFormat,
   ChatMessage,
   ChatRequestOptions,
   ChatStreamEvent,
@@ -312,11 +313,23 @@ function validateListModelsInput(input: ListModelsInput): ListModelsInput {
   return {
     providerName: requireText(input.providerName, "模型供应商"),
     baseUrl: requireText(input.baseUrl, "API 地址"),
+    apiFormat: validateApiFormat(input.apiFormat ?? "chat-completions"),
     apiKey:
       input.apiKey === undefined || !input.apiKey.trim()
         ? undefined
         : input.apiKey.trim(),
   };
+}
+
+function validateApiFormat(apiFormat: ApiFormat): ApiFormat {
+  if (
+    apiFormat !== "anthropic" &&
+    apiFormat !== "chat-completions" &&
+    apiFormat !== "responses"
+  ) {
+    throw new TypeError("API 格式无效");
+  }
+  return apiFormat;
 }
 
 function validateChatRequestOptions(

@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+
 from app.dto.request.memory_extraction_request import MemoryExtractionRequest
 from app.dto.response.chat_completion_response import (
     ChatCompletionResponse,
@@ -26,6 +27,7 @@ class FakeProvider:
 class RecordingProvider(FakeProvider):
     def __init__(self, message: str) -> None:
         super().__init__(message)
+        self.settings = None
         self.prompt = None
         self.messages = None
 
@@ -36,7 +38,8 @@ class RecordingProvider(FakeProvider):
         messages,
         **kwargs,
     ) -> ChatCompletionResponse:
-        del settings, kwargs
+        del kwargs
+        self.settings = settings
         self.prompt = prompt
         self.messages = messages
         return await super().complete()
@@ -66,6 +69,27 @@ def test_extracts_valid_long_term_candidate_from_fenced_json() -> None:
     assert response.candidates[0].content == "用户偏好简洁回答"
     assert response.candidates[0].dedupe_key == "user.response.style"
     assert response.candidates[0].ttl_seconds is None
+
+
+def test_preserves_the_configured_protocol_for_memory_extraction() -> None:
+    provider = RecordingProvider('{"candidates":[]}')
+    extraction_request = request().model_copy(update={
+        "connection": request().connection.model_copy(update={
+            "api_format": "anthropic",
+            "max_output_tokens": 4096,
+            "context_window": 200_000,
+            "web_search_enabled": True,
+        }),
+    })
+
+    asyncio.run(
+        MemoryExtractionService(provider).extract(extraction_request)
+    )
+
+    assert provider.settings.api_format == "anthropic"
+    assert provider.settings.max_output_tokens == 4096
+    assert provider.settings.context_window == 200_000
+    assert provider.settings.web_search_enabled is False
 
 
 def test_rejects_short_term_user_scope() -> None:

@@ -15,7 +15,7 @@ import com.lumora.core.agent.dto.response.AgentPlanTaskResponse;
 import com.lumora.core.agent.dto.response.AgentTokenUsageResponse;
 import com.lumora.core.agent.exception.AgentRuntimeException;
 import com.lumora.core.agent.model.AgentPlanStep;
-import com.lumora.core.agent.model.AgentMemoryCandidate;
+import com.lumora.core.memory.domain.model.MemoryCandidate;
 import com.lumora.core.conversation.domain.model.ChatCompletion;
 import com.lumora.core.conversation.domain.model.ChatMessage;
 import com.lumora.core.conversation.domain.model.ChatStreamEvent;
@@ -201,14 +201,14 @@ public class AgentDtoMapper {
         );
     }
 
-    public List<AgentMemoryCandidate> toMemoryCandidates(
+    public List<MemoryCandidate> toMemoryCandidates(
             AgentMemoryExtractionResponse response
     ) {
         if (response == null || response.getCandidates() == null) {
             throw new AgentRuntimeException("Python Agent 返回无效记忆候选");
         }
         return response.getCandidates().stream()
-                .map(candidate -> new AgentMemoryCandidate(
+                .map(candidate -> new MemoryCandidate(
                         candidate.getScope(),
                         candidate.getType(),
                         candidate.getRetention(),
