@@ -1,6 +1,8 @@
 import asyncio
 import json
 
+import httpx
+
 from app.dto.request.chat_completion_request import ChatMessageRequest
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.prompt.prompt_builder import PromptBuilder
@@ -48,6 +50,20 @@ class _StreamingClient:
 
     def stream(self, *_args, **_kwargs):
         return _StreamingResponse()
+
+
+class _InterruptedStreamingResponse(_StreamingResponse):
+    async def aiter_lines(self):
+        yield "data: " + json.dumps({
+            "model": "example-model",
+            "choices": [{"delta": {"content": "x" * 160}}],
+        })
+        raise httpx.RemoteProtocolError("incomplete chunked read")
+
+
+class _InterruptedStreamingClient(_StreamingClient):
+    def stream(self, *_args, **_kwargs):
+        return _InterruptedStreamingResponse()
 
 
 class _CompletionResponse:
@@ -207,7 +223,53 @@ def test_agent_turn_stream_stops_at_done_marker(monkeypatch) -> None:
 
     events = asyncio.run(collect())
 
-    assert [event.type for event in events] == ["content_delta", "completed"]
+    assert [event.type for event in events] == [
+        "usage",
+        "content_delta",
+        "usage",
+        "completed",
+    ]
+    usage_events = [event for event in events if event.type == "usage"]
+    assert usage_events[0].usage_estimated is True
+    assert usage_events[-1].usage_estimated is False
+    assert usage_events[-1].usage is not None
+    assert usage_events[-1].usage.total_tokens == 6
     assert events[-1].turn is not None
     assert events[-1].turn.content == "完成"
     assert events[-1].turn.usage.total_tokens == 6
+
+
+def test_agent_turn_stream_estimates_usage_before_disconnect(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.provider.openai_compatible_provider.httpx.AsyncClient",
+        _InterruptedStreamingClient,
+    )
+    captured = []
+
+    async def collect() -> None:
+        try:
+            async for event in OpenAICompatibleProvider().stream_agent_turn(
+                ModelConnectionSettings(
+                    provider_name="OpenAI compatible",
+                    base_url="https://example.com/v1",
+                    model="example-model",
+                    api_key="secret",
+                ),
+                [{"role": "user", "content": "继续"}],
+                (),
+                None,
+            ):
+                captured.append(event)
+        except httpx.RemoteProtocolError:
+            pass
+
+    asyncio.run(collect())
+    usage_events = [event for event in captured if event.type == "usage"]
+
+    assert len(usage_events) == 2
+    assert usage_events[0].usage is not None
+    assert usage_events[0].usage.prompt_tokens > 0
+    assert usage_events[0].usage.completion_tokens == 0
+    assert usage_events[1].usage is not None
+    assert usage_events[1].usage.completion_tokens == 40
+    assert usage_events[1].usage_estimated is True

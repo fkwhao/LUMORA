@@ -1,7 +1,7 @@
 package com.lumora.core.agent.client;
 
 import com.lumora.core.agent.model.AgentPlanStep;
-import com.lumora.core.memory.domain.model.MemoryCandidate;
+import com.lumora.core.memory.application.model.MemoryExtractionBatch;
 import com.lumora.core.agent.model.AgentChatStreamRequest;
 import com.lumora.core.conversation.domain.model.ChatCompletion;
 import com.lumora.core.conversation.domain.model.ChatMessage;
@@ -49,7 +49,7 @@ public interface AgentRuntimeClient {
         return listModels(providerName, baseUrl, apiKey, correlationId);
     }
 
-    List<MemoryCandidate> extractMemories(
+    MemoryExtractionBatch extractMemories(
         String userMessage,
         String assistantMessage,
         String existingMemorySummary,
@@ -57,7 +57,7 @@ public interface AgentRuntimeClient {
         String correlationId
     );
 
-    default List<MemoryCandidate> extractMemories(
+    default MemoryExtractionBatch extractMemories(
         String userMessage,
         String assistantMessage,
         String existingMemorySummary,

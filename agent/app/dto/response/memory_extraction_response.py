@@ -2,6 +2,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.dto.response.chat_completion_response import TokenUsageResponse
+
 
 class MemoryCandidateResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -51,3 +53,5 @@ class MemoryExtractionResponse(BaseModel):
         default_factory=list,
         max_length=8,
     )
+    model: str = ""
+    usage: TokenUsageResponse = Field(default_factory=TokenUsageResponse)

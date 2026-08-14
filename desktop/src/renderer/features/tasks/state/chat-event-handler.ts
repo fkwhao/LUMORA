@@ -6,6 +6,12 @@ import { workLogItemFromEvent } from "../../../../shared/work-log";
 import { reconcilePersistedMessages } from "./chat-message-reconciliation";
 import type { TaskState } from "./task-store";
 
+const supplementalUsageRefreshDelaysMs = [5_000, 15_000, 30_000, 60_000, 120_000];
+const supplementalUsageRefreshTimers = new Map<
+  string,
+  ReturnType<typeof setTimeout>
+>();
+
 export function applyChatEvent(
   event: ChatStreamEvent,
   taskId: string,
@@ -144,14 +150,21 @@ export function applyChatEvent(
     });
     void modelApi
       .listMessages(taskId)
-      .then((persistedMessages) =>
+      .then((persistedMessages) => {
         set({
           messages: reconcilePersistedMessages(
             get().messages,
             persistedMessages,
           ),
-        }),
-      )
+        });
+        scheduleSupplementalUsageRefresh(
+          taskId,
+          usageRecordCount(persistedMessages),
+          modelApi,
+          get,
+          set,
+        );
+      })
       .catch(() => undefined)
       .finally(resolve);
     return;
@@ -193,4 +206,81 @@ export function applyChatEvent(
       )
       .finally(resolve);
   }
+}
+
+/** Refresh delayed, billed background calls such as memory extraction. */
+function scheduleSupplementalUsageRefresh(
+  taskId: string,
+  baselineUsageRecordCount: number,
+  modelApi: LumoraModelApi,
+  get: () => TaskState,
+  set: (partial: Partial<TaskState>) => void,
+): void {
+  const previous = supplementalUsageRefreshTimers.get(taskId);
+  if (previous) clearTimeout(previous);
+  let attempt = 0;
+
+  const stop = () => {
+    const timer = supplementalUsageRefreshTimers.get(taskId);
+    if (timer) clearTimeout(timer);
+    supplementalUsageRefreshTimers.delete(taskId);
+  };
+  const scheduleNext = () => {
+    if (attempt >= supplementalUsageRefreshDelaysMs.length) {
+      stop();
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (
+        get().activeTask?.taskId !== taskId
+        || get().isChatting
+      ) {
+        stop();
+        return;
+      }
+      void modelApi
+        .listMessages(taskId)
+        .then((persistedMessages) => {
+          if (get().activeTask?.taskId !== taskId) {
+            stop();
+            return;
+          }
+          if (usageRecordCount(persistedMessages) > baselineUsageRecordCount) {
+            set({
+              messages: reconcilePersistedMessages(
+                get().messages,
+                persistedMessages,
+              ),
+            });
+            stop();
+            return;
+          }
+          attempt += 1;
+          scheduleNext();
+        })
+        .catch(() => {
+          attempt += 1;
+          scheduleNext();
+        });
+    }, supplementalUsageRefreshDelaysMs[attempt]);
+    supplementalUsageRefreshTimers.set(taskId, timer);
+  };
+
+  scheduleNext();
+}
+
+function usageRecordCount(messages: TaskState["messages"]): number {
+  const ids = new Set<string>();
+  const records = new Set<object>();
+  const visit = (message: TaskState["messages"][number]) => {
+    if (message.usageRecordOnly !== true) return;
+    const id = message.messageId ?? message.runtimeId;
+    if (id) ids.add(id);
+    else records.add(message);
+  };
+  messages.forEach((message) => {
+    visit(message);
+    message.threadMessages?.forEach(visit);
+  });
+  return ids.size + records.size;
 }

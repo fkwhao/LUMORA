@@ -794,6 +794,11 @@ async def _assert_auto_reviewer_allows_once(tmp_path: Path) -> None:
                 "The requested files stay inside the workspace.",
                 "LOW",
                 reviewer_model="reviewer-model",
+                usage=TokenUsageResponse(
+                    promptTokens=10,
+                    completionTokens=5,
+                    totalTokens=15,
+                ),
             )
 
     registry = ToolRegistry(
@@ -855,6 +860,11 @@ async def _assert_auto_reviewer_allows_once(tmp_path: Path) -> None:
     assert review_completed.duration_ms >= 1
     assert completed.metadata["approvalReviewDecision"] == "allow_once"
     assert completed.metadata["approvalReviewerModel"] == "reviewer-model"
+    usage_events = [
+        event for event in events
+        if event.type == "usage" and event.usage is not None
+    ]
+    assert usage_events[-1].usage.total_tokens == 19
 
 
 def test_auto_approval_reviewer_can_deny_shell_call(tmp_path: Path) -> None:

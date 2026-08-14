@@ -14,6 +14,7 @@ import com.lumora.core.shared.config.CoreProperties;
 import com.lumora.core.conversation.domain.model.ChatCompletion;
 import com.lumora.core.conversation.domain.model.ChatMessage;
 import com.lumora.core.memory.domain.model.MemoryCandidate;
+import com.lumora.core.memory.application.model.MemoryExtractionBatch;
 import com.lumora.core.conversation.domain.model.ChatStreamEvent;
 import com.lumora.core.conversation.domain.model.ChatStreamEventType;
 import com.lumora.core.model.domain.model.ModelConnection;
@@ -318,11 +319,23 @@ class HttpAgentRuntimeClientTest {
                             "structuredData": {"style": "concise"},
                             "confidence": 0.95,
                             "ttlSeconds": null
-                          }]
+                          }],
+                          "model": "deepseek-v4-pro",
+                          "usage": {
+                            "promptTokens": 100,
+                            "completionTokens": 20,
+                            "totalTokens": 120,
+                            "inputTokens": 12,
+                            "outputTokens": 18,
+                            "reasoningTokens": 2,
+                            "cacheReadTokens": 88,
+                            "cacheWriteTokens": 0,
+                            "cacheMetricsAvailable": true
+                          }
                         }
                         """, MediaType.APPLICATION_JSON));
 
-        List<MemoryCandidate> candidates = client.extractMemories(
+        MemoryExtractionBatch extraction = client.extractMemories(
                 "以后回答简洁一点",
                 "好的",
                 null,
@@ -330,8 +343,12 @@ class HttpAgentRuntimeClientTest {
                 CONNECTION,
                 "correlation-123"
         );
+        List<MemoryCandidate> candidates = extraction.candidates();
 
         assertEquals(1, candidates.size());
+        assertEquals("deepseek-v4-pro", extraction.model());
+        assertEquals(120, extraction.usage().getTotalTokens());
+        assertEquals(88, extraction.usage().getCacheReadTokens());
         assertEquals("PREFERENCE", candidates.get(0).getType());
         assertEquals("user.response.style", candidates.get(0).getDedupeKey());
         assertEquals("UPSERT", candidates.get(0).getAction());

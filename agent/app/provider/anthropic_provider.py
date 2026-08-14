@@ -21,6 +21,7 @@ class AnthropicProvider(ProtocolProviderBase):
     """Adapter for Anthropic's native Messages API."""
 
     _MAX_SERVER_TOOL_CONTINUATIONS = 5
+    _PARTIAL_USAGE_EMIT_INTERVAL = 32
 
     async def list_models(self, settings: ModelConnectionSettings) -> list[str]:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -111,6 +112,40 @@ class AnthropicProvider(ProtocolProviderBase):
                 # endpoints may repeat input/cache fields in message_delta, so
                 # adding both events would count the same tokens twice.
                 call_usage: dict[str, Any] = {}
+                streamed_output_bytes = 0
+                last_emitted_output_tokens = -1
+
+                def provisional_usage_event(
+                    *,
+                    force: bool = False,
+                    authoritative_output: bool = False,
+                ) -> ProviderTurnEvent | None:
+                    nonlocal last_emitted_output_tokens
+                    # The closure is invoked only within this loop iteration.
+                    if not call_usage:  # noqa: B023
+                        return None
+                    usage, estimated = _provisional_anthropic_usage(
+                        usage_parts,
+                        call_usage,  # noqa: B023
+                        streamed_output_bytes,  # noqa: B023
+                        authoritative_output=authoritative_output,
+                    )
+                    if (
+                        not force
+                        and last_emitted_output_tokens >= 0
+                        and usage.completion_tokens
+                        < last_emitted_output_tokens
+                        + self._PARTIAL_USAGE_EMIT_INTERVAL
+                    ):
+                        return None
+                    last_emitted_output_tokens = usage.completion_tokens
+                    return ProviderTurnEvent(
+                        type="usage",
+                        model=model,  # noqa: B023
+                        usage=usage,
+                        usage_estimated=estimated,
+                    )
+
                 async with client.stream(
                     "POST",
                     f"{settings.base_url}/messages",
@@ -133,6 +168,9 @@ class AnthropicProvider(ProtocolProviderBase):
                                 call_usage,
                                 message.get("usage"),
                             )
+                            usage_event = provisional_usage_event(force=True)
+                            if usage_event is not None:
+                                yield usage_event
                         elif event_type == "content_block_start":
                             index = int(event.get("index") or 0)
                             block = event.get("content_block") or {}
@@ -140,6 +178,12 @@ class AnthropicProvider(ProtocolProviderBase):
                             if block.get("type") == "text":
                                 initial_text = str(block.get("text") or "")
                                 if initial_text:
+                                    streamed_output_bytes += len(
+                                        initial_text.encode("utf-8")
+                                    )
+                                    usage_event = provisional_usage_event()
+                                    if usage_event is not None:
+                                        yield usage_event
                                     text_blocks.setdefault(index, []).append(initial_text)
                                     if (
                                         settings.web_search_enabled
@@ -236,6 +280,10 @@ class AnthropicProvider(ProtocolProviderBase):
                             )
                             if delta_type == "text_delta":
                                 text = str(delta.get("text") or "")
+                                streamed_output_bytes += len(text.encode("utf-8"))
+                                usage_event = provisional_usage_event()
+                                if usage_event is not None:
+                                    yield usage_event
                                 text_blocks.setdefault(index, []).append(text)
                                 # Claude may narrate before and between hosted
                                 # searches. Text after a result is a candidate
@@ -252,11 +300,21 @@ class AnthropicProvider(ProtocolProviderBase):
                                     )
                             elif delta_type == "thinking_delta":
                                 text = str(delta.get("thinking") or "")
+                                streamed_output_bytes += len(text.encode("utf-8"))
+                                usage_event = provisional_usage_event()
+                                if usage_event is not None:
+                                    yield usage_event
                                 reasoning_parts.append(text)
                                 yield ProviderTurnEvent(
                                     type="reasoning_delta", delta=text, model=model
                                 )
                             elif delta_type == "input_json_delta":
+                                streamed_output_bytes += len(
+                                    str(delta.get("partial_json") or "").encode("utf-8")
+                                )
+                                usage_event = provisional_usage_event()
+                                if usage_event is not None:
+                                    yield usage_event
                                 search_id = search_indices.get(index)
                                 if search_id is not None:
                                     search = searches[search_id]
@@ -300,6 +358,13 @@ class AnthropicProvider(ProtocolProviderBase):
                                 call_usage,
                                 event.get("usage"),
                             )
+                            usage_event = provisional_usage_event(
+                                force=True,
+                                authoritative_output="output_tokens"
+                                in (event.get("usage") or {}),
+                            )
+                            if usage_event is not None:
+                                yield usage_event
                         elif event_type == "error":
                             for search in searches.values():
                                 yield ProviderTurnEvent(
@@ -386,6 +451,35 @@ def _merge_anthropic_stream_usage(
     if not isinstance(update, dict):
         return
     current.update(update)
+
+
+def _provisional_anthropic_usage(
+    settled_parts: list[TokenUsageResponse],
+    call_usage: dict[str, Any],
+    streamed_output_bytes: int,
+    *,
+    authoritative_output: bool,
+) -> tuple[TokenUsageResponse, bool]:
+    """Build a replaceable usage snapshot for an in-flight Anthropic call.
+
+    Anthropic sends exact input/cache usage in ``message_start`` but normally
+    withholds the final output count until ``message_delta``. If the caller
+    cancels or the transport breaks, that final event never arrives even though
+    the provider still bills generated output. Estimate only that unfinished
+    output; a later authoritative snapshot replaces it field-for-field.
+    """
+    snapshot = dict(call_usage)
+    reported = parse_anthropic_usage(snapshot).completion_tokens
+    estimated = (
+        max(1, (max(0, streamed_output_bytes) + 3) // 4)
+        if streamed_output_bytes > 0
+        else 0
+    )
+    uses_estimate = not authoritative_output and estimated > reported
+    if uses_estimate:
+        snapshot["output_tokens"] = estimated
+    current = parse_anthropic_usage(snapshot)
+    return add_token_usage((*settled_parts, current)), uses_estimate
 
 
 def _headers(settings: ModelConnectionSettings) -> dict[str, str]:

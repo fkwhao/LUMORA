@@ -85,4 +85,71 @@ describe("completed chat reconciliation", () => {
     expect(result[0]).toBe(earlier);
     expect(result.at(-1)?.runtimeId).toBe("live-assistant");
   });
+
+  it("does not drop usage-only thread records from a delayed server snapshot", () => {
+    const failedUsage = {
+      messageId: "failed-usage",
+      parentMessageId: "current-user",
+      usageRecordOnly: true,
+      role: "assistant" as const,
+      content: "",
+      usage: {
+        promptTokens: 100,
+        completionTokens: 20,
+        totalTokens: 120,
+      },
+    };
+    const result = reconcilePersistedMessages(
+      [
+        {
+          messageId: "current-user",
+          role: "user",
+          content: "继续",
+          threadMessages: [failedUsage],
+        },
+      ],
+      [
+        {
+          messageId: "current-user",
+          role: "user",
+          content: "继续",
+        },
+      ],
+    );
+
+    expect(result[0]?.threadMessages).toEqual([failedUsage]);
+  });
+
+  it("accepts newly persisted usage records without losing renderer identity", () => {
+    const result = reconcilePersistedMessages(
+      [
+        {
+          messageId: "current-user",
+          runtimeId: "live-user",
+          role: "user",
+          content: "继续",
+          threadMessages: [],
+        },
+      ],
+      [
+        {
+          messageId: "current-user",
+          role: "user",
+          content: "继续",
+          threadMessages: [
+            {
+              messageId: "failed-usage",
+              parentMessageId: "current-user",
+              usageRecordOnly: true,
+              role: "assistant",
+              content: "",
+            },
+          ],
+        },
+      ],
+    );
+
+    expect(result[0]?.runtimeId).toBe("live-user");
+    expect(result[0]?.threadMessages?.[0]?.messageId).toBe("failed-usage");
+  });
 });

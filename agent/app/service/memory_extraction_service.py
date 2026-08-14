@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 
 import httpx
@@ -22,6 +23,8 @@ from app.prompt.prompt_segment import (
     PromptTarget,
     PromptTrustLevel,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class MemoryExtractionService:
@@ -91,11 +94,6 @@ class MemoryExtractionService:
                     "low" if self._is_deepseek(request) else None
                 ),
             )
-            parsed = self._parse_json_object(completion.message)
-            response = MemoryExtractionResponse.model_validate(parsed)
-            self._normalize_revocations(response, request.user_message)
-            self._validate_retention(response)
-            return response
         except (
             httpx.HTTPError,
             TypeError,
@@ -103,6 +101,25 @@ class MemoryExtractionService:
             ValidationError,
         ) as error:
             raise ModelProviderError("记忆提取失败") from error
+
+        try:
+            parsed = self._parse_json_object(completion.message)
+            response = MemoryExtractionResponse.model_validate(parsed)
+            self._normalize_revocations(response, request.user_message)
+            self._validate_retention(response)
+        except (
+            TypeError,
+            ValueError,
+            ValidationError,
+        ) as error:
+            _LOGGER.warning(
+                "Ignoring invalid memory extraction candidates: %s",
+                type(error).__name__,
+            )
+            response = MemoryExtractionResponse()
+        response.model = completion.model
+        response.usage = completion.usage
+        return response
 
     @staticmethod
     def _parse_json_object(value: str) -> dict:

@@ -2,6 +2,9 @@ package com.lumora.core.memory.application.support;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lumora.core.memory.domain.model.MemoryCandidate;
+import com.lumora.core.memory.application.model.MemoryExtractionBatch;
+import com.lumora.core.memory.application.model.MemoryExtractionOutcome;
+import com.lumora.core.conversation.domain.model.TokenUsage;
 import com.lumora.core.shared.config.CoreProperties;
 import com.lumora.core.memory.domain.entity.MemoryItem;
 import com.lumora.core.memory.domain.model.MemoryScopeType;
@@ -62,7 +65,7 @@ class MemoryExtractionCoordinatorTest {
         when(memoryExtractionPort.extractMemories(
                 anyString(), anyString(), nullable(String.class),
                 nullable(String.class), anyString()
-        )).thenReturn(List.of(new MemoryCandidate(
+        )).thenReturn(batch(new MemoryCandidate(
                 "USER",
                 "PREFERENCE",
                 "LONG_TERM",
@@ -77,8 +80,9 @@ class MemoryExtractionCoordinatorTest {
                 null
         )));
 
-        int count = coordinator.extractAndStore(
+        MemoryExtractionOutcome outcome = coordinator.extractStoreAndReport(
                 "conversation-1",
+                null,
                 "message-1",
                 "以后回答简洁一点",
                 "好的",
@@ -90,7 +94,10 @@ class MemoryExtractionCoordinatorTest {
                 MemoryWriteRequest.class
         );
         verify(memoryService).remember(captor.capture());
-        assertThat(count).isEqualTo(1);
+        assertThat(outcome.storedCount()).isEqualTo(1);
+        assertThat(outcome.model()).isEqualTo("deepseek-v4-pro");
+        assertThat(outcome.usage().getTotalTokens()).isEqualTo(120);
+        assertThat(outcome.usage().getCacheReadTokens()).isEqualTo(88);
         assertThat(captor.getValue().getScopeType())
                 .isEqualTo(MemoryScopeType.USER);
         assertThat(captor.getValue().getMemoryType())
@@ -103,7 +110,7 @@ class MemoryExtractionCoordinatorTest {
         when(memoryExtractionPort.extractMemories(
                 anyString(), anyString(), nullable(String.class),
                 nullable(String.class), anyString()
-        )).thenReturn(List.of(new MemoryCandidate(
+        )).thenReturn(batch(new MemoryCandidate(
                 "CONVERSATION",
                 "SUMMARY",
                 "SHORT_TERM",
@@ -144,7 +151,7 @@ class MemoryExtractionCoordinatorTest {
         when(memoryExtractionPort.extractMemories(
                 anyString(), anyString(), nullable(String.class),
                 nullable(String.class), anyString()
-        )).thenReturn(List.of(new MemoryCandidate(
+        )).thenReturn(batch(new MemoryCandidate(
                 "PROJECT",
                 "DECISION",
                 "LONG_TERM",
@@ -188,7 +195,7 @@ class MemoryExtractionCoordinatorTest {
         when(memoryExtractionPort.extractMemories(
                 anyString(), anyString(), nullable(String.class),
                 nullable(String.class), anyString()
-        )).thenReturn(List.of(
+        )).thenReturn(batch(
                 candidate(
                         "lumora.cloud.relational_database",
                         "relational_database",
@@ -227,7 +234,7 @@ class MemoryExtractionCoordinatorTest {
         when(memoryExtractionPort.extractMemories(
                 anyString(), anyString(), nullable(String.class),
                 nullable(String.class), anyString()
-        )).thenReturn(List.of(new MemoryCandidate(
+        )).thenReturn(batch(new MemoryCandidate(
                 "PROJECT",
                 "CONSTRAINT",
                 "LONG_TERM",
@@ -269,7 +276,7 @@ class MemoryExtractionCoordinatorTest {
         when(memoryExtractionPort.extractMemories(
                 anyString(), anyString(), nullable(String.class),
                 nullable(String.class), anyString()
-        )).thenReturn(List.of(new MemoryCandidate(
+        )).thenReturn(batch(new MemoryCandidate(
                 "PROJECT",
                 "CONSTRAINT",
                 "LONG_TERM",
@@ -329,7 +336,7 @@ class MemoryExtractionCoordinatorTest {
         when(memoryExtractionPort.extractMemories(
                 anyString(), anyString(), nullable(String.class),
                 nullable(String.class), anyString()
-        )).thenReturn(List.of(archived, conflictingUpdate));
+        )).thenReturn(batch(archived, conflictingUpdate));
 
         int count = coordinator.extractAndStore(
                 "conversation-1", "f:/project/lumora", "message-1",
@@ -365,6 +372,18 @@ class MemoryExtractionCoordinatorTest {
                 Map.of(),
                 0.99,
                 null
+        );
+    }
+
+    private static MemoryExtractionBatch batch(
+            MemoryCandidate... candidates
+    ) {
+        return new MemoryExtractionBatch(
+                List.of(candidates),
+                "deepseek-v4-pro",
+                new TokenUsage(
+                        100, 20, 120, 12, 18, 2, 88, 0, true
+                )
         );
     }
 }

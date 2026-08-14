@@ -21,11 +21,13 @@ from app.harness.run_event import RunEvent, RunUsage
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.prompt.prompt_assembly import PromptAssembly
 from app.prompt.prompt_loader import PromptLoader
-from app.provider.token_usage import parse_chat_usage
+from app.provider.token_usage import estimate_stream_usage, parse_chat_usage
 
 
 class OpenAICompatibleProvider:
     """调用实现 OpenAI Chat Completions 契约的第三方模型服务。"""
+
+    _PARTIAL_USAGE_EMIT_INTERVAL = 32
 
     def __init__(self, prompt_loader: PromptLoader | None = None) -> None:
         self._prompt_loader = prompt_loader or PromptLoader()
@@ -361,6 +363,47 @@ class OpenAICompatibleProvider:
         )
         call_parts: dict[int, dict[str, str]] = {}
 
+        estimator = TokenEstimator()
+        estimated_prompt_tokens = (
+            estimator.estimate_messages(request_body["messages"])
+            + estimator.estimate_tools(tuple(request_body.get("tools", [])))
+        )
+        streamed_output_bytes = 0
+        streamed_reasoning_bytes = 0
+        last_emitted_output_tokens = -1
+        stream_started = False
+        authoritative_usage_received = False
+
+        def provisional_usage_event(
+            *,
+            force: bool = False,
+        ) -> ProviderTurnEvent | None:
+            nonlocal last_emitted_output_tokens
+            if not stream_started or authoritative_usage_received:
+                return None
+            snapshot = estimate_stream_usage(
+                prompt_tokens=estimated_prompt_tokens,
+                output_bytes=streamed_output_bytes,
+                reasoning_bytes=streamed_reasoning_bytes,
+            )
+            if snapshot.completion_tokens == last_emitted_output_tokens:
+                return None
+            if (
+                not force
+                and last_emitted_output_tokens >= 0
+                and snapshot.completion_tokens
+                < last_emitted_output_tokens
+                + self._PARTIAL_USAGE_EMIT_INTERVAL
+            ):
+                return None
+            last_emitted_output_tokens = snapshot.completion_tokens
+            return ProviderTurnEvent(
+                type="usage",
+                model=resolved_model,
+                usage=snapshot,
+                usage_estimated=True,
+            )
+
         async with httpx.AsyncClient(timeout=120.0) as client, client.stream(
             "POST",
             f"{settings.base_url}/chat/completions",
@@ -371,7 +414,21 @@ class OpenAICompatibleProvider:
             json=request_body,
         ) as response:
             response.raise_for_status()
-            async for line in response.aiter_lines():
+            stream_started = True
+            initial_usage = provisional_usage_event(force=True)
+            if initial_usage is not None:
+                yield initial_usage
+            lines = response.aiter_lines()
+            while True:
+                try:
+                    line = await anext(lines)
+                except StopAsyncIteration:
+                    break
+                except Exception:
+                    interrupted_usage = provisional_usage_event(force=True)
+                    if interrupted_usage is not None:
+                        yield interrupted_usage
+                    raise
                 if not line.startswith("data:"):
                     continue
                 data = line[5:].strip()
@@ -382,8 +439,16 @@ class OpenAICompatibleProvider:
                 payload = json.loads(data)
                 resolved_model = str(payload.get("model") or resolved_model)
                 raw_usage = payload.get("usage")
-                if isinstance(raw_usage, dict):
+                if _has_chat_usage(raw_usage):
                     usage = self._parse_usage(raw_usage)
+                    authoritative_usage_received = True
+                    last_emitted_output_tokens = usage.completion_tokens
+                    yield ProviderTurnEvent(
+                        type="usage",
+                        model=resolved_model,
+                        usage=usage,
+                        usage_estimated=False,
+                    )
                 choices = payload.get("choices") or []
                 if not choices:
                     continue
@@ -393,6 +458,12 @@ class OpenAICompatibleProvider:
                 )
                 if isinstance(reasoning, str) and reasoning:
                     reasoning_parts.append(reasoning)
+                    reasoning_bytes = len(reasoning.encode("utf-8"))
+                    streamed_reasoning_bytes += reasoning_bytes
+                    streamed_output_bytes += reasoning_bytes
+                    partial_usage = provisional_usage_event()
+                    if partial_usage is not None:
+                        yield partial_usage
                     yield ProviderTurnEvent(
                         type="reasoning_delta",
                         delta=reasoning,
@@ -401,6 +472,10 @@ class OpenAICompatibleProvider:
                 content = delta.get("content")
                 if isinstance(content, str) and content:
                     content_parts.append(content)
+                    streamed_output_bytes += len(content.encode("utf-8"))
+                    partial_usage = provisional_usage_event()
+                    if partial_usage is not None:
+                        yield partial_usage
                     yield ProviderTurnEvent(
                         type="content_delta",
                         delta=content,
@@ -414,17 +489,40 @@ class OpenAICompatibleProvider:
                         index,
                         {"id": "", "name": "", "arguments": ""},
                     )
+                    generated_parts: list[str] = []
                     if raw_call.get("id"):
-                        current["id"] = str(raw_call["id"])
+                        call_id = str(raw_call["id"])
+                        current["id"] = call_id
+                        generated_parts.append(call_id)
                     function = raw_call.get("function") or {}
                     if function.get("name"):
-                        current["name"] += str(function["name"])
+                        name = str(function["name"])
+                        current["name"] += name
+                        generated_parts.append(name)
                     if function.get("arguments"):
-                        current["arguments"] += str(function["arguments"])
+                        arguments = str(function["arguments"])
+                        current["arguments"] += arguments
+                        generated_parts.append(arguments)
+                    streamed_output_bytes += sum(
+                        len(part.encode("utf-8")) for part in generated_parts
+                    )
+                    partial_usage = provisional_usage_event()
+                    if partial_usage is not None:
+                        yield partial_usage
                     yield ProviderTurnEvent(
                         type="tool_call_delta",
                         model=resolved_model,
                     )
+
+        if not authoritative_usage_received:
+            final_estimate = provisional_usage_event(force=True)
+            if final_estimate is not None:
+                yield final_estimate
+            usage = estimate_stream_usage(
+                prompt_tokens=estimated_prompt_tokens,
+                output_bytes=streamed_output_bytes,
+                reasoning_bytes=streamed_reasoning_bytes,
+            )
 
         calls = tuple(
             ProviderToolCall(
@@ -499,3 +597,16 @@ class OpenAICompatibleProvider:
     @staticmethod
     def _parse_usage(usage: dict[str, Any]) -> TokenUsageResponse:
         return parse_chat_usage(usage)
+
+
+def _has_chat_usage(value: Any) -> bool:
+    return isinstance(value, dict) and any(
+        key in value
+        for key in (
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "prompt_cache_hit_tokens",
+            "prompt_cache_miss_tokens",
+        )
+    )

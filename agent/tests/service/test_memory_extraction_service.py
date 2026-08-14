@@ -1,13 +1,10 @@
 import asyncio
 
-import pytest
-
 from app.dto.request.memory_extraction_request import MemoryExtractionRequest
 from app.dto.response.chat_completion_response import (
     ChatCompletionResponse,
     TokenUsageResponse,
 )
-from app.exception.provider_errors import ModelProviderError
 from app.service.memory_extraction_service import MemoryExtractionService
 
 
@@ -20,7 +17,16 @@ class FakeProvider:
         return ChatCompletionResponse(
             message=self.message,
             model="example-model",
-            usage=TokenUsageResponse(),
+            usage=TokenUsageResponse(
+                promptTokens=100,
+                completionTokens=20,
+                totalTokens=120,
+                inputTokens=12,
+                outputTokens=18,
+                reasoningTokens=2,
+                cacheReadTokens=88,
+                cacheMetricsAvailable=True,
+            ),
         )
 
 
@@ -69,6 +75,10 @@ def test_extracts_valid_long_term_candidate_from_fenced_json() -> None:
     assert response.candidates[0].content == "用户偏好简洁回答"
     assert response.candidates[0].dedupe_key == "user.response.style"
     assert response.candidates[0].ttl_seconds is None
+    assert response.model == "example-model"
+    assert response.usage.total_tokens == 120
+    assert response.usage.input_tokens == 12
+    assert response.usage.cache_read_tokens == 88
 
 
 def test_preserves_the_configured_protocol_for_memory_extraction() -> None:
@@ -92,13 +102,15 @@ def test_preserves_the_configured_protocol_for_memory_extraction() -> None:
     assert provider.settings.web_search_enabled is False
 
 
-def test_rejects_short_term_user_scope() -> None:
+def test_discards_invalid_short_term_user_scope_but_preserves_usage() -> None:
     provider = FakeProvider("""
     {"candidates":[{"scope":"USER","type":"SUMMARY","retention":"SHORT_TERM","content":"临时目标","dedupeKey":"conversation.temporary_goal","subject":"当前会话","predicate":"temporary_goal","value":"临时目标","structuredData":{},"confidence":0.9,"ttlSeconds":3600}]}
     """)
 
-    with pytest.raises(ModelProviderError):
-        asyncio.run(MemoryExtractionService(provider).extract(request()))
+    response = asyncio.run(MemoryExtractionService(provider).extract(request()))
+
+    assert response.candidates == []
+    assert response.usage.total_tokens == 120
 
 
 def test_accepts_long_term_project_memory_with_importance() -> None:
@@ -112,13 +124,15 @@ def test_accepts_long_term_project_memory_with_importance() -> None:
     assert response.candidates[0].importance == 0.85
 
 
-def test_rejects_short_term_project_scope() -> None:
+def test_discards_invalid_short_term_project_scope_but_preserves_usage() -> None:
     provider = FakeProvider("""
     {"candidates":[{"scope":"PROJECT","type":"SUMMARY","retention":"SHORT_TERM","content":"临时诊断","dedupeKey":"project.temporary_diagnostic","subject":"项目","predicate":"temporary_diagnostic","value":"失败","structuredData":{},"confidence":0.9,"importance":0.2,"ttlSeconds":3600}]}
     """)
 
-    with pytest.raises(ModelProviderError):
-        asyncio.run(MemoryExtractionService(provider).extract(request()))
+    response = asyncio.run(MemoryExtractionService(provider).extract(request()))
+
+    assert response.candidates == []
+    assert response.usage.total_tokens == 120
 
 
 def test_accepts_empty_candidate_list() -> None:

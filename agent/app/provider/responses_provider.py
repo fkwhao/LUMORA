@@ -5,6 +5,7 @@ from typing import Any
 
 import httpx
 
+from app.context.estimator import TokenEstimator
 from app.dto.response.chat_completion_response import TokenUsageResponse
 from app.harness.contracts import ProviderToolCall, ProviderTurn, ProviderTurnEvent
 from app.model.model_connection_settings import ModelConnectionSettings
@@ -13,11 +14,13 @@ from app.provider.hosted_web_search import (
     responses_web_searches,
 )
 from app.provider.protocol_provider import ProtocolProviderBase
-from app.provider.token_usage import parse_responses_usage
+from app.provider.token_usage import estimate_stream_usage, parse_responses_usage
 
 
 class ResponsesProvider(ProtocolProviderBase):
     """OpenAI Responses API adapter."""
+
+    _PARTIAL_USAGE_EMIT_INTERVAL = 32
 
     async def list_models(self, settings: ModelConnectionSettings) -> list[str]:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -82,6 +85,47 @@ class ResponsesProvider(ProtocolProviderBase):
             reasoning_effort,
             stream=True,
         )
+        estimator = TokenEstimator()
+        estimated_prompt_tokens = (
+            estimator.estimate_messages(request_body["input"])
+            + estimator.estimate_tools(tuple(request_body.get("tools", [])))
+        )
+        streamed_output_bytes = 0
+        streamed_reasoning_bytes = 0
+        last_emitted_output_tokens = -1
+        stream_started = False
+        authoritative_usage_received = False
+
+        def provisional_usage_event(
+            *,
+            force: bool = False,
+        ) -> ProviderTurnEvent | None:
+            nonlocal last_emitted_output_tokens
+            if not stream_started or authoritative_usage_received:
+                return None
+            snapshot = estimate_stream_usage(
+                prompt_tokens=estimated_prompt_tokens,
+                output_bytes=streamed_output_bytes,
+                reasoning_bytes=streamed_reasoning_bytes,
+            )
+            if snapshot.completion_tokens == last_emitted_output_tokens:
+                return None
+            if (
+                not force
+                and last_emitted_output_tokens >= 0
+                and snapshot.completion_tokens
+                < last_emitted_output_tokens
+                + self._PARTIAL_USAGE_EMIT_INTERVAL
+            ):
+                return None
+            last_emitted_output_tokens = snapshot.completion_tokens
+            return ProviderTurnEvent(
+                type="usage",
+                model=model,
+                usage=snapshot,
+                usage_estimated=True,
+            )
+
         async with httpx.AsyncClient(timeout=120.0) as client:
             lines = _response_sse_lines(
                 client,
@@ -89,13 +133,27 @@ class ResponsesProvider(ProtocolProviderBase):
                 _headers(settings),
                 request_body,
             )
-            async for line in lines:
+            while True:
+                try:
+                    line = await anext(lines)
+                except StopAsyncIteration:
+                    break
+                except Exception:
+                    interrupted_usage = provisional_usage_event(force=True)
+                    if interrupted_usage is not None:
+                        yield interrupted_usage
+                    raise
                 if not line.startswith("data:"):
                     continue
                 data = line[5:].strip()
                 if not data or data == "[DONE]":
                     continue
                 event = json.loads(data)
+                if not stream_started:
+                    stream_started = True
+                    initial_usage = provisional_usage_event(force=True)
+                    if initial_usage is not None:
+                        yield initial_usage
                 event_type = str(event.get("type") or "")
                 if event_type == "response.created":
                     model = str((event.get("response") or {}).get("model") or model)
@@ -106,6 +164,10 @@ class ResponsesProvider(ProtocolProviderBase):
                     delta = str(event.get("delta") or "")
                     if delta:
                         content_parts.append(delta)
+                        streamed_output_bytes += len(delta.encode("utf-8"))
+                        partial_usage = provisional_usage_event()
+                        if partial_usage is not None:
+                            yield partial_usage
                         if not settings.web_search_enabled:
                             yield ProviderTurnEvent(
                                 type="content_delta",
@@ -130,6 +192,12 @@ class ResponsesProvider(ProtocolProviderBase):
                     delta = str(event.get("delta") or "")
                     if delta:
                         reasoning_parts.append(delta)
+                        reasoning_bytes = len(delta.encode("utf-8"))
+                        streamed_reasoning_bytes += reasoning_bytes
+                        streamed_output_bytes += reasoning_bytes
+                        partial_usage = provisional_usage_event()
+                        if partial_usage is not None:
+                            yield partial_usage
                         yield ProviderTurnEvent(
                             type="reasoning_delta",
                             delta=delta,
@@ -178,6 +246,12 @@ class ResponsesProvider(ProtocolProviderBase):
                             "name": str(item.get("name") or ""),
                             "arguments": str(item.get("arguments") or ""),
                         }
+                        streamed_output_bytes += len(
+                            str(item.get("name") or "").encode("utf-8")
+                        )
+                        partial_usage = provisional_usage_event()
+                        if partial_usage is not None:
+                            yield partial_usage
                         yield ProviderTurnEvent(type="tool_call_delta", model=model)
                     elif item_type == "web_search_call":
                         if candidate_content_emitted:
@@ -203,7 +277,12 @@ class ResponsesProvider(ProtocolProviderBase):
                         key,
                         {"id": key, "name": "", "arguments": ""},
                     )
-                    current["arguments"] += str(event.get("delta") or "")
+                    arguments_delta = str(event.get("delta") or "")
+                    current["arguments"] += arguments_delta
+                    streamed_output_bytes += len(arguments_delta.encode("utf-8"))
+                    partial_usage = provisional_usage_event()
+                    if partial_usage is not None:
+                        yield partial_usage
                     yield ProviderTurnEvent(type="tool_call_delta", model=model)
                 elif event_type == "response.function_call_arguments.done":
                     key = str(event.get("item_id") or event.get("output_index") or "")
@@ -272,7 +351,21 @@ class ResponsesProvider(ProtocolProviderBase):
                 elif event_type in {"response.completed", "response.incomplete"}:
                     completed_payload = event.get("response") or {}
                     model = str(completed_payload.get("model") or model)
-                    usage = _parse_usage(completed_payload.get("usage") or {})
+                    raw_usage = completed_payload.get("usage")
+                    if _has_responses_usage(raw_usage):
+                        usage = _parse_usage(raw_usage)
+                        authoritative_usage_received = True
+                        last_emitted_output_tokens = usage.completion_tokens
+                        yield ProviderTurnEvent(
+                            type="usage",
+                            model=model,
+                            usage=usage,
+                            usage_estimated=False,
+                        )
+                    else:
+                        final_estimate = provisional_usage_event(force=True)
+                        if final_estimate is not None:
+                            yield final_estimate
                     completed_searches = responses_web_searches(completed_payload)
                     for search in completed_searches:
                         searches[search.item_id] = search
@@ -285,6 +378,21 @@ class ResponsesProvider(ProtocolProviderBase):
                             model=model,
                         )
                 elif event_type in {"response.failed", "error"}:
+                    failed_response = event.get("response") or {}
+                    failed_usage = failed_response.get("usage")
+                    if _has_responses_usage(failed_usage):
+                        usage = _parse_usage(failed_usage)
+                        authoritative_usage_received = True
+                        yield ProviderTurnEvent(
+                            type="usage",
+                            model=model,
+                            usage=usage,
+                            usage_estimated=False,
+                        )
+                    else:
+                        failed_estimate = provisional_usage_event(force=True)
+                        if failed_estimate is not None:
+                            yield failed_estimate
                     for search in searches.values():
                         yield ProviderTurnEvent(
                             type="web_search_failed",
@@ -294,6 +402,13 @@ class ResponsesProvider(ProtocolProviderBase):
                             model=model,
                         )
                     raise ValueError(_response_failure_message(event))
+
+        if not authoritative_usage_received:
+            usage = estimate_stream_usage(
+                prompt_tokens=estimated_prompt_tokens,
+                output_bytes=streamed_output_bytes,
+                reasoning_bytes=streamed_reasoning_bytes,
+            )
 
         if completed_payload is not None:
             parsed = _parse_turn(completed_payload, model)
@@ -569,6 +684,17 @@ def _final_response_message(payload: dict[str, Any]) -> tuple[str, str]:
 
 def _parse_usage(usage: dict[str, Any]) -> TokenUsageResponse:
     return parse_responses_usage(usage)
+
+
+def _has_responses_usage(value: Any) -> bool:
+    return isinstance(value, dict) and any(
+        key in value
+        for key in (
+            "input_tokens",
+            "output_tokens",
+            "total_tokens",
+        )
+    )
 
 
 def _response_failure_message(event: dict[str, Any]) -> str:

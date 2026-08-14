@@ -16,6 +16,7 @@ import com.lumora.core.agent.dto.response.AgentTokenUsageResponse;
 import com.lumora.core.agent.exception.AgentRuntimeException;
 import com.lumora.core.agent.model.AgentPlanStep;
 import com.lumora.core.memory.domain.model.MemoryCandidate;
+import com.lumora.core.memory.application.model.MemoryExtractionBatch;
 import com.lumora.core.conversation.domain.model.ChatCompletion;
 import com.lumora.core.conversation.domain.model.ChatMessage;
 import com.lumora.core.conversation.domain.model.ChatStreamEvent;
@@ -226,6 +227,19 @@ public class AgentDtoMapper {
                         candidate.getStorage()
                 ))
                 .toList();
+    }
+
+    public MemoryExtractionBatch toMemoryExtraction(
+            AgentMemoryExtractionResponse response
+    ) {
+        if (response == null || response.getUsage() == null) {
+            throw new AgentRuntimeException("Python Agent 返回无效记忆提取用量");
+        }
+        return new MemoryExtractionBatch(
+                toMemoryCandidates(response),
+                response.getModel(),
+                toTokenUsage(response.getUsage())
+        );
     }
 
     public ChatStreamEvent toChatStreamEvent(

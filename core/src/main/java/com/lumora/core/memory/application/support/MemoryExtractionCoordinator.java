@@ -3,6 +3,8 @@ package com.lumora.core.memory.application.support;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lumora.core.memory.domain.model.MemoryCandidate;
+import com.lumora.core.memory.application.model.MemoryExtractionBatch;
+import com.lumora.core.memory.application.model.MemoryExtractionOutcome;
 import com.lumora.core.shared.config.CoreProperties;
 import com.lumora.core.memory.domain.model.MemoryScopeType;
 import com.lumora.core.memory.domain.model.MemoryType;
@@ -55,9 +57,9 @@ public class MemoryExtractionCoordinator {
             String existingMemorySummary,
             String correlationId
     ) {
-        return extractAndStore(conversationId, null, sourceMessageId,
+        return extractStoreAndReport(conversationId, null, sourceMessageId,
                 userMessage, assistantMessage, existingMemorySummary,
-                correlationId);
+                correlationId).storedCount();
     }
 
     public int extractAndStore(
@@ -69,17 +71,38 @@ public class MemoryExtractionCoordinator {
             String existingMemorySummary,
             String correlationId
     ) {
+        return extractStoreAndReport(
+                conversationId,
+                projectScopeId,
+                sourceMessageId,
+                userMessage,
+                assistantMessage,
+                existingMemorySummary,
+                correlationId
+        ).storedCount();
+    }
+
+    public MemoryExtractionOutcome extractStoreAndReport(
+            String conversationId,
+            String projectScopeId,
+            String sourceMessageId,
+            String userMessage,
+            String assistantMessage,
+            String existingMemorySummary,
+            String correlationId
+    ) {
         if (!coreProperties.isMemoryAutoExtractionEnabled()
                 || !memoryService.isEnabled()) {
-            return 0;
+            return MemoryExtractionOutcome.empty();
         }
-        List<MemoryCandidate> candidates = memoryExtractionPort.extractMemories(
+        MemoryExtractionBatch extraction = memoryExtractionPort.extractMemories(
                 userMessage,
                 assistantMessage,
                 existingMemorySummary,
                 projectScopeId,
                 correlationId
         );
+        List<MemoryCandidate> candidates = extraction.candidates();
         int stored = 0;
         Set<String> claimedTargetIds = new HashSet<>();
         Set<String> archivedTargetIds = new HashSet<>();
@@ -124,9 +147,16 @@ public class MemoryExtractionCoordinator {
                 }
             } catch (IllegalArgumentException | JsonProcessingException error) {
                 LOGGER.warn("忽略无效记忆候选: {}", error.getMessage());
+            } catch (RuntimeException error) {
+                // Candidate storage is best-effort; provider usage is still billable.
+                LOGGER.warn("保存记忆候选失败", error);
             }
         }
-        return stored;
+        return new MemoryExtractionOutcome(
+                stored,
+                extraction.model(),
+                extraction.usage()
+        );
     }
 
     private MemoryWriteRequest toWriteRequest(

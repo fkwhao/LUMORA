@@ -215,6 +215,25 @@ class _ResponsesStreamingClient:
         return _ResponsesStreamingResponse()
 
 
+class _ResponsesInterruptedResponse(_ResponsesStreamingResponse):
+    async def aiter_lines(self):
+        yield "data: " + json.dumps({
+            "type": "response.created",
+            "response": {"model": "gpt-example"},
+        })
+        yield "data: " + json.dumps({
+            "type": "response.output_text.delta",
+            "item_id": "message-partial",
+            "delta": "x" * 160,
+        })
+        raise httpx.RemoteProtocolError("incomplete chunked read")
+
+
+class _ResponsesInterruptedClient(_ResponsesStreamingClient):
+    def stream(self, *_args, **_kwargs):
+        return _ResponsesInterruptedResponse()
+
+
 class _ResponsesFallbackResponse:
     def __init__(
         self,
@@ -388,6 +407,42 @@ def test_responses_streams_final_answer_after_hosted_search(monkeypatch) -> None
     assert all(event.type != "content_reset" for event in events)
     assert events[-1].turn is not None
     assert events[-1].turn.content == "最终核实结果。"
+    usage_events = [event for event in events if event.type == "usage"]
+    assert usage_events[0].usage_estimated is True
+    assert usage_events[-1].usage_estimated is False
+    assert usage_events[-1].usage is not None
+    assert usage_events[-1].usage.total_tokens == 7
+
+
+def test_responses_stream_estimates_usage_before_disconnect(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.provider.responses_provider.httpx.AsyncClient",
+        _ResponsesInterruptedClient,
+    )
+    captured = []
+
+    async def collect() -> None:
+        try:
+            async for event in ResponsesProvider().stream_agent_turn(
+                _settings("responses"),
+                [{"role": "user", "content": "继续"}],
+                (),
+                None,
+            ):
+                captured.append(event)
+        except httpx.RemoteProtocolError:
+            pass
+
+    asyncio.run(collect())
+    usage_events = [event for event in captured if event.type == "usage"]
+
+    assert len(usage_events) == 2
+    assert usage_events[0].usage is not None
+    assert usage_events[0].usage.prompt_tokens > 0
+    assert usage_events[0].usage.completion_tokens == 0
+    assert usage_events[1].usage is not None
+    assert usage_events[1].usage.completion_tokens == 40
+    assert usage_events[1].usage_estimated is True
 
 
 def test_responses_accepts_incomplete_event_with_partial_answer(monkeypatch) -> None:
@@ -829,6 +884,38 @@ class _AnthropicRepeatedUsageClient(_AnthropicStreamingClient):
         return _AnthropicRepeatedUsageResponse()
 
 
+class _AnthropicInterruptedUsageResponse(_AnthropicStreamingResponse):
+    async def aiter_lines(self):
+        events = [
+            {
+                "type": "message_start",
+                "message": {
+                    "model": "deepseek-v4-pro",
+                    "usage": {
+                        "input_tokens": 40,
+                        "cache_read_input_tokens": 960,
+                    },
+                },
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {
+                    "type": "thinking_delta",
+                    "thinking": "x" * 160,
+                },
+            },
+        ]
+        for event in events:
+            yield "data: " + json.dumps(event)
+        raise httpx.RemoteProtocolError("incomplete chunked read")
+
+
+class _AnthropicInterruptedUsageClient(_AnthropicStreamingClient):
+    def stream(self, *_args, **_kwargs):
+        return _AnthropicInterruptedUsageResponse()
+
+
 class _AnthropicContinuationResponse:
     def __init__(self, events: list[dict[str, Any]]) -> None:
         self._events = events
@@ -922,7 +1009,7 @@ def test_anthropic_stream_buffers_search_narration(monkeypatch) -> None:
 
     events = asyncio.run(collect())
 
-    assert [event.type for event in events] == [
+    assert [event.type for event in events if event.type != "usage"] == [
         "web_search_started",
         "web_search_progress",
         "web_search_completed",
@@ -937,6 +1024,43 @@ def test_anthropic_stream_buffers_search_narration(monkeypatch) -> None:
     assert events[-1].turn is not None
     assert events[-1].turn.content == "最终核实结果。"
     assert events[-1].turn.usage.total_tokens == 7
+
+
+def test_anthropic_stream_reports_input_and_estimated_output_before_disconnect(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.provider.anthropic_provider.httpx.AsyncClient",
+        _AnthropicInterruptedUsageClient,
+    )
+    captured = []
+
+    async def collect() -> None:
+        try:
+            async for event in AnthropicProvider().stream_agent_turn(
+                replace(
+                    _settings("anthropic"),
+                    provider_name="DeepSeek",
+                    model="deepseek-v4-pro",
+                ),
+                [{"role": "user", "content": "continue"}],
+                (),
+                None,
+            ):
+                captured.append(event)
+        except httpx.RemoteProtocolError:
+            pass
+
+    asyncio.run(collect())
+    usage_events = [event for event in captured if event.type == "usage"]
+
+    assert len(usage_events) == 2
+    assert usage_events[0].usage is not None
+    assert usage_events[0].usage.prompt_tokens == 1000
+    assert usage_events[0].usage.cache_read_tokens == 960
+    assert usage_events[1].usage is not None
+    assert usage_events[1].usage.completion_tokens == 40
+    assert usage_events[1].usage_estimated is True
 
 
 def test_anthropic_stream_replaces_repeated_usage_snapshot(monkeypatch) -> None:

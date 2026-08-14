@@ -64,7 +64,7 @@ public class ConversationPersistenceService {
         return prepareNewMessage(taskId, content, null);
     }
 
-    public ConversationRunContext prepareNewMessage(
+    public synchronized ConversationRunContext prepareNewMessage(
             String taskId,
             String content,
             String workspacePath
@@ -81,7 +81,7 @@ public class ConversationPersistenceService {
         return context;
     }
 
-    public ConversationRunContext prepareRegeneration(
+    public synchronized ConversationRunContext prepareRegeneration(
             String taskId,
             String messageId,
             String content
@@ -110,7 +110,7 @@ public class ConversationPersistenceService {
         return context;
     }
 
-    public void persistAssistant(
+    public synchronized void persistAssistant(
             ConversationRunContext context,
             ConversationStreamAccumulator accumulator
     ) {
@@ -119,12 +119,25 @@ public class ConversationPersistenceService {
         );
     }
 
-    public void persistFailedUsage(
+    public synchronized void persistFailedUsage(
             ConversationRunContext context,
             ConversationStreamAccumulator accumulator
     ) {
         transactionTemplate.executeWithoutResult(
                 status -> insertFailedUsage(context, accumulator)
+        );
+    }
+
+    public synchronized void persistSupplementalUsage(
+            ConversationRunContext context,
+            TokenUsage usage,
+            String model
+    ) {
+        if (!hasBillableUsage(usage)) {
+            return;
+        }
+        transactionTemplate.executeWithoutResult(
+                status -> insertSupplementalUsage(context, usage, model)
         );
     }
 
@@ -156,7 +169,10 @@ public class ConversationPersistenceService {
         );
     }
 
-    public void appendWorkLogEvent(String taskId, ChatStreamEvent event) {
+    public synchronized void appendWorkLogEvent(
+            String taskId,
+            ChatStreamEvent event
+    ) {
         transactionTemplate.executeWithoutResult(
                 status -> insertWorkLogMessage(taskId, event)
         );
@@ -395,6 +411,57 @@ public class ConversationPersistenceService {
                 context.getConversationId()
         );
         touchConversation(conversation, context.getTaskId(), now);
+    }
+
+    /** Persist a hidden, billed model call triggered by a completed turn. */
+    private void insertSupplementalUsage(
+            ConversationRunContext context,
+            TokenUsage usage,
+            String model
+    ) {
+        Instant now = clock.instant();
+        ConversationMessage usageRecord = new ConversationMessage(
+                UUID.randomUUID().toString(),
+                context.getConversationId(),
+                nextSequence(context.getConversationId()),
+                ChatMessageRole.ASSISTANT,
+                "",
+                model == null ? "" : model,
+                usage.getPromptTokens(),
+                usage.getCompletionTokens(),
+                usage.getTotalTokens(),
+                0L,
+                now
+        );
+        ConversationMessage parent = messageMapper.selectById(
+                context.getCurrentUserMessageId()
+        );
+        usageRecord.setParentMessageId(context.getCurrentUserMessageId());
+        usageRecord.setMessageDepth(
+                parent == null ? 1 : parent.getMessageDepth() + 1
+        );
+        usageRecord.setActivePath(false);
+        usageRecord.setUsageRecordOnly(true);
+        applyUsageDetails(usageRecord, usage);
+        usageRecord.setActiveContextTokens(0);
+        messageMapper.insert(usageRecord);
+        Conversation conversation = conversationMapper.selectById(
+                context.getConversationId()
+        );
+        touchConversation(conversation, context.getTaskId(), now);
+    }
+
+    private static boolean hasBillableUsage(TokenUsage usage) {
+        return usage != null && (
+                usage.getTotalTokens() > 0
+                        || usage.getPromptTokens() > 0
+                        || usage.getCompletionTokens() > 0
+                        || usage.getInputTokens() > 0
+                        || usage.getOutputTokens() > 0
+                        || usage.getReasoningTokens() > 0
+                        || usage.getCacheReadTokens() > 0
+                        || usage.getCacheWriteTokens() > 0
+        );
     }
 
     private void applyUsageDetails(

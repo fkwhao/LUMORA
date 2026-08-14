@@ -5,15 +5,17 @@ import json
 import logging
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from app.dto.response.chat_completion_response import TokenUsageResponse
 from app.harness.contracts import TurnCompleter
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.permission.reviewer_policy import ApprovalReviewerPolicyStore
 from app.prompt.prompt_loader import PromptLoader
+from app.provider.token_usage import add_token_usage
 
 _REVIEW_TIMEOUT_SECONDS = 45
 _REVIEW_ATTEMPTS = 2
@@ -54,6 +56,7 @@ class ApprovalReviewResult:
     risk_level: str
     reviewer_model: str = ""
     fallback: bool = False
+    usage: TokenUsageResponse = field(default_factory=TokenUsageResponse)
 
 
 @runtime_checkable
@@ -137,6 +140,7 @@ class ModelApprovalReviewer:
             )
 
         last_error: Exception | None = None
+        usage_parts: list[TokenUsageResponse] = []
         for attempt in range(_REVIEW_ATTEMPTS):
             try:
                 turn = await asyncio.wait_for(
@@ -151,6 +155,7 @@ class ModelApprovalReviewer:
                     ),
                     timeout=self._timeout_seconds,
                 )
+                usage_parts.append(turn.usage)
                 if turn.tool_calls:
                     raise ValueError("Approval reviewer attempted a tool call")
                 decision, risk_level, reason = _parse_review(turn.content)
@@ -159,6 +164,7 @@ class ModelApprovalReviewer:
                     reason,
                     risk_level,
                     reviewer_model=turn.model,
+                    usage=add_token_usage(usage_parts),
                 )
             except Exception as error:  # noqa: BLE001 - model boundary
                 last_error = error
@@ -175,6 +181,7 @@ class ModelApprovalReviewer:
             "自动审批调用连续失败或返回无效结果，本次调用未执行。",
             request.risk_level,
             fallback=True,
+            usage=add_token_usage(usage_parts),
         )
 
 

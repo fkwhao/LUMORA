@@ -18,6 +18,7 @@ import com.lumora.core.conversation.application.support.ConversationRunContext;
 import com.lumora.core.conversation.application.support.ConversationStreamAccumulator;
 import com.lumora.core.conversation.application.support.WorkLogEventProjector;
 import com.lumora.core.memory.application.support.MemoryExtractionCoordinator;
+import com.lumora.core.memory.application.model.MemoryExtractionOutcome;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -349,7 +350,8 @@ public class ConversationServiceImpl implements ConversationService {
         try {
             executorService.submit(() -> {
                 try {
-                    memoryExtractionCoordinator.extractAndStore(
+                    MemoryExtractionOutcome outcome =
+                            memoryExtractionCoordinator.extractStoreAndReport(
                             context.getConversationId(),
                             context.getProjectScopeId(),
                             context.getCurrentUserMessageId(),
@@ -358,6 +360,13 @@ public class ConversationServiceImpl implements ConversationService {
                             context.getMemoryExtractionContext(),
                             correlationId
                     );
+                    if (outcome != null) {
+                        persistenceService.persistSupplementalUsage(
+                                context,
+                                outcome.usage(),
+                                outcome.model()
+                        );
+                    }
                 } catch (RuntimeException error) {
                     // 记忆是回答完成后的增强能力，失败不能反向破坏已完成的会话。
                     LOGGER.warn("异步记忆提取失败", error);

@@ -761,6 +761,88 @@ def test_agent_loop_reports_invalid_tool_arguments() -> None:
     asyncio.run(_assert_invalid_tool_arguments_are_reported())
 
 
+def test_agent_loop_replaces_provisional_usage_and_keeps_billed_retry() -> None:
+    asyncio.run(_assert_provisional_usage_survives_retry())
+
+
+async def _assert_provisional_usage_survives_retry() -> None:
+    attempts = 0
+
+    async def complete_turn(*_args):
+        raise AssertionError("存在流式回合能力时不应调用一次性完成接口")
+
+    async def stream_turn(*_args):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            yield ProviderTurnEvent(
+                type="usage",
+                model="test-model",
+                usage=TokenUsageResponse(
+                    promptTokens=8,
+                    completionTokens=2,
+                    totalTokens=10,
+                ),
+                usage_estimated=True,
+            )
+            raise httpx.RemoteProtocolError("interrupted")
+        yield ProviderTurnEvent(
+            type="usage",
+            model="test-model",
+            usage=TokenUsageResponse(
+                promptTokens=16,
+                completionTokens=4,
+                totalTokens=20,
+            ),
+        )
+        yield ProviderTurnEvent(
+            type="content_delta",
+            delta="重试后完成。" * 4,
+            model="test-model",
+        )
+        yield ProviderTurnEvent(
+            type="completed",
+            model="test-model",
+            turn=ProviderTurn(
+                content="重试后完成。" * 4,
+                reasoning="",
+                model="test-model",
+                usage=TokenUsageResponse(
+                    promptTokens=16,
+                    completionTokens=6,
+                    totalTokens=22,
+                ),
+                tool_calls=(),
+            ),
+        )
+
+    events = [
+        event
+        async for event in AgentLoopRunner(
+            complete_turn,
+            stream_turn=stream_turn,
+            stream_retry_base_delay=0,
+        ).stream(
+            _settings(),
+            PromptAssembly(()),
+            [ChatMessageRequest(role="user", content="继续")],
+            None,
+            ToolRegistry(),
+            ToolContext(Path(".")),
+        )
+    ]
+    usage_totals = [
+        event.usage.total_tokens
+        for event in events
+        if event.type == "usage" and event.usage is not None
+    ]
+
+    assert attempts == 2
+    assert usage_totals == [10, 30, 32]
+    assert events[-2].usage is not None
+    assert events[-2].metadata == {}
+
+
 async def _assert_invalid_tool_arguments_are_reported() -> None:
     turns = iter((
         ProviderTurn(

@@ -470,12 +470,16 @@ components:
     MemoryExtractionResponse:
       type: object
       additionalProperties: false
-      required: [candidates]
+      required: [candidates, model, usage]
       properties:
         candidates:
           type: array
           maxItems: 8
           items: { $ref: "#/components/schemas/MemoryCandidate" }
+        model:
+          type: string
+        usage:
+          $ref: "#/components/schemas/TokenUsage"
     MemoryCandidate:
       type: object
       additionalProperties: false

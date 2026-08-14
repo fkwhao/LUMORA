@@ -15,7 +15,7 @@ import com.lumora.core.agent.dto.response.AgentChatCompletionResponse;
 import com.lumora.core.agent.dto.response.AgentPlanTaskResponse;
 import com.lumora.core.agent.dto.response.AgentModelListResponse;
 import com.lumora.core.agent.model.AgentPlanStep;
-import com.lumora.core.memory.domain.model.MemoryCandidate;
+import com.lumora.core.memory.application.model.MemoryExtractionBatch;
 import com.lumora.core.agent.model.AgentChatStreamRequest;
 import com.lumora.core.conversation.domain.model.ChatCompletion;
 import com.lumora.core.conversation.domain.model.ChatMessage;
@@ -82,14 +82,14 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
     }
 
     @Override
-    public List<MemoryCandidate> extractMemories(
+    public MemoryExtractionBatch extractMemories(
         String userMessage,
         String assistantMessage,
         String existingMemorySummary,
         ModelConnection connection,
         String correlationId
     ) {
-        return dtoMapper.toMemoryCandidates(exceptionMapper.execute(
+        return dtoMapper.toMemoryExtraction(exceptionMapper.execute(
             () -> httpApi.extractMemories(
                 correlationId,
                 new AgentMemoryExtractionRequest(
@@ -103,7 +103,7 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
     }
 
     @Override
-    public List<MemoryCandidate> extractMemories(
+    public MemoryExtractionBatch extractMemories(
         String userMessage,
         String assistantMessage,
         String existingMemorySummary,
@@ -111,7 +111,7 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
         ModelConnection connection,
         String correlationId
     ) {
-        return dtoMapper.toMemoryCandidates(exceptionMapper.execute(
+        return dtoMapper.toMemoryExtraction(exceptionMapper.execute(
             () -> httpApi.extractMemories(
                 correlationId,
                 new AgentMemoryExtractionRequest(

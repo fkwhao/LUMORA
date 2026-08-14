@@ -83,6 +83,7 @@ def test_model_reviewer_uses_active_settings_and_layered_policy(
     assert result.decision is ApprovalReviewDecision.ALLOW_ONCE
     assert result.risk_level == "LOW"
     assert result.reviewer_model == "reviewer-model"
+    assert result.usage.total_tokens == 15
     assert captured[0][0].base_url == _settings().base_url
     assert captured[0][0].api_key == _settings().api_key
     assert captured[0][0].model == _settings().model
@@ -123,6 +124,7 @@ def test_model_reviewer_fails_closed_on_invalid_output(tmp_path: Path) -> None:
     assert result.decision is ApprovalReviewDecision.REQUIRE_HUMAN
     assert result.fallback is True
     assert attempts == 2
+    assert result.usage.total_tokens == 4
 
 
 def test_model_reviewer_retries_and_accepts_embedded_json(
@@ -163,6 +165,7 @@ def test_model_reviewer_retries_and_accepts_embedded_json(
     assert result.decision is ApprovalReviewDecision.ALLOW_ONCE
     assert result.fallback is False
     assert attempts == 2
+    assert result.usage.total_tokens == 4
 
 
 def test_model_reviewer_never_auto_approves_external_paths(
@@ -185,3 +188,4 @@ def test_model_reviewer_never_auto_approves_external_paths(
     assert result.decision is ApprovalReviewDecision.REQUIRE_HUMAN
     assert result.fallback is False
     assert called is False
+    assert result.usage.total_tokens == 0

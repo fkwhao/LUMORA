@@ -128,6 +128,8 @@ class AgentLoopRunner:
         )
 
         for _iteration in range(self._max_tool_iterations):
+            retry_usage = empty_token_usage()
+            provisional_usage = empty_token_usage()
             content_was_streamed = False
             stage_content_seen = False
             stage_item_id = ""
@@ -169,6 +171,10 @@ class AgentLoopRunner:
                             break
                         stream_error = error
                     if stream_error is not None:
+                        retry_usage = add_token_usage(
+                            (retry_usage, provisional_usage)
+                        )
+                        provisional_usage = empty_token_usage()
                         if stream_retries >= self._max_stream_retries:
                             raise stream_error
                         stream_retries += 1
@@ -210,7 +216,29 @@ class AgentLoopRunner:
                             reasoning_effort,
                         )
                         continue
-                    if turn_event.type == "reasoning_delta":
+                    if turn_event.type == "usage":
+                        if turn_event.usage is None:
+                            continue
+                        provisional_usage = turn_event.usage
+                        preview_usage = add_token_usage((
+                            cumulative_usage,
+                            retry_usage,
+                            provisional_usage,
+                        ))
+                        yield RunEvent(
+                            type="usage",
+                            model=turn_event.model or resolved_model,
+                            usage=_to_run_usage(preview_usage),
+                            active_context_tokens=(
+                                provisional_usage.prompt_tokens
+                                or active_context_tokens
+                            ),
+                            metadata={
+                                "usageProvisional": True,
+                                "usageEstimated": turn_event.usage_estimated,
+                            },
+                        )
+                    elif turn_event.type == "reasoning_delta":
                         continue
                     elif is_web_search_event(turn_event):
                         yield web_search_run_event(turn_event)
@@ -322,7 +350,11 @@ class AgentLoopRunner:
                     )
             assert turn is not None
             resolved_model = turn.model
-            cumulative_usage = add_token_usage((cumulative_usage, turn.usage))
+            cumulative_usage = add_token_usage((
+                cumulative_usage,
+                retry_usage,
+                turn.usage,
+            ))
             active_context_tokens = turn.usage.prompt_tokens or (
                 self._token_estimator.estimate_messages(request_messages)
                 + self._token_estimator.estimate_tools(prompt.tools)
@@ -393,6 +425,27 @@ class AgentLoopRunner:
                     latest_user_request,
                     turn.content[-10_000:],
                 ):
+                    if (
+                        event.type == "usage"
+                        and event.usage is not None
+                        and event.metadata.get("usageDelta") is True
+                    ):
+                        cumulative_usage = add_token_usage((
+                            cumulative_usage,
+                            _from_run_usage(event.usage),
+                        ))
+                        yield RunEvent(
+                            type="usage",
+                            model=event.model or resolved_model,
+                            usage=_to_run_usage(cumulative_usage),
+                            active_context_tokens=active_context_tokens,
+                            metadata={
+                                "usageCategory": event.metadata.get(
+                                    "usageCategory", "internal"
+                                ),
+                            },
+                        )
+                        continue
                     yield event
                 inline_result_chars += len(result_text)
                 tool_results.append(result_text)
@@ -516,6 +569,20 @@ def _to_run_usage(usage: TokenUsageResponse) -> RunUsage:
         cache_read_tokens=usage.cache_read_tokens,
         cache_write_tokens=usage.cache_write_tokens,
         cache_metrics_available=usage.cache_metrics_available,
+    )
+
+
+def _from_run_usage(usage: RunUsage) -> TokenUsageResponse:
+    return TokenUsageResponse(
+        promptTokens=usage.prompt_tokens,
+        completionTokens=usage.completion_tokens,
+        totalTokens=usage.total_tokens,
+        inputTokens=usage.input_tokens,
+        outputTokens=usage.output_tokens,
+        reasoningTokens=usage.reasoning_tokens,
+        cacheReadTokens=usage.cache_read_tokens,
+        cacheWriteTokens=usage.cache_write_tokens,
+        cacheMetricsAvailable=usage.cache_metrics_available,
     )
 
 

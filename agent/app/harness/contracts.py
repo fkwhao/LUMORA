@@ -44,6 +44,7 @@ class ProviderTurnEvent:
         "web_search_progress",
         "web_search_completed",
         "web_search_failed",
+        "usage",
         "completed",
     ]
     delta: str = ""
@@ -53,6 +54,8 @@ class ProviderTurnEvent:
     sources: tuple[ProviderWebSource, ...] = ()
     error_message: str = ""
     turn: ProviderTurn | None = None
+    usage: TokenUsageResponse | None = None
+    usage_estimated: bool = False
 
 
 TurnCompleter = Callable[

@@ -220,6 +220,33 @@ def build_token_usage(
     )
 
 
+def estimate_stream_usage(
+    *,
+    prompt_tokens: int,
+    output_bytes: int,
+    reasoning_bytes: int = 0,
+) -> TokenUsageResponse:
+    """Estimate a replaceable usage snapshot for an unfinished stream.
+
+    Compatible streaming APIs generally expose authoritative usage only in the
+    terminal event.  Until that event arrives, estimate from the exact UTF-8
+    bytes received by the client.  Cache fields deliberately remain unavailable:
+    there is no safe way to infer the provider's cache split locally.
+    """
+    completion_tokens = _tokens_from_utf8_bytes(output_bytes)
+    reasoning_tokens = min(
+        completion_tokens,
+        _tokens_from_utf8_bytes(reasoning_bytes),
+    )
+    return build_token_usage(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        reasoning_tokens=reasoning_tokens,
+        cache_metrics_available=False,
+        input_tokens=prompt_tokens,
+    )
+
+
 def add_token_usage(usages: Iterable[TokenUsageResponse]) -> TokenUsageResponse:
     values = list(usages)
     return TokenUsageResponse(
@@ -260,3 +287,8 @@ def _integer(value: Any) -> int:
         return max(0, int(value or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def _tokens_from_utf8_bytes(byte_count: int) -> int:
+    resolved = max(0, byte_count)
+    return max(1, (resolved + 3) // 4) if resolved else 0

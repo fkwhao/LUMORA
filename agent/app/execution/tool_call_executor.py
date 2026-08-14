@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from app.execution.tool_result_processor import ToolResultProcessor
 from app.harness.contracts import ProviderToolCall
-from app.harness.run_event import RunEvent
+from app.harness.run_event import RunEvent, RunUsage
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.permission.broker import ApprovalBroker
 from app.permission.config_store import PermissionConfigStore
@@ -253,6 +253,16 @@ class ToolCallExecutor:
                         "approvalReviewerModel": review.reviewer_model,
                         "approvalReviewFallback": review.fallback,
                     }
+                    if _has_billable_usage(review):
+                        yield RunEvent(
+                            type="usage",
+                            model=review.reviewer_model or model,
+                            usage=_to_run_usage(review),
+                            metadata={
+                                "usageDelta": True,
+                                "usageCategory": "approval_review",
+                            },
+                        ), ""
                     allowed_by_reviewer = (
                         review.decision is ApprovalReviewDecision.ALLOW_ONCE
                     )
@@ -476,3 +486,32 @@ def _automatic_block_result(reason: str, *, error_code: str) -> str:
         },
         ensure_ascii=False,
     )
+
+
+def _to_run_usage(review: ApprovalReviewResult) -> RunUsage:
+    usage = review.usage
+    return RunUsage(
+        prompt_tokens=usage.prompt_tokens,
+        completion_tokens=usage.completion_tokens,
+        total_tokens=usage.total_tokens,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        reasoning_tokens=usage.reasoning_tokens,
+        cache_read_tokens=usage.cache_read_tokens,
+        cache_write_tokens=usage.cache_write_tokens,
+        cache_metrics_available=usage.cache_metrics_available,
+    )
+
+
+def _has_billable_usage(review: ApprovalReviewResult) -> bool:
+    usage = review.usage
+    return any((
+        usage.total_tokens,
+        usage.prompt_tokens,
+        usage.completion_tokens,
+        usage.input_tokens,
+        usage.output_tokens,
+        usage.reasoning_tokens,
+        usage.cache_read_tokens,
+        usage.cache_write_tokens,
+    ))

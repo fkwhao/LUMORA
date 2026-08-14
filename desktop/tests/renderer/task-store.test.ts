@@ -359,6 +359,120 @@ describe("task store", () => {
     expect(store.getState().chatWasStopped).toBe(true);
   });
 
+  it("keeps the latest usage snapshot while stopped usage persistence catches up", async () => {
+    const api = createApi();
+    const modelApi = createModelApi();
+    let onEvent: Parameters<LumoraModelApi["streamMessage"]>[2] | undefined;
+    vi.mocked(modelApi.streamMessage).mockImplementation(
+      (_taskId, _content, eventHandler) => {
+        onEvent = eventHandler;
+        return () => undefined;
+      },
+    );
+    vi.mocked(modelApi.listMessages)
+      .mockResolvedValueOnce([
+        { messageId: "old-user", role: "user", content: "旧问题" },
+        { messageId: "old-answer", role: "assistant", content: "旧回答" },
+      ])
+      .mockResolvedValueOnce([
+        { messageId: "old-user", role: "user", content: "旧问题" },
+        { messageId: "old-answer", role: "assistant", content: "旧回答" },
+        { messageId: "current-user", role: "user", content: "继续" },
+      ]);
+    const store = createTaskStore(api, modelApi);
+    await store.getState().openTask(createdTask.taskId);
+    const pending = store.getState().sendMessage("继续");
+    onEvent?.({
+      type: "usage",
+      delta: "",
+      model: "deepseek-v4-pro",
+      errorMessage: "",
+      usage: {
+        promptTokens: 120,
+        completionTokens: 30,
+        totalTokens: 150,
+      },
+    });
+
+    store.getState().stopChat();
+    await pending;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(store.getState().messages.at(-1)?.usage?.totalTokens).toBe(150);
+  });
+
+  it("refreshes delayed background usage after a completed answer", async () => {
+    vi.useFakeTimers();
+    try {
+      const api = createApi();
+      const modelApi = createModelApi();
+      let onEvent: Parameters<LumoraModelApi["streamMessage"]>[2] | undefined;
+      vi.mocked(modelApi.streamMessage).mockImplementation(
+        (_taskId, _content, eventHandler) => {
+          onEvent = eventHandler;
+          return () => undefined;
+        },
+      );
+      const user = {
+        messageId: "user-1",
+        role: "user" as const,
+        content: "remember this",
+      };
+      const assistant = {
+        messageId: "assistant-1",
+        role: "assistant" as const,
+        content: "remembered",
+        usage: {
+          promptTokens: 10,
+          completionTokens: 2,
+          totalTokens: 12,
+        },
+      };
+      const supplemental = {
+        messageId: "memory-usage-1",
+        parentMessageId: "user-1",
+        role: "assistant" as const,
+        content: "",
+        usageRecordOnly: true,
+        usage: {
+          promptTokens: 100,
+          completionTokens: 20,
+          totalTokens: 120,
+        },
+      };
+      vi.mocked(modelApi.listMessages)
+        .mockResolvedValueOnce([user, assistant])
+        .mockResolvedValueOnce([user, assistant])
+        .mockResolvedValueOnce([
+          user,
+          { ...assistant, threadMessages: [user, assistant, supplemental] },
+        ]);
+      const store = createTaskStore(api, modelApi);
+      await store.getState().openTask(createdTask.taskId);
+      const pending = store.getState().sendMessage("remember this");
+
+      onEvent?.({
+        type: "completed",
+        delta: "",
+        model: "deepseek-v4-pro",
+        errorMessage: "",
+      });
+      await pending;
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(
+        store.getState().messages.some((message) =>
+          message.threadMessages?.some(
+            (candidate) => candidate.messageId === "memory-usage-1",
+          ),
+        ),
+      ).toBe(true);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
   it("moves a streamed stage reply into the work log without a blank frame", async () => {
     const api = createApi();
     const modelApi = createModelApi();

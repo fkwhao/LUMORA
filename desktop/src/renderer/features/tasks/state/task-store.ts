@@ -15,6 +15,7 @@ import type {
   TaskSummary,
 } from "../../../../shared/task-contract";
 import { applyChatEvent } from "./chat-event-handler";
+import { reconcilePersistedMessages } from "./chat-message-reconciliation";
 import {
   createChatEventBatcher,
   type ChatEventBatcher,
@@ -577,14 +578,22 @@ export function createTaskStore(
             if (!persistedUserMessage) {
               return;
             }
+            const liveMessages = get().messages;
+            const liveAssistant = liveMessages.at(-1);
+            const persistedWithAssistant =
+              persistedMessages.at(-1)?.role === "assistant"
+                ? persistedMessages
+                : [
+                    ...persistedMessages,
+                    liveAssistant?.role === "assistant"
+                      ? liveAssistant
+                      : { role: "assistant" as const, content: "" },
+                  ];
             set({
-              messages:
-                persistedMessages.at(-1)?.role === "assistant"
-                  ? persistedMessages
-                  : [
-                      ...persistedMessages,
-                      { role: "assistant", content: "" },
-                    ],
+              messages: reconcilePersistedMessages(
+                liveMessages,
+                persistedWithAssistant,
+              ),
             });
           })
           .catch(() => undefined);

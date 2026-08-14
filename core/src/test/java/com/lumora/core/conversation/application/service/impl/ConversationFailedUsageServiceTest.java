@@ -14,6 +14,7 @@ import com.lumora.core.conversation.domain.model.ChatStreamEvent;
 import com.lumora.core.conversation.domain.model.ChatStreamEventType;
 import com.lumora.core.conversation.domain.model.TokenUsage;
 import com.lumora.core.memory.application.service.MemoryService;
+import com.lumora.core.memory.application.model.MemoryExtractionOutcome;
 import com.lumora.core.memory.application.support.MemoryExtractionCoordinator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -101,6 +102,102 @@ class ConversationFailedUsageServiceTest {
                 ArgumentCaptor.forClass(ConversationStreamAccumulator.class);
         verify(persistence).persistFailedUsage(eq(context), captor.capture());
         assertThat(captor.getValue().getUsage().getTotalTokens()).isEqualTo(35);
+    }
+
+    @Test
+    void persistsUsageFromPostTurnMemoryExtraction() throws Exception {
+        ConversationPersistenceService persistence = mock(
+                ConversationPersistenceService.class
+        );
+        ConversationRuntimePort runtime = mock(ConversationRuntimePort.class);
+        MemoryExtractionCoordinator extractionCoordinator = mock(
+                MemoryExtractionCoordinator.class
+        );
+        ConversationRunContext context = new ConversationRunContext(
+                "task-1",
+                "conversation-1",
+                2,
+                List.of(new ChatMessage("user", "remember this")),
+                "message-1",
+                "remember this",
+                null,
+                null,
+                System.nanoTime()
+        );
+        when(persistence.prepareNewMessage(
+                "task-1", "remember this", null
+        )).thenReturn(context);
+        doAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            java.util.function.Consumer<ChatStreamEvent> consumer =
+                    invocation.getArgument(1);
+            consumer.accept(new ChatStreamEvent(
+                    ChatStreamEventType.TEXT_DELTA,
+                    "remembered",
+                    "deepseek-v4-pro",
+                    null,
+                    ""
+            ));
+            consumer.accept(usageEvent(new TokenUsage(10, 2, 12)));
+            consumer.accept(new ChatStreamEvent(
+                    ChatStreamEventType.COMPLETED,
+                    "",
+                    "deepseek-v4-pro",
+                    null,
+                    ""
+            ));
+            return null;
+        }).when(runtime).streamChat(any(ConversationRunRequest.class), any());
+        TokenUsage extractionUsage = new TokenUsage(
+                100, 20, 120, 12, 18, 2, 88, 0, true
+        );
+        when(extractionCoordinator.extractStoreAndReport(
+                "conversation-1",
+                null,
+                "message-1",
+                "remember this",
+                "remembered",
+                null,
+                "correlation-1"
+        )).thenReturn(new MemoryExtractionOutcome(
+                1, "deepseek-v4-pro", extractionUsage
+        ));
+        CountDownLatch supplementalPersisted = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            supplementalPersisted.countDown();
+            return null;
+        }).when(persistence).persistSupplementalUsage(
+                context, extractionUsage, "deepseek-v4-pro"
+        );
+        ConversationServiceImpl service = new ConversationServiceImpl(
+                persistence,
+                runtime,
+                mock(ContextCompactionPort.class),
+                mock(ToolApprovalPort.class),
+                executor,
+                extractionCoordinator,
+                mock(ConversationContextSummaryService.class),
+                mock(ArtifactService.class),
+                mock(MemoryService.class)
+        );
+
+        service.streamMessage(
+                "task-1",
+                "remember this",
+                null,
+                null,
+                null,
+                "request_approval",
+                "correlation-1",
+                event -> { },
+                () -> { },
+                error -> { }
+        );
+
+        assertTrue(supplementalPersisted.await(5, TimeUnit.SECONDS));
+        verify(persistence).persistSupplementalUsage(
+                context, extractionUsage, "deepseek-v4-pro"
+        );
     }
 
     private static ChatStreamEvent usageEvent(TokenUsage usage) {
