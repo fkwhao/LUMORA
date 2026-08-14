@@ -26,9 +26,11 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -45,6 +47,7 @@ public class ConversationServiceImpl implements ConversationService {
     private static final Logger LOGGER = LoggerFactory.getLogger(
             ConversationServiceImpl.class
     );
+    private static final long CANCEL_SETTLE_TIMEOUT_SECONDS = 10L;
 
     private final ConversationPersistenceService persistenceService;
     private final ConversationRuntimePort conversationRuntimePort;
@@ -55,12 +58,36 @@ public class ConversationServiceImpl implements ConversationService {
     private final ConversationContextSummaryService contextSummaryService;
     private final ArtifactService artifactService;
     private final MemoryService memoryService;
-    private final ConcurrentHashMap<String, FutureTask<Void>> activeRuns =
+    private final ConcurrentHashMap<String, ActiveRun> activeRuns =
             new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, PendingToolApproval>
             pendingToolApprovals = new ConcurrentHashMap<>();
 
     private record PendingToolApproval(String taskId, String correlationId) {
+    }
+
+    private static final class ActiveRun {
+        private final CountDownLatch terminated = new CountDownLatch(1);
+        private FutureTask<Void> task;
+
+        private void attach(FutureTask<Void> task) {
+            this.task = task;
+        }
+
+        private boolean cancel() {
+            return task != null && task.cancel(true);
+        }
+
+        private boolean awaitTermination() throws InterruptedException {
+            return terminated.await(
+                    CANCEL_SETTLE_TIMEOUT_SECONDS,
+                    TimeUnit.SECONDS
+            );
+        }
+
+        private void markTerminated() {
+            terminated.countDown();
+        }
     }
 
     @Override
@@ -161,6 +188,7 @@ public class ConversationServiceImpl implements ConversationService {
 
         try {
             ConversationRunContext context = contextSupplier.get();
+            ActiveRun activeRun = new ActiveRun();
             FutureTask<Void> run = new FutureTask<>(() -> {
                 executeStream(
                         context,
@@ -176,25 +204,51 @@ public class ConversationServiceImpl implements ConversationService {
                 return null;
             }) {
                 @Override
-                protected void done() {
-                    activeRuns.remove(taskId, this);
+                public void run() {
+                    try {
+                        super.run();
+                    } finally {
+                        activeRuns.remove(taskId, activeRun);
+                        activeRun.markTerminated();
+                    }
                 }
             };
-            activeRuns.put(taskId, run);
+            activeRun.attach(run);
+            activeRuns.put(taskId, activeRun);
             executorService.execute(run);
         } catch (RuntimeException error) {
-            activeRuns.remove(taskId);
+            ActiveRun removed = activeRuns.remove(taskId);
+            if (removed != null) {
+                removed.markTerminated();
+            }
             throw error;
         }
     }
 
     @Override
-    public boolean cancelGeneration(String taskId) {
-        FutureTask<Void> run = activeRuns.remove(taskId);
+    public synchronized boolean cancelGeneration(String taskId) {
+        ActiveRun run = activeRuns.get(taskId);
         pendingToolApprovals.entrySet().removeIf(
                 entry -> entry.getValue().taskId().equals(taskId)
         );
-        return run != null && run.cancel(true);
+        if (run == null || !run.cancel()) {
+            return false;
+        }
+        try {
+            if (!run.awaitTermination()) {
+                LOGGER.warn(
+                        "Timed out waiting for cancelled conversation run {}",
+                        taskId
+                );
+            }
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            LOGGER.warn(
+                    "Interrupted while waiting for conversation run {} to stop",
+                    taskId
+            );
+        }
+        return true;
     }
 
     @Override
@@ -318,7 +372,7 @@ public class ConversationServiceImpl implements ConversationService {
             scheduleMemoryExtraction(context, accumulator, correlationId);
         } catch (Throwable error) {
             if (!accumulator.isCompleted()
-                    && accumulator.hasBillableUsage()) {
+                    && accumulator.hasPersistableResult()) {
                 try {
                     persistenceService.persistFailedUsage(
                             context, accumulator

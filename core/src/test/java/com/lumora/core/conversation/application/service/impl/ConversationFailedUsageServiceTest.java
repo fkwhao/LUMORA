@@ -24,10 +24,12 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
@@ -102,6 +104,95 @@ class ConversationFailedUsageServiceTest {
                 ArgumentCaptor.forClass(ConversationStreamAccumulator.class);
         verify(persistence).persistFailedUsage(eq(context), captor.capture());
         assertThat(captor.getValue().getUsage().getTotalTokens()).isEqualTo(35);
+    }
+
+    @Test
+    void cancellationWaitsUntilVisibleWorkLogIsPersisted() throws Exception {
+        ConversationPersistenceService persistence = mock(
+                ConversationPersistenceService.class
+        );
+        ConversationRuntimePort runtime = mock(ConversationRuntimePort.class);
+        ConversationRunContext context = new ConversationRunContext(
+                "task-1",
+                "conversation-1",
+                2,
+                List.of(new ChatMessage("user", "hello")),
+                "message-1",
+                "hello",
+                null,
+                null,
+                System.nanoTime()
+        );
+        when(persistence.prepareNewMessage("task-1", "hello", null))
+                .thenReturn(context);
+        CountDownLatch streamStarted = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            java.util.function.Consumer<ChatStreamEvent> consumer =
+                    invocation.getArgument(1);
+            consumer.accept(new ChatStreamEvent(
+                    ChatStreamEventType.PROGRESS_MESSAGE,
+                    "正在执行相关步骤",
+                    "demo",
+                    null,
+                    "",
+                    "progress-1",
+                    "",
+                    "",
+                    "正在执行相关步骤",
+                    java.util.Map.of(),
+                    "",
+                    0L,
+                    null,
+                    java.util.Map.of()
+            ));
+            streamStarted.countDown();
+            new CountDownLatch(1).await();
+            return null;
+        }).when(runtime).streamChat(any(ConversationRunRequest.class), any());
+        CountDownLatch persistenceStarted = new CountDownLatch(1);
+        CountDownLatch allowPersistence = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            persistenceStarted.countDown();
+            allowPersistence.await(5, TimeUnit.SECONDS);
+            return null;
+        }).when(persistence).persistFailedUsage(eq(context), any());
+        ConversationServiceImpl service = new ConversationServiceImpl(
+                persistence,
+                runtime,
+                mock(ContextCompactionPort.class),
+                mock(ToolApprovalPort.class),
+                executor,
+                mock(MemoryExtractionCoordinator.class),
+                mock(ConversationContextSummaryService.class),
+                mock(ArtifactService.class),
+                mock(MemoryService.class)
+        );
+
+        service.streamMessage(
+                "task-1", "hello", null, null, null,
+                "request_approval", "correlation-1", event -> { },
+                () -> { }, error -> { }
+        );
+        assertTrue(streamStarted.await(5, TimeUnit.SECONDS));
+        ExecutorService cancellationExecutor = Executors.newSingleThreadExecutor();
+        try {
+            Future<Boolean> cancelled = cancellationExecutor.submit(
+                    () -> service.cancelGeneration("task-1")
+            );
+            assertTrue(persistenceStarted.await(5, TimeUnit.SECONDS));
+            assertFalse(cancelled.isDone());
+            allowPersistence.countDown();
+            assertTrue(cancelled.get(5, TimeUnit.SECONDS));
+        } finally {
+            allowPersistence.countDown();
+            cancellationExecutor.shutdownNow();
+        }
+
+        ArgumentCaptor<ConversationStreamAccumulator> captor =
+                ArgumentCaptor.forClass(ConversationStreamAccumulator.class);
+        verify(persistence).persistFailedUsage(eq(context), captor.capture());
+        assertThat(captor.getValue().getWorkLogEvents()).hasSize(1);
     }
 
     @Test

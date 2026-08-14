@@ -95,6 +95,32 @@ class ConversationStreamAccumulatorTest {
         assertThat(accumulator.getUsage().getTotalTokens()).isEqualTo(21);
     }
 
+    @Test
+    void treatsInterruptedWorkLogAsAPersistableVisibleResult() {
+        ConversationStreamAccumulator accumulator =
+                new ConversationStreamAccumulator();
+        accumulator.accept(new ChatStreamEvent(
+                ChatStreamEventType.PROGRESS_MESSAGE,
+                "正在分析项目结构",
+                "model",
+                null,
+                "",
+                "progress-1",
+                "",
+                "",
+                "正在分析项目结构",
+                Map.of(),
+                "",
+                0L,
+                null,
+                Map.of()
+        ));
+
+        assertThat(accumulator.hasVisibleOutput()).isTrue();
+        assertThat(accumulator.hasBillableUsage()).isFalse();
+        assertThat(accumulator.hasPersistableResult()).isTrue();
+    }
+
     private ChatStreamEvent usageEvent(TokenUsage usage) {
         return new ChatStreamEvent(
                 ChatStreamEventType.USAGE,

@@ -97,6 +97,14 @@ public class ConversationStreamAccumulator {
         );
     }
 
+    public boolean hasVisibleOutput() {
+        return !content.toString().isBlank() || !workLogEvents.isEmpty();
+    }
+
+    public boolean hasPersistableResult() {
+        return hasVisibleOutput() || hasBillableUsage();
+    }
+
     public List<ChatStreamEvent> getWorkLogEvents() {
         return List.copyOf(workLogEvents);
     }

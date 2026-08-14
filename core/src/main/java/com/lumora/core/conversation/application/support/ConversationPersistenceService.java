@@ -324,6 +324,14 @@ public class ConversationPersistenceService {
             ConversationRunContext context,
             ConversationStreamAccumulator accumulator
     ) {
+        insertAssistant(context, accumulator, false);
+    }
+
+    private void insertAssistant(
+            ConversationRunContext context,
+            ConversationStreamAccumulator accumulator,
+            boolean interrupted
+    ) {
         TokenUsage usage = accumulator.getUsage() == null
                 ? new TokenUsage(0, 0, 0)
                 : accumulator.getUsage();
@@ -346,7 +354,10 @@ public class ConversationPersistenceService {
                 durationMs,
                 now
         );
-        assistantMessage.setWorkLogJson(serializeWorkLog(accumulator));
+        assistantMessage.setWorkLogJson(serializeWorkLog(
+                accumulator,
+                interrupted
+        ));
         ConversationMessage parent = messageMapper.selectById(
                 context.getCurrentUserMessageId()
         );
@@ -364,14 +375,15 @@ public class ConversationPersistenceService {
         touchConversation(conversation, context.getTaskId(), now);
     }
 
-    /**
-     * Preserve provider billing from a run that failed after reporting usage.
-     * The row participates in durable totals but never becomes a chat branch.
-     */
+    /** Preserve visible partial output, or a hidden usage-only failed call. */
     private void insertFailedUsage(
             ConversationRunContext context,
             ConversationStreamAccumulator accumulator
     ) {
+        if (accumulator.hasVisibleOutput()) {
+            insertAssistant(context, accumulator, true);
+            return;
+        }
         TokenUsage usage = accumulator.getUsage();
         if (usage == null) {
             return;
@@ -479,11 +491,20 @@ public class ConversationPersistenceService {
     }
 
     private String serializeWorkLog(
-            ConversationStreamAccumulator accumulator
+            ConversationStreamAccumulator accumulator,
+            boolean interrupted
     ) {
         try {
-            return objectMapper.writeValueAsString(
+            List<ChatStreamEvent> events = new ArrayList<>(
                     accumulator.getWorkLogEvents()
+            );
+            if (interrupted) {
+                events.add(InterruptedRunContextRenderer.marker(
+                        accumulator.getModel()
+                ));
+            }
+            return objectMapper.writeValueAsString(
+                    events
             );
         } catch (JsonProcessingException error) {
             throw new IllegalStateException("无法保存工作过程记录", error);
@@ -725,9 +746,20 @@ public class ConversationPersistenceService {
     }
 
     private ChatMessage toModelMessage(ConversationMessage message) {
+        String content = message.getContent();
+        if (message.getRole() == ChatMessageRole.ASSISTANT
+                && InterruptedRunContextRenderer.isInterrupted(
+                message.getWorkLogJson(), objectMapper
+        )) {
+            content = InterruptedRunContextRenderer.render(
+                    content,
+                    message.getWorkLogJson(),
+                    objectMapper
+            );
+        }
         return new ChatMessage(
                 message.getRole().name().toLowerCase(),
-                message.getContent(),
+                content,
                 message.getMessageId(),
                 message.getSequence()
         );
@@ -738,6 +770,9 @@ public class ConversationPersistenceService {
                 message.getRole() != ChatMessageRole.ASSISTANT
                 || (message.getContent() != null
                 && !message.getContent().isBlank())
+                || InterruptedRunContextRenderer.isInterrupted(
+                message.getWorkLogJson(), objectMapper
+                )
                 || message.getWorkLogJson() == null
                 || message.getWorkLogJson().equals("[]")
         );
