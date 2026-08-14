@@ -70,6 +70,7 @@ export interface ChatMessage {
   parentMessageId?: string;
   messageDepth?: number;
   activePath?: boolean;
+  usageRecordOnly?: boolean;
   threadMessages?: ChatMessage[];
   role: "user" | "assistant";
   content: string;

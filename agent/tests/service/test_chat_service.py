@@ -2,9 +2,14 @@ import asyncio
 from collections.abc import AsyncIterator
 from typing import Any, ClassVar
 
+from app.context.planner import ContextPlan
 from app.dto.request.chat_completion_request import ChatCompletionRequest
 from app.dto.request.model_list_request import ModelListRequest
-from app.harness.run_event import RunEvent
+from app.dto.response.chat_completion_response import (
+    ChatCompletionResponse,
+    TokenUsageResponse,
+)
+from app.harness.run_event import RunEvent, RunUsage
 from app.mcp.model import McpServerConfig, McpToolDefinition
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.prompt.prompt_builder import PromptBuilder
@@ -63,6 +68,99 @@ class CapturingHarness:
         self.tool_context = tool_context
         if False:
             yield RunEvent(type="completed")
+
+
+class UsageHarness:
+    async def stream(self, *_args: Any) -> AsyncIterator[RunEvent]:
+        yield RunEvent(
+            type="usage",
+            model="example-model",
+            usage=RunUsage(
+                prompt_tokens=20,
+                completion_tokens=5,
+                total_tokens=25,
+                input_tokens=12,
+                output_tokens=5,
+                cache_read_tokens=8,
+                cache_metrics_available=True,
+            ),
+        )
+        yield RunEvent(type="completed", model="example-model")
+
+
+class CompactingProvider(ModelListProvider):
+    async def compact_context(self, *_args: Any) -> ChatCompletionResponse:
+        return ChatCompletionResponse(
+            message="summary",
+            model="example-model",
+            usage=TokenUsageResponse(
+                promptTokens=10,
+                completionTokens=2,
+                totalTokens=12,
+                inputTokens=4,
+                outputTokens=2,
+                cacheReadTokens=6,
+                cacheMetricsAvailable=True,
+            ),
+        )
+
+
+class AlwaysCompactingPlanner:
+    def should_compact(self, *_args: Any) -> tuple[bool, int, int]:
+        return True, 100, 80
+
+    def split_for_compaction(self, messages: list[Any]) -> tuple[list[Any], list[Any]]:
+        return messages[:1], messages[1:]
+
+    def completed_plan(
+        self,
+        _prompt: Any,
+        _messages: list[Any],
+        retained: list[Any],
+        summary: str,
+        before_tokens: int,
+    ) -> ContextPlan:
+        return ContextPlan(
+            messages=retained,
+            summary=summary,
+            compacted=True,
+            before_tokens=before_tokens,
+            after_tokens=40,
+            through_sequence=1,
+            retained_from_sequence=2,
+        )
+
+
+def test_automatic_compaction_usage_is_included_in_stream_totals() -> None:
+    service = ChatService(
+        CompactingProvider(),  # type: ignore[arg-type]
+        PromptBuilder(),
+        context_planner=AlwaysCompactingPlanner(),  # type: ignore[arg-type]
+        agent_harness=UsageHarness(),  # type: ignore[arg-type]
+    )
+    request = ChatCompletionRequest.model_validate({
+        "messages": [
+            {"role": "user", "content": "old", "sequence": 1},
+            {"role": "assistant", "content": "answer", "sequence": 2},
+        ],
+        "connection": {
+            "providerName": "OpenAI compatible",
+            "baseUrl": "https://example.com/v1",
+            "model": "example-model",
+            "apiKey": "secret",
+        },
+    })
+
+    events = asyncio.run(_collect(service.stream(request)))
+
+    compacted = next(event for event in events if event.type == "context_compacted")
+    usage = next(event for event in events if event.type == "usage")
+    assert compacted.usage is not None
+    assert compacted.usage.total_tokens == 12
+    assert usage.usage is not None
+    assert usage.usage.total_tokens == 37
+    assert usage.usage.input_tokens == 16
+    assert usage.usage.cache_read_tokens == 14
 
 
 class FakeMcpClient:
@@ -280,3 +378,7 @@ def _mcp_request(content: str) -> ChatCompletionRequest:
 async def _drain(events: AsyncIterator[RunEvent]) -> None:
     async for _event in events:
         pass
+
+
+async def _collect(events: AsyncIterator[RunEvent]) -> list[RunEvent]:
+    return [event async for event in events]

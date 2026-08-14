@@ -46,6 +46,7 @@ import {
   LoaderCircle,
   Minimize2,
   MoreHorizontal,
+  PackageOpen,
   Pencil,
   Plus,
   ShieldAlert,
@@ -66,6 +67,7 @@ import type {
   ArtifactChunk,
 } from "../../../../shared/model-contract";
 import type { TaskEvent } from "../../../../shared/task-contract";
+import type { LumoraSkillApi, SkillSummary } from "../../../../shared/skill-contract";
 import {
   executionPlanFromWorkLog,
   isExecutionPlanComplete,
@@ -101,6 +103,7 @@ import type { TaskStore } from "../state/task-store";
 interface TaskPageProps {
   store: TaskStore;
   modelApi?: LumoraModelApi;
+  skillApi?: LumoraSkillApi;
   composerMotion?: "from-center";
   notify(message: string, tone?: "info" | "success"): void;
 }
@@ -138,6 +141,7 @@ const EMPTY_TASK_EVENTS: TaskEvent[] = [];
 export const TaskPage = memo(function TaskPage({
   store,
   modelApi,
+  skillApi,
   composerMotion,
   notify,
 }: TaskPageProps) {
@@ -166,6 +170,7 @@ export const TaskPage = memo(function TaskPage({
     (state) => state.lastChatDurationMs,
   );
   const [composerText, setComposerText] = useState("");
+  const [skills, setSkills] = useState<SkillSummary[]>([]);
   const [moreOpen, setMoreOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
@@ -214,6 +219,20 @@ export const TaskPage = memo(function TaskPage({
   const runtimeMessageCacheRef = useRef(
     new Map<string, RuntimeMessageCacheEntry>(),
   );
+  const workspacePath = useStore(store, (state) =>
+    task?.taskId ? state.taskProjectPaths[task.taskId] : undefined,
+  );
+
+  useEffect(() => {
+    if (!skillApi) return;
+    let cancelled = false;
+    void skillApi.list(workspacePath).then((items) => {
+      if (!cancelled) setSkills(items.filter((item) => item.enabled));
+    }).catch(() => {
+      if (!cancelled) setSkills([]);
+    });
+    return () => { cancelled = true; };
+  }, [skillApi, workspacePath]);
 
   useLayoutEffect(() => {
     if (composerMenu !== "model" || !modelPickerSection) return;
@@ -588,7 +607,7 @@ export const TaskPage = memo(function TaskPage({
     };
     const persisted = displayMessages.flatMap(
       (message) => message.threadMessages ?? [],
-    );
+    ).filter((message) => message.usageRecordOnly !== true);
     const byId = new Map<string, ChatMessage>();
     persisted.forEach((message) => {
       if (message.messageId) byId.set(message.messageId, message);
@@ -670,6 +689,12 @@ export const TaskPage = memo(function TaskPage({
     },
     [permissionMode, reasoningEffort, selectedModel, store],
   );
+
+  const commandQuery = composerText.trim().toLowerCase();
+  const matchingSkills = skills.filter((skill) =>
+    `/${skill.name}`.startsWith(commandQuery),
+  );
+  const showCompactCommand = "/compact".startsWith(commandQuery);
 
   const handleEditMessage = useCallback(
     async (message: AppendMessage) => {
@@ -787,6 +812,13 @@ export const TaskPage = memo(function TaskPage({
     },
     unstable_capabilities: { copy: true },
   });
+
+  const chooseSlashCommand = useCallback((command: string) => {
+    runtime.thread.composer.setText(command);
+    setComposerText(command);
+    setComposerMenu(null);
+    requestAnimationFrame(() => followUpInputRef.current?.focus());
+  }, [runtime]);
 
   const showLegacyThread = Boolean(task && task.taskId.length < 0);
   const fileChanges = fileChangesFromMessages(displayMessages);
@@ -2040,30 +2072,24 @@ export const TaskPage = memo(function TaskPage({
                 </span>
               ) : composerMenu === "command" &&
                 composerText.startsWith("/") &&
-                "/compact".startsWith(composerText.trim().toLowerCase()) ? (
+                (showCompactCommand || matchingSkills.length > 0) ? (
                 <span
                   className="composer-popover command-picker-popover"
                   role="menu"
                   aria-label="斜杠指令"
                 >
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      runtime.thread.composer.setText("/compact");
-                      setComposerText("/compact");
-                      setComposerMenu(null);
-                      requestAnimationFrame(() =>
-                        followUpInputRef.current?.focus(),
-                      );
-                    }}
-                  >
-                    <Minimize2 size={17} />
-                    <span>
-                      <strong>/compact</strong>
-                      <small>压缩上下文，保留近期原文</small>
-                    </span>
-                  </button>
+                  {showCompactCommand && (
+                    <button type="button" role="menuitem" onClick={() => chooseSlashCommand("/compact")}>
+                      <Minimize2 size={17} />
+                      <span><strong>/compact</strong><small>压缩上下文，保留近期原文</small></span>
+                    </button>
+                  )}
+                  {matchingSkills.map((skill) => (
+                    <button type="button" role="menuitem" key={skill.name} onClick={() => chooseSlashCommand(`/${skill.name} `)}>
+                      <PackageOpen size={17} />
+                      <span><strong>/{skill.name}</strong><small>{skill.description}</small></span>
+                    </button>
+                  ))}
                 </span>
               ) : null
             }

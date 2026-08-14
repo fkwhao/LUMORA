@@ -1,6 +1,9 @@
 import asyncio
 from pathlib import Path
 
+import httpx
+import pytest
+
 from app.artifact.store import ArtifactStore
 from app.dto.request.chat_completion_request import ChatMessageRequest
 from app.dto.response.chat_completion_response import (
@@ -83,6 +86,312 @@ def test_agent_loop_preserves_provisional_answer_as_stage_content() -> None:
 
 def test_agent_loop_does_not_duplicate_stage_content_before_tool() -> None:
     asyncio.run(_assert_stage_content_is_not_duplicated_before_tool())
+
+
+def test_agent_loop_moves_streamed_tool_preamble_to_progress() -> None:
+    asyncio.run(_assert_streamed_tool_preamble_becomes_progress())
+
+
+def test_agent_loop_supports_more_than_twenty_tool_iterations() -> None:
+    asyncio.run(_assert_long_task_exceeds_old_iteration_limit())
+
+
+def test_agent_loop_stops_identical_no_progress_iterations() -> None:
+    asyncio.run(_assert_identical_tool_iterations_are_stopped())
+
+
+def test_agent_loop_retries_transient_stream_disconnect() -> None:
+    asyncio.run(_assert_transient_stream_disconnect_is_retried())
+
+
+async def _assert_transient_stream_disconnect_is_retried() -> None:
+    interrupted = (
+        "我已经拿到 Maven 的失败输出，正在分析 Wrapper 下载失败的原因，"
+        "接下来会改用本地缓存继续验证。"
+    )
+    final = "已从瞬时断连中恢复，并继续处理 Maven 失败。"
+    attempts = 0
+
+    async def complete_turn(*_args):
+        raise AssertionError("存在流式回合能力时不应调用一次性完成接口")
+
+    async def stream_turn(*_args):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            yield ProviderTurnEvent(
+                type="content_delta",
+                delta=interrupted,
+                model="test-model",
+            )
+            raise httpx.RemoteProtocolError("incomplete chunked read")
+        turn = ProviderTurn(
+            content=final,
+            reasoning="",
+            model="test-model",
+            usage=TokenUsageResponse(
+                promptTokens=20,
+                completionTokens=8,
+                totalTokens=28,
+            ),
+            tool_calls=(),
+        )
+        yield ProviderTurnEvent(
+            type="content_delta",
+            delta=final,
+            model=turn.model,
+        )
+        yield ProviderTurnEvent(
+            type="completed",
+            model=turn.model,
+            turn=turn,
+        )
+
+    events = [
+        event
+        async for event in AgentLoopRunner(
+            complete_turn,
+            stream_turn=stream_turn,
+            stream_retry_base_delay=0,
+        ).stream(
+            _settings(),
+            PromptAssembly(()),
+            [ChatMessageRequest(role="user", content="继续完成项目")],
+            None,
+            ToolRegistry(),
+            ToolContext(Path(".")),
+        )
+    ]
+
+    reset_index = next(
+        index for index, event in enumerate(events) if event.type == "text_reset"
+    )
+    assert attempts == 2
+    assert interrupted == "".join(
+        event.delta for event in events[:reset_index] if event.type == "text_delta"
+    )
+    assert final == "".join(
+        event.delta for event in events[reset_index + 1 :] if event.type == "text_delta"
+    )
+    assert any(
+        event.type == "progress_message" and "自动重试" in event.delta
+        for event in events
+    )
+    assert events[-1].type == "completed"
+
+
+async def _assert_streamed_tool_preamble_becomes_progress() -> None:
+    preamble = (
+        "本机环境已经检查完成，接下来我会补充 Maven Wrapper，"
+        "然后继续执行项目测试并根据结果修复问题。"
+    )
+    final = "Maven Wrapper 已补充，项目测试也已经通过。"
+    turns = iter((
+        ProviderTurn(
+            content=preamble,
+            reasoning="",
+            model="test-model",
+            usage=TokenUsageResponse(
+                promptTokens=10,
+                completionTokens=8,
+                totalTokens=18,
+            ),
+            tool_calls=(ProviderToolCall("call-1", "run_step", "{}"),),
+        ),
+        ProviderTurn(
+            content=final,
+            reasoning="",
+            model="test-model",
+            usage=TokenUsageResponse(
+                promptTokens=20,
+                completionTokens=6,
+                totalTokens=26,
+            ),
+            tool_calls=(),
+        ),
+    ))
+
+    async def complete_turn(*_args):
+        raise AssertionError("存在流式回合能力时不应调用一次性完成接口")
+
+    async def stream_turn(*_args):
+        turn = next(turns)
+        yield ProviderTurnEvent(
+            type="content_delta",
+            delta=turn.content,
+            model=turn.model,
+        )
+        if turn.tool_calls:
+            yield ProviderTurnEvent(
+                type="tool_call_delta",
+                model=turn.model,
+            )
+        yield ProviderTurnEvent(
+            type="completed",
+            model=turn.model,
+            turn=turn,
+        )
+
+    async def execute(_context, _input):
+        return ToolResult("done")
+
+    registry = ToolRegistry((
+        function_tool(
+            name="run_step",
+            description="运行步骤",
+            input_schema={"type": "object", "properties": {}},
+            execute=execute,
+            read_only=True,
+        ),
+    ))
+    events = [
+        event
+        async for event in AgentLoopRunner(
+            complete_turn,
+            stream_turn=stream_turn,
+        ).stream(
+            _settings(),
+            PromptAssembly(()),
+            [ChatMessageRequest(role="user", content="完成项目")],
+            None,
+            registry,
+            ToolContext(Path(".")),
+        )
+    ]
+
+    reset_index = next(
+        index for index, event in enumerate(events) if event.type == "text_reset"
+    )
+    assert preamble == "".join(
+        event.delta for event in events[:reset_index] if event.type == "text_delta"
+    )
+    assert final == "".join(
+        event.delta for event in events[reset_index + 1 :] if event.type == "text_delta"
+    )
+    progress = [event.delta for event in events if event.type == "progress_message"]
+    assert progress == [preamble]
+    progress_index = next(
+        index
+        for index, event in enumerate(events)
+        if event.type == "progress_message"
+    )
+    assert progress_index < reset_index
+    assert events[progress_index].metadata["replacesAssistantContent"] is True
+
+
+async def _assert_long_task_exceeds_old_iteration_limit() -> None:
+    tool_turns = tuple(
+        ProviderTurn(
+            content=f"执行第 {step} 步。",
+            reasoning="",
+            model="test-model",
+            usage=TokenUsageResponse(
+                promptTokens=step,
+                completionTokens=1,
+                totalTokens=step + 1,
+            ),
+            tool_calls=(ProviderToolCall(
+                f"call-{step}",
+                "run_step",
+                f'{{"step":{step}}}',
+            ),),
+        )
+        for step in range(1, 22)
+    )
+    turns = iter((*tool_turns, ProviderTurn(
+        content="长任务完成。",
+        reasoning="",
+        model="test-model",
+        usage=TokenUsageResponse(
+            promptTokens=30,
+            completionTokens=3,
+            totalTokens=33,
+        ),
+        tool_calls=(),
+    )))
+    executed_steps: list[int] = []
+
+    async def complete_turn(*_args):
+        return next(turns)
+
+    async def execute(_context, input_data):
+        step = int(input_data["step"])
+        executed_steps.append(step)
+        return ToolResult(f"step {step} done")
+
+    registry = ToolRegistry((
+        function_tool(
+            name="run_step",
+            description="运行步骤",
+            input_schema={
+                "type": "object",
+                "properties": {"step": {"type": "integer"}},
+                "required": ["step"],
+            },
+            execute=execute,
+            read_only=True,
+        ),
+    ))
+    events = [
+        event
+        async for event in AgentLoopRunner(complete_turn).stream(
+            _settings(),
+            PromptAssembly(()),
+            [ChatMessageRequest(role="user", content="完成长任务")],
+            None,
+            registry,
+            ToolContext(Path(".")),
+        )
+    ]
+
+    assert executed_steps == list(range(1, 22))
+    assert events[-1].type == "completed"
+
+
+async def _assert_identical_tool_iterations_are_stopped() -> None:
+    turns = iter(
+        ProviderTurn(
+            content="再次读取。",
+            reasoning="",
+            model="test-model",
+            usage=TokenUsageResponse(
+                promptTokens=10,
+                completionTokens=1,
+                totalTokens=11,
+            ),
+            tool_calls=(ProviderToolCall("call", "read_same", "{}"),),
+        )
+        for _ in range(4)
+    )
+
+    async def complete_turn(*_args):
+        return next(turns)
+
+    async def execute(_context, _input):
+        return ToolResult("unchanged")
+
+    registry = ToolRegistry((
+        function_tool(
+            name="read_same",
+            description="读取相同内容",
+            input_schema={"type": "object", "properties": {}},
+            execute=execute,
+            read_only=True,
+        ),
+    ))
+
+    with pytest.raises(ValueError, match="无进展循环"):
+        _events = [
+            event
+            async for event in AgentLoopRunner(complete_turn).stream(
+                _settings(),
+                PromptAssembly(()),
+                [ChatMessageRequest(role="user", content="读取")],
+                None,
+                registry,
+                ToolContext(Path(".")),
+            )
+        ]
 
 
 async def _assert_stage_content_is_not_duplicated_before_tool() -> None:

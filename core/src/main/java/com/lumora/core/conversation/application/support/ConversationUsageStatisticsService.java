@@ -111,7 +111,7 @@ public class ConversationUsageStatisticsService {
                 + message.getReasoningTokens()
                 + message.getCacheReadTokens()
                 + message.getCacheWriteTokens();
-        return detailed > 0 ? detailed : Math.max(0, message.getTotalTokens());
+        return Math.max(detailed, Math.max(0, message.getTotalTokens()));
     }
 
     private static final class MutableUsage {
@@ -139,7 +139,7 @@ public class ConversationUsageStatisticsService {
 
         long normalizedTotal() {
             long detailed = input + output + reasoning + cacheRead + cacheWrite;
-            return detailed > 0 ? detailed : total;
+            return Math.max(detailed, total);
         }
 
         AggregateTokenUsage toModel() {

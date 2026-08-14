@@ -18,6 +18,7 @@ public class ConversationMessageResponseConverter {
                 message.getParentMessageId(),
                 message.getMessageDepth(),
                 message.isActivePath(),
+                message.isUsageRecordOnly(),
                 message.getRole().name().toLowerCase(),
                 message.getContent(),
                 message.getModel(),

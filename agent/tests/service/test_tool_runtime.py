@@ -2,6 +2,7 @@ import asyncio
 from pathlib import Path
 
 import pytest
+
 from app.tool.base import ToolContext
 from app.tool.default_registry import create_default_tool_registry
 from app.tool.tool_runtime import (
@@ -147,6 +148,9 @@ def test_default_registry_exposes_large_file_tools() -> None:
         "apply_patch",
         "write_file",
         "shell_command",
+        "shell_process",
+        "load_skill",
+        "read_skill_resource",
     )
 
 
@@ -163,6 +167,9 @@ def test_legacy_tool_runtime_import_keeps_default_registry_compatible() -> None:
         "apply_patch",
         "write_file",
         "shell_command",
+        "shell_process",
+        "load_skill",
+        "read_skill_resource",
     )
     assert compatible.names() == expected_names
     assert compatible.model_definitions(expected_names) == registry.model_definitions(

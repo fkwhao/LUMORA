@@ -208,3 +208,12 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 024-conversation-usage-record
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V24__conversation_usage_record.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

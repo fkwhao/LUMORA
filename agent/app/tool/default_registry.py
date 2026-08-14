@@ -3,6 +3,7 @@ from app.tool.filesystem_tools import filesystem_tools
 from app.tool.planning_tools import planning_tools
 from app.tool.registry import ToolRegistry
 from app.tool.shell_tools import shell_tools
+from app.tool.skill_tools import skill_tools
 
 
 def create_default_tool_registry() -> ToolRegistry:
@@ -13,5 +14,6 @@ def create_default_tool_registry() -> ToolRegistry:
             *artifact_tools(),
             *filesystem_tools(),
             *shell_tools(),
+            *skill_tools(),
         )
     )

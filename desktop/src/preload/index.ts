@@ -26,6 +26,7 @@ import {
 } from "../shared/validation";
 import type { ResolvedAppearanceTheme } from "../shared/window-contract";
 import type { SaveMcpServerInput } from "../shared/mcp-contract";
+import type { LumoraSkillApi } from "../shared/skill-contract";
 import type { ProjectDirectory } from "../shared/window-contract";
 
 const api: LumoraApi = {
@@ -219,6 +220,15 @@ const api: LumoraApi = {
     testServer: (serverId: string) =>
       ipcRenderer.invoke("mcp:test-server", serverId),
   },
+  skill: {
+    list: (workspacePath?: string) => ipcRenderer.invoke("skill:list", workspacePath),
+    setEnabled: (name: string, enabled: boolean) =>
+      ipcRenderer.invoke("skill:set-enabled", name, enabled),
+    openDirectory: (scope, workspacePath?: string) =>
+      ipcRenderer.invoke("skill:open-directory", scope, workspacePath),
+    installFromDirectory: (scope, workspacePath?: string) =>
+      ipcRenderer.invoke("skill:install-from-directory", scope, workspacePath),
+  } satisfies LumoraSkillApi,
   window: {
     setAppearance: (theme: ResolvedAppearanceTheme) => {
       if (theme !== "light" && theme !== "dark") {

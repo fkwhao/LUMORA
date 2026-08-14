@@ -1,5 +1,6 @@
 import logging
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from pathlib import Path
 
 import httpx
@@ -9,12 +10,15 @@ from app.context.planner import ContextPlanner
 from app.dto.request.artifact_request import ArtifactReadRequest, ArtifactSearchRequest
 from app.dto.request.chat_completion_request import ChatCompletionRequest
 from app.dto.request.model_list_request import ModelListRequest
-from app.dto.response.chat_completion_response import ChatCompletionResponse
+from app.dto.response.chat_completion_response import (
+    ChatCompletionResponse,
+    TokenUsageResponse,
+)
 from app.dto.response.context_compaction_response import ContextCompactionResponse
 from app.exception.provider_errors import ModelProviderError
 from app.harness.agent_harness import AgentHarness
 from app.harness.ports.model_provider import ModelProviderPort
-from app.harness.run_event import RunEvent
+from app.harness.run_event import RunEvent, RunUsage
 from app.mcp.capability_adapter import create_mcp_capability_tools
 from app.mcp.client import McpClient, McpConnectionError
 from app.mcp.exposure_policy import (
@@ -37,7 +41,9 @@ from app.permission.model import (
 from app.prompt.project_instruction_loader import ProjectInstructionLoader
 from app.prompt.prompt_builder import PromptBuilder
 from app.prompt.prompt_context import PromptContext
+from app.provider.token_usage import add_token_usage, empty_token_usage
 from app.service.mcp_service import to_mcp_config
+from app.skill.catalog import SkillCatalog
 from app.tool.base import ToolContext
 from app.tool.default_registry import create_default_tool_registry
 from app.tool.registry import ToolRegistry
@@ -59,6 +65,7 @@ class ChatService:
         agent_harness: AgentHarness | None = None,
         memory_retriever: MemoryRetriever | None = None,
         project_instruction_loader: ProjectInstructionLoader | None = None,
+        skill_catalog: SkillCatalog | None = None,
     ) -> None:
         self._provider = provider
         self._prompt_builder = prompt_builder
@@ -75,6 +82,7 @@ class ChatService:
         self._project_instruction_loader = (
             project_instruction_loader or ProjectInstructionLoader()
         )
+        self._skill_catalog = skill_catalog or SkillCatalog()
 
     async def list_models(self, request: ModelListRequest) -> list[str]:
         connection = request
@@ -135,6 +143,7 @@ class ChatService:
     ) -> AsyncIterator[RunEvent]:
         runtime_registry = self._tool_registry
         mcp_clients: list[McpClient] = []
+        prelude_usage = empty_token_usage()
         try:
             runtime_registry, mcp_clients, mcp_errors = (
                 await self._prepare_mcp_registry(request)
@@ -206,6 +215,9 @@ class ChatService:
                     )
                     request_messages = plan.messages
                     active_summary = plan.summary
+                    prelude_usage = add_token_usage(
+                        (prelude_usage, compacted.usage)
+                    )
                     prompt = self._prompt_builder.build(
                         self._prompt_context(
                             request,
@@ -231,6 +243,7 @@ class ChatService:
                             "usage": compacted.usage.model_dump(by_alias=True),
                         },
                         model=compacted.model,
+                        usage=_to_run_usage(prelude_usage),
                         active_context_tokens=plan.after_tokens,
                     )
             workspace_path = request.prompt_context.workspace_path
@@ -268,12 +281,12 @@ class ChatService:
                 self._approval_broker,
                 self._permission_config_store,
                 lambda summary: self._prompt_builder.build(
-                    self._prompt_context(request, summary)
+                    self._prompt_context(request, summary, runtime_registry)
                 ),
                 active_summary,
             )
             async for event in stream:
-                yield event
+                yield _with_prelude_usage(event, prelude_usage)
         except (httpx.HTTPError, OSError, TypeError, ValueError) as error:
             logger.warning(
                 "Model stream failed correlation_id=%s provider=%s "
@@ -382,6 +395,7 @@ class ChatService:
             context.workspace_path
         )
         registry = tool_registry or self._tool_registry
+        skills = self._skill_catalog.discover(context.workspace_path)
         registered_names = registry.names()
         base_names = set(self._tool_registry.names())
         mcp_names = tuple(
@@ -393,11 +407,24 @@ class ChatService:
                 for name in context.available_tools
                 if name in registered_names
             )
-            allowed_names = tuple(dict.fromkeys((*allowed_local_names, *mcp_names)))
+            skill_tool_names = tuple(
+                name for name in ("load_skill", "read_skill_resource")
+                if skills and name in registered_names
+            )
+            allowed_names = tuple(dict.fromkeys(
+                (*allowed_local_names, *skill_tool_names, *mcp_names)
+            ))
         elif context.workspace_path:
-            allowed_names = registered_names
+            allowed_names = tuple(
+                name for name in registered_names
+                if skills or name not in {"load_skill", "read_skill_resource"}
+            )
         else:
-            allowed_names = mcp_names
+            allowed_names = tuple(dict.fromkeys((
+                *(name for name in ("load_skill", "read_skill_resource")
+                  if skills and name in registered_names),
+                *mcp_names,
+            )))
         return PromptContext(
             workspace_path=context.workspace_path,
             project_instructions=(
@@ -420,6 +447,7 @@ class ChatService:
                 if conversation_summary is not None
                 else context.conversation_summary
             ),
+            available_skills=skills,
         )
 
     async def _prepare_mcp_registry(
@@ -439,11 +467,15 @@ class ChatService:
         if not servers:
             return self._tool_registry, [], []
 
-        registry = (
-            self._tool_registry.copy()
-            if request.prompt_context.workspace_path
-            else ToolRegistry()
-        )
+        if request.prompt_context.workspace_path:
+            registry = self._tool_registry.copy()
+        else:
+            user_skills = self._skill_catalog.discover()
+            registry = ToolRegistry(
+                self._tool_registry.get(name)
+                for name in ("load_skill", "read_skill_resource")
+                if user_skills and name in self._tool_registry.names()
+            )
         expose_capabilities = should_expose_capability_tools(
             current_request
         )
@@ -514,3 +546,64 @@ class ChatService:
         )
         settings.validate()
         return settings
+
+
+def _to_run_usage(usage: TokenUsageResponse) -> RunUsage:
+    return RunUsage(
+        prompt_tokens=usage.prompt_tokens,
+        completion_tokens=usage.completion_tokens,
+        total_tokens=usage.total_tokens,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        reasoning_tokens=usage.reasoning_tokens,
+        cache_read_tokens=usage.cache_read_tokens,
+        cache_write_tokens=usage.cache_write_tokens,
+        cache_metrics_available=usage.cache_metrics_available,
+    )
+
+
+def _with_prelude_usage(
+    event: RunEvent,
+    prelude: TokenUsageResponse,
+) -> RunEvent:
+    if event.usage is None or not _has_billable_usage(prelude):
+        return event
+    usage = event.usage
+    return replace(
+        event,
+        usage=RunUsage(
+            prompt_tokens=prelude.prompt_tokens + usage.prompt_tokens,
+            completion_tokens=(
+                prelude.completion_tokens + usage.completion_tokens
+            ),
+            total_tokens=prelude.total_tokens + usage.total_tokens,
+            input_tokens=prelude.input_tokens + usage.input_tokens,
+            output_tokens=prelude.output_tokens + usage.output_tokens,
+            reasoning_tokens=(
+                prelude.reasoning_tokens + usage.reasoning_tokens
+            ),
+            cache_read_tokens=(
+                prelude.cache_read_tokens + usage.cache_read_tokens
+            ),
+            cache_write_tokens=(
+                prelude.cache_write_tokens + usage.cache_write_tokens
+            ),
+            cache_metrics_available=(
+                prelude.cache_metrics_available
+                or usage.cache_metrics_available
+            ),
+        ),
+    )
+
+
+def _has_billable_usage(usage: TokenUsageResponse) -> bool:
+    return any((
+        usage.prompt_tokens,
+        usage.completion_tokens,
+        usage.total_tokens,
+        usage.input_tokens,
+        usage.output_tokens,
+        usage.reasoning_tokens,
+        usage.cache_read_tokens,
+        usage.cache_write_tokens,
+    ))

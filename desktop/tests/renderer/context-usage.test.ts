@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import type { ChatMessage } from "../../src/shared/model-contract";
 import {
   resolveContextBreakdown,
   resolveContextUsage,
 } from "../../src/renderer/features/tasks/state/context-usage";
 
 describe("context usage", () => {
-  it("uses accumulated provider token totals across assistant messages", () => {
+  it("anchors context pressure to the latest provider prompt", () => {
     const usage = resolveContextUsage([
       { role: "user", content: "第一问" },
       {
@@ -30,10 +31,12 @@ describe("context usage", () => {
       },
     ]);
 
-    expect(usage).toEqual({ tokens: 300, estimated: false });
+    expect(usage.estimated).toBe(true);
+    expect(usage.tokens).toBeGreaterThan(170);
+    expect(usage.tokens).toBeLessThan(200);
   });
 
-  it("keeps the accumulated total stable before a new run reports usage", () => {
+  it("projects messages added after the latest provider sample", () => {
     const usage = resolveContextUsage([
       {
         role: "assistant",
@@ -48,10 +51,12 @@ describe("context usage", () => {
       { role: "assistant", content: "" },
     ]);
 
-    expect(usage).toEqual({ tokens: 100, estimated: false });
+    expect(usage.estimated).toBe(true);
+    expect(usage.tokens).toBeGreaterThan(80);
+    expect(usage.tokens).toBeLessThan(120);
   });
 
-  it("uses the current run's latest cumulative usage without double counting it", () => {
+  it("uses the current run's latest prompt sample without double counting it", () => {
     const usage = resolveContextUsage([
       {
         role: "assistant",
@@ -74,7 +79,69 @@ describe("context usage", () => {
       },
     ]);
 
-    expect(usage).toEqual({ tokens: 400, estimated: false });
+    expect(usage.estimated).toBe(true);
+    expect(usage.tokens).toBeGreaterThan(250);
+    expect(usage.tokens).toBeLessThan(300);
+  });
+
+  it("uses a compaction result immediately as the newest context anchor", () => {
+    const usage = resolveContextUsage([
+      {
+        role: "assistant",
+        content: "old answer",
+        activeContextTokens: 8_000,
+      },
+      {
+        role: "assistant",
+        content: "",
+        activeContextTokens: 2_800,
+      },
+    ]);
+
+    expect(usage).toEqual({ tokens: 2_800, estimated: true });
+  });
+
+  it("uses a later failed request as the durable provider anchor", () => {
+    const threadMessages: ChatMessage[] = [
+      {
+        messageId: "assistant-active",
+        sequence: 2,
+        role: "assistant" as const,
+        content: "old answer",
+        usage: { promptTokens: 80, completionTokens: 20, totalTokens: 100 },
+      },
+      {
+        messageId: "failed-usage",
+        sequence: 4,
+        role: "assistant" as const,
+        content: "",
+        activePath: false,
+        usageRecordOnly: true,
+        parentMessageId: "user-current",
+        usage: { promptTokens: 250, completionTokens: 10, totalTokens: 260 },
+      },
+    ];
+    const usage = resolveContextUsage([
+      {
+        ...threadMessages[0]!,
+        threadMessages,
+      },
+      {
+        messageId: "user-current",
+        sequence: 3,
+        role: "user",
+        content: "current request",
+        threadMessages,
+      },
+      {
+        runtimeId: "failed-live-assistant",
+        role: "assistant",
+        content: "partial response",
+        usage: { promptTokens: 250, completionTokens: 10, totalTokens: 260 },
+      },
+    ]);
+
+    expect(usage).toEqual({ tokens: 250, estimated: true });
   });
 
   it("falls back to a local estimate before any provider usage exists", () => {

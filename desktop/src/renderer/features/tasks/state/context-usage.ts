@@ -1,5 +1,5 @@
 import type { ChatMessage } from "../../../../shared/model-contract";
-import { aggregateMessageUsage } from "./token-usage";
+import { normalizeTokenUsage } from "./token-usage";
 
 export interface ContextUsageSnapshot {
   tokens: number;
@@ -12,16 +12,30 @@ export interface ContextBreakdownPart {
   percent: number;
 }
 
-/** Use the conversation's accumulated provider usage as the displayed total. */
+/**
+ * Project the next request's prompt pressure from the newest provider anchor.
+ *
+ * Provider usage describes the prompt that produced an assistant message, so
+ * that assistant message and everything after it are estimated as additions to
+ * the next prompt. This intentionally stays separate from durable cumulative
+ * billing totals, which repeatedly include earlier conversation history.
+ */
 export function resolveContextUsage(
   messages: ChatMessage[],
 ): ContextUsageSnapshot {
-  const accumulatedTokens = aggregateMessageUsage(messages).totalTokens;
-  if (accumulatedTokens > 0) {
-    return { tokens: accumulatedTokens, estimated: false };
+  const projectionMessages = contextProjectionMessages(messages);
+  for (let index = projectionMessages.length - 1; index >= 0; index -= 1) {
+    const anchorTokens = providerPromptAnchor(projectionMessages[index]);
+    if (anchorTokens > 0) {
+      return {
+        tokens: anchorTokens
+          + estimateConversationTokens(projectionMessages.slice(index)),
+        estimated: true,
+      };
+    }
   }
   return {
-    tokens: estimateConversationTokens(messages),
+    tokens: estimateConversationTokens(projectionMessages),
     estimated: true,
   };
 }
@@ -62,9 +76,64 @@ export function resolveContextBreakdown(
 
 function estimateConversationTokens(messages: ChatMessage[]): number {
   return messages.reduce(
-    (total, message) => total + 6 + estimateTextTokens(message.content),
+    (total, message) => total + estimateMessageTokens(message),
     0,
   );
+}
+
+function contextProjectionMessages(messages: ChatMessage[]): ChatMessage[] {
+  const result: ChatMessage[] = [];
+  const seenIds = new Set<string>();
+  const seenObjects = new Set<ChatMessage>();
+  const failedUsageParents = new Set(
+    messages.flatMap((message) =>
+      (message.threadMessages ?? []).flatMap((candidate) =>
+        candidate.usageRecordOnly === true && candidate.parentMessageId
+          ? [candidate.parentMessageId]
+          : [],
+      ),
+    ),
+  );
+  const visit = (message: ChatMessage) => {
+    const id = message.messageId ?? message.runtimeId;
+    if (id ? seenIds.has(id) : seenObjects.has(message)) return;
+    if (id) seenIds.add(id);
+    seenObjects.add(message);
+    result.push(message);
+  };
+  messages.forEach((message, index) => {
+    const previous = messages[index - 1];
+    const duplicatesFailedRecord =
+      message.role === "assistant"
+      && !message.messageId
+      && previous?.role === "user"
+      && Boolean(previous.messageId)
+      && failedUsageParents.has(previous.messageId!);
+    if (!duplicatesFailedRecord) visit(message);
+  });
+  messages.forEach((message) => {
+    message.threadMessages
+      ?.filter((candidate) => candidate.usageRecordOnly === true)
+      .forEach(visit);
+  });
+  return result.sort(
+    (left, right) =>
+      (left.sequence ?? Number.MAX_SAFE_INTEGER)
+      - (right.sequence ?? Number.MAX_SAFE_INTEGER),
+  );
+}
+
+function providerPromptAnchor(message: ChatMessage | undefined): number {
+  if (!message || message.role !== "assistant") return 0;
+  const activeContextTokens = positive(message.activeContextTokens);
+  if (activeContextTokens > 0) return activeContextTokens;
+  const usage = normalizeTokenUsage(message.usage);
+  return usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
+}
+
+function estimateMessageTokens(message: ChatMessage): number {
+  if (!message.content) return 0;
+  return 6 + estimateTextTokens(message.content);
 }
 
 function estimateTextTokens(content: string): number {
@@ -78,4 +147,8 @@ function estimateTextTokens(content: string): number {
     }
   }
   return nonAsciiCharacters + Math.ceil(asciiCharacters / 4);
+}
+
+function positive(value?: number): number {
+  return Number.isFinite(value) ? Math.max(0, value ?? 0) : 0;
 }

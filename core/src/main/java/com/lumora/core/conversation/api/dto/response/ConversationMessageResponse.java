@@ -9,6 +9,7 @@ public class ConversationMessageResponse {
     private final String parentMessageId;
     private final int messageDepth;
     private final boolean activePath;
+    private final boolean usageRecordOnly;
     private final String role;
     private final String content;
     private final String model;
@@ -24,6 +25,7 @@ public class ConversationMessageResponse {
             String parentMessageId,
             int messageDepth,
             boolean activePath,
+            boolean usageRecordOnly,
             String role,
             String content,
             String model,
@@ -38,6 +40,7 @@ public class ConversationMessageResponse {
         this.parentMessageId = parentMessageId;
         this.messageDepth = messageDepth;
         this.activePath = activePath;
+        this.usageRecordOnly = usageRecordOnly;
         this.role = role;
         this.content = content;
         this.model = model;
@@ -59,6 +62,7 @@ public class ConversationMessageResponse {
     public String getParentMessageId() { return parentMessageId; }
     public int getMessageDepth() { return messageDepth; }
     public boolean isActivePath() { return activePath; }
+    public boolean isUsageRecordOnly() { return usageRecordOnly; }
 
     public String getRole() {
         return role;

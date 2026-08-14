@@ -25,6 +25,7 @@ import {
 import {
   aggregateMessageUsage,
   cacheHitRate,
+  countModelRequests,
   normalizeTokenUsage,
 } from "../state/token-usage";
 import { resolveContextBreakdown } from "../state/context-usage";
@@ -83,11 +84,7 @@ export function ConversationUsagePane({
   const hitRate = cacheHitRate(usage);
   const userMessages = messages.filter((message) => message.role === "user").length;
   const assistantMessages = messages.filter((message) => message.role === "assistant").length;
-  const modelRequests = messages.filter(
-    (message) =>
-      message.role === "assistant" &&
-      normalizeTokenUsage(message.usage).totalTokens > 0,
-  ).length;
+  const modelRequests = countModelRequests(messages);
   const dates = messages
     .map((message) => message.createdAt)
     .filter((value): value is string => Boolean(value));

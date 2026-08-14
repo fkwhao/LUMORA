@@ -37,6 +37,7 @@ Electron Renderer
 - 使用结构化工作记录展示概括阶段和真实工具活动；模型隐藏推理不作为聊天正文展示。
 - 对敏感工具调用进行确定性分级、自动 Reviewer 或人工审批，并从工具记录打开局部 Diff 或大型结果 Artifact。
 - 接入远程 Streamable HTTP MCP 的 Tools、Resources、Resource Templates 与 Prompts，所有远程能力继续经过现有权限和审计链路。
+- 支持项目级与个人级 Skills：只在上下文中暴露名称和描述，命中后由 Agent 按需加载完整 SOP 与附属文本资源；输入 `/` 可搜索显式 Skill 指令。
 - 对支持的模型启用供应商托管 Web Search，并在工作过程中展示搜索状态、引用和来源。
 - 自动或手动压缩较早上下文，并在 Java SQLite 中保存摘要、活动上下文 Token 和输入、输出、推理、缓存等消息用量。
 - 在会话右侧查看上下文总量与本地估算细分，在个人资料页查看本机 Token 汇总、每日热力图和缓存指标。
@@ -47,6 +48,25 @@ Electron Renderer
 - 本机启动令牌、进程边界和受控 Electron Preload。
 
 ## 本地开发
+
+### 添加 Skill
+
+项目 Skill 放在 `<工作区>/.lumora/skills/<skill-name>/SKILL.md`，个人 Skill 放在
+`~/.lumora/skills/<skill-name>/SKILL.md`。项目中的同名 Skill 会覆盖个人 Skill。
+
+```markdown
+---
+name: release-notes
+description: 根据变更生成简洁的发布说明
+mode: inline
+context: full
+---
+
+先读取变更，再为 $ARGUMENTS 生成发布说明。
+```
+
+`name` 只允许小写字母、数字和连字符。`mode` 支持 `inline` 与 `fork` 元数据；
+当前运行时会以内联方式执行，独立 Agent 上下文将在后续运行时版本接入。
 
 开发阶段分别启动三个工程：
 

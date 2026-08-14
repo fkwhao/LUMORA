@@ -11,6 +11,7 @@ import { useStore } from "zustand";
 import type { LumoraModelApi } from "../shared/model-contract";
 import type { LumoraMemoryApi } from "../shared/memory-contract";
 import type { LumoraMcpApi } from "../shared/mcp-contract";
+import type { LumoraSkillApi } from "../shared/skill-contract";
 import type { LumoraTaskApi } from "../shared/task-contract";
 import type { ProjectDirectory } from "../shared/window-contract";
 import { AppSidebar } from "./components/AppSidebar";
@@ -47,6 +48,7 @@ interface AppProps {
   modelApi?: LumoraModelApi;
   memoryApi?: LumoraMemoryApi;
   mcpApi?: LumoraMcpApi;
+  skillApi?: LumoraSkillApi;
 }
 
 type AppView = "work" | "conversationHub" | "settings" | PrototypeView;
@@ -62,11 +64,12 @@ interface NavigationState {
   index: number;
 }
 
-export function App({ api, modelApi, memoryApi, mcpApi }: AppProps) {
+export function App({ api, modelApi, memoryApi, mcpApi, skillApi }: AppProps) {
   const resolvedTaskApi = api ?? window.lumora?.tasks;
   const resolvedModelApi = modelApi ?? window.lumora?.model;
   const resolvedMemoryApi = memoryApi ?? window.lumora?.memory;
   const resolvedMcpApi = mcpApi ?? window.lumora?.mcp;
+  const resolvedSkillApi = skillApi ?? window.lumora?.skill;
   if (!resolvedTaskApi) {
     return <DesktopBridgeError />;
   }
@@ -76,6 +79,7 @@ export function App({ api, modelApi, memoryApi, mcpApi }: AppProps) {
       modelApi={resolvedModelApi}
       memoryApi={resolvedMemoryApi}
       mcpApi={resolvedMcpApi}
+      skillApi={resolvedSkillApi}
     />
   );
 }
@@ -85,10 +89,12 @@ function ConnectedApp({
   modelApi,
   memoryApi,
   mcpApi,
+  skillApi,
 }: Required<Pick<AppProps, "api">> & {
   modelApi?: LumoraModelApi;
   memoryApi?: LumoraMemoryApi;
   mcpApi?: LumoraMcpApi;
+  skillApi?: LumoraSkillApi;
 }) {
   // Store 与能力边界绑定，切换测试 API 时不会泄漏旧任务订阅。
   const store = useMemo(
@@ -436,6 +442,8 @@ function ConnectedApp({
           api={modelApi}
           memoryApi={memoryApi}
           mcpApi={mcpApi}
+          skillApi={skillApi}
+          workspacePath={activeTask ? taskProjectPaths[activeTask.taskId] : undefined}
           archivedTasks={archivedTasks}
           notify={notify}
           onBack={() =>
@@ -504,6 +512,7 @@ function ConnectedApp({
         <TaskPage
           store={store}
           modelApi={modelApi}
+          skillApi={skillApi}
           notify={notify}
           composerMotion={
             composerMotion === "to-task" ? "from-center" : undefined

@@ -17,31 +17,47 @@ def parse_chat_usage(usage: Mapping[str, Any]) -> TokenUsageResponse:
     completion_details = _mapping(
         usage.get("completion_tokens_details") or usage.get("output_tokens_details")
     )
-    cache_read_tokens = _first_integer(
+    nested_cache_read = _first_present_integer(
         prompt_details,
         "cached_tokens",
         "cache_read_tokens",
         "cache_read_input_tokens",
-    ) or _first_integer(
-        usage,
-        "cache_read_tokens",
-        "cache_read_input_tokens",
-        "input_cache_read",
     )
-    cache_write_tokens = _first_integer(
-        prompt_details,
-        "cache_write_tokens",
-        "cache_creation_input_tokens",
-    ) or _first_integer(
+    native_cache_read = _first_present_integer(
         usage,
-        "cache_write_tokens",
-        "cache_creation_input_tokens",
-        "input_cache_write",
+        "prompt_cache_hit_tokens",
     )
-    reasoning_tokens = _first_integer(
-        completion_details,
-        "reasoning_tokens",
-    ) or _first_integer(usage, "reasoning_tokens")
+    cache_read_tokens = _coalesce_integer(
+        nested_cache_read,
+        native_cache_read,
+        _first_present_integer(
+            usage,
+            "cache_read_tokens",
+            "cache_read_input_tokens",
+            "input_cache_read",
+        ),
+    )
+    cache_write_tokens = _coalesce_integer(
+        _first_present_integer(
+            prompt_details,
+            "cache_write_tokens",
+            "cache_creation_input_tokens",
+        ),
+        _first_present_integer(
+            usage,
+            "cache_write_tokens",
+            "cache_creation_input_tokens",
+            "input_cache_write",
+        ),
+    )
+    reasoning_tokens = _coalesce_integer(
+        _first_present_integer(completion_details, "reasoning_tokens"),
+        _first_present_integer(usage, "reasoning_tokens"),
+    )
+    native_cache_miss = _first_present_integer(
+        usage,
+        "prompt_cache_miss_tokens",
+    )
     cache_metrics_available = any(
         key in usage
         for key in (
@@ -53,17 +69,25 @@ def parse_chat_usage(usage: Mapping[str, Any]) -> TokenUsageResponse:
             "cache_creation_input_tokens",
             "input_cache_read",
             "input_cache_write",
+            "prompt_cache_hit_tokens",
+            "prompt_cache_miss_tokens",
         )
     )
-    prompt_details_include_cache = any(
-        key in prompt_details
-        for key in (
-            "cached_tokens",
-            "cache_read_tokens",
-            "cache_write_tokens",
+    prompt_total_includes_cache = (
+        native_cache_read is not None
+        or native_cache_miss is not None
+        or any(
+            key in prompt_details
+            for key in (
+                "cached_tokens",
+                "cache_read_tokens",
+                "cache_write_tokens",
+            )
         )
     )
-    normalized_prompt_tokens = prompt_tokens if prompt_details_include_cache else (
+    if prompt_tokens == 0 and native_cache_miss is not None:
+        prompt_tokens = native_cache_miss + cache_read_tokens
+    normalized_prompt_tokens = prompt_tokens if prompt_total_includes_cache else (
         prompt_tokens + cache_read_tokens + cache_write_tokens
     )
     return build_token_usage(
@@ -74,7 +98,15 @@ def parse_chat_usage(usage: Mapping[str, Any]) -> TokenUsageResponse:
         cache_read_tokens=cache_read_tokens,
         cache_write_tokens=cache_write_tokens,
         cache_metrics_available=cache_metrics_available,
-        input_tokens=prompt_tokens if not prompt_details_include_cache else None,
+        input_tokens=(
+            native_cache_miss
+            if native_cache_miss is not None
+            else (
+                prompt_tokens
+                if not prompt_total_includes_cache
+                else None
+            )
+        ),
     )
 
 
@@ -83,17 +115,23 @@ def parse_responses_usage(usage: Mapping[str, Any]) -> TokenUsageResponse:
     completion_tokens = _integer(usage.get("output_tokens"))
     input_details = _mapping(usage.get("input_tokens_details"))
     output_details = _mapping(usage.get("output_tokens_details"))
-    cache_read_tokens = _first_integer(
-        input_details,
-        "cached_tokens",
-        "cache_read_tokens",
+    cache_read_tokens = _coalesce_integer(
+        _first_present_integer(
+            input_details,
+            "cached_tokens",
+            "cache_read_tokens",
+        )
     )
-    cache_write_tokens = _first_integer(
-        input_details,
-        "cache_write_tokens",
-        "cache_creation_input_tokens",
+    cache_write_tokens = _coalesce_integer(
+        _first_present_integer(
+            input_details,
+            "cache_write_tokens",
+            "cache_creation_input_tokens",
+        )
     )
-    reasoning_tokens = _first_integer(output_details, "reasoning_tokens")
+    reasoning_tokens = _coalesce_integer(
+        _first_present_integer(output_details, "reasoning_tokens")
+    )
     return build_token_usage(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
@@ -108,17 +146,23 @@ def parse_responses_usage(usage: Mapping[str, Any]) -> TokenUsageResponse:
 def parse_anthropic_usage(usage: Mapping[str, Any]) -> TokenUsageResponse:
     input_tokens = _integer(usage.get("input_tokens"))
     completion_tokens = _integer(usage.get("output_tokens"))
-    cache_read_tokens = _first_integer(
-        usage,
-        "cache_read_input_tokens",
-        "cache_read_tokens",
+    cache_read_tokens = _coalesce_integer(
+        _first_present_integer(
+            usage,
+            "cache_read_input_tokens",
+            "cache_read_tokens",
+        )
     )
-    cache_write_tokens = _first_integer(
-        usage,
-        "cache_creation_input_tokens",
-        "cache_write_tokens",
+    cache_write_tokens = _coalesce_integer(
+        _first_present_integer(
+            usage,
+            "cache_creation_input_tokens",
+            "cache_write_tokens",
+        )
     )
-    reasoning_tokens = _first_integer(usage, "reasoning_tokens")
+    reasoning_tokens = _coalesce_integer(
+        _first_present_integer(usage, "reasoning_tokens")
+    )
     prompt_tokens = input_tokens + cache_read_tokens + cache_write_tokens
     return build_token_usage(
         prompt_tokens=prompt_tokens,
@@ -197,11 +241,18 @@ def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
-def _first_integer(source: Mapping[str, Any], *keys: str) -> int:
+def _first_present_integer(
+    source: Mapping[str, Any],
+    *keys: str,
+) -> int | None:
     for key in keys:
         if key in source:
             return _integer(source.get(key))
-    return 0
+    return None
+
+
+def _coalesce_integer(*values: int | None) -> int:
+    return next((value for value in values if value is not None), 0)
 
 
 def _integer(value: Any) -> int:

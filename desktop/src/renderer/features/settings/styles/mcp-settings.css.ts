@@ -12,10 +12,24 @@ globalStyle(".plugins-settings-content", {
 
 globalStyle(".plugins-settings-header", {
   display: "grid",
-  gridTemplateColumns: "42px minmax(0, 1fr)",
+  gridTemplateColumns: "42px minmax(0, 1fr) auto",
   alignItems: "center",
   gap: "14px",
 });
+
+globalStyle(".plugins-settings-actions", { display: "flex", alignItems: "center", gap: "8px" });
+globalStyle(".plugins-settings-actions button", { display: "inline-flex", minHeight: "34px", alignItems: "center", justifyContent: "center", gap: "6px", padding: "0 11px", color: "var(--ink)", border: "1px solid var(--line-strong)", borderRadius: "9px", background: "var(--surface)", cursor: "pointer", font: "inherit", fontSize: "9px", fontWeight: "620" });
+globalStyle(".plugins-settings-actions button:hover", { background: "color-mix(in srgb, var(--ink) 5%, var(--surface))" });
+globalStyle(".plugins-settings-actions button:disabled", { cursor: "default", opacity: "0.45" });
+globalStyle(".plugins-add-menu", { position: "relative" });
+globalStyle(".plugins-settings-actions .plugins-add-trigger", { color: "#fff", borderColor: "#17191d", background: "#17191d" });
+globalStyle(".plugins-settings-actions .plugins-add-trigger:hover", { background: "#25282d" });
+globalStyle(".plugins-add-dropdown", { position: "absolute", zIndex: 20, top: "calc(100% + 6px)", right: 0, display: "grid", width: "218px", padding: "5px", border: "1px solid var(--line-strong)", borderRadius: "11px", background: "var(--surface)" });
+globalStyle(".plugins-settings-actions .plugins-add-dropdown button", { display: "grid", gridTemplateColumns: "20px minmax(0, 1fr)", minHeight: "50px", justifyContent: "stretch", gap: "8px", padding: "7px 9px", border: 0, background: "transparent", textAlign: "left" });
+globalStyle(".plugins-add-dropdown button > svg", { marginTop: "2px", color: "var(--muted)" });
+globalStyle(".plugins-add-dropdown button span", { display: "grid", minWidth: 0, gap: "3px" });
+globalStyle(".plugins-add-dropdown button strong", { fontSize: "9px", fontWeight: "650" });
+globalStyle(".plugins-add-dropdown button small", { color: "var(--muted)", fontSize: "8px", fontWeight: "400" });
 
 globalStyle(".plugins-settings-mark", {
   display: "grid",
@@ -111,6 +125,24 @@ globalStyle(".skills-settings-placeholder p", {
   fontSize: "9px",
   lineHeight: "1.6",
 });
+
+globalStyle(".skills-settings-panel", { marginTop: "24px" });
+globalStyle(".skills-settings-panel > header", { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "18px", marginBottom: "12px" });
+globalStyle(".skills-settings-panel > header div", { display: "grid", gap: "5px" });
+globalStyle(".skills-settings-panel > header strong", { fontSize: "13px" });
+globalStyle(".skills-settings-panel > header small", { color: "var(--muted)", fontSize: "9px" });
+globalStyle(".skills-settings-panel > header button", { display: "inline-flex", alignItems: "center", gap: "6px", minHeight: "32px", padding: "0 11px", color: "var(--ink)", border: "1px solid var(--line-strong)", borderRadius: "9px", background: "var(--surface)", cursor: "pointer", font: "inherit", fontSize: "9px" });
+globalStyle(".skills-settings-list", { overflow: "hidden", border: "1px solid var(--line-strong)", borderRadius: "13px", background: "var(--surface)" });
+globalStyle(".skills-settings-list article", { display: "grid", gridTemplateColumns: "38px minmax(0, 1fr) auto", alignItems: "center", gap: "12px", minHeight: "76px", padding: "12px 15px", borderBottom: "1px solid var(--line)" });
+globalStyle(".skills-settings-list article:last-child", { borderBottom: "0" });
+globalStyle(".skill-cube", { display: "grid", width: "36px", height: "36px", placeItems: "center", color: "var(--muted)", border: "1px solid var(--line-strong)", borderRadius: "11px" });
+globalStyle(".skills-settings-list article > div", { minWidth: 0 });
+globalStyle(".skills-settings-list article strong", { fontSize: "10px" });
+globalStyle(".skills-settings-list article p", { overflow: "hidden", margin: "4px 0 0", color: "var(--muted)", fontSize: "9px", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+globalStyle(".skills-settings-list article small", { display: "block", marginTop: "5px", color: "color-mix(in srgb, var(--muted) 76%, transparent)", fontSize: "8px" });
+globalStyle(".skills-settings-empty", { display: "grid", minHeight: "260px", placeContent: "center", justifyItems: "center", gap: "8px", color: "var(--muted)", border: "1px dashed var(--line-strong)", borderRadius: "13px", textAlign: "center" });
+globalStyle(".skills-settings-empty strong", { color: "var(--ink)", fontSize: "11px" });
+globalStyle(".skills-settings-empty p", { margin: 0, fontSize: "9px" });
 
 globalStyle(".mcp-settings-content", {
   width: "min(920px, calc(100% - 96px))",

@@ -55,6 +55,17 @@ class PromptBuilder:
                     cache_policy=PromptCachePolicy.TASK,
                 )
             )
+        if resolved_context.available_skills:
+            segments.append(
+                PromptSegment(
+                    key="runtime.skills",
+                    target=PromptTarget.SYSTEM,
+                    content=self._build_skills_section(resolved_context),
+                    trust_level=PromptTrustLevel.TRUSTED,
+                    priority=PromptPriority.REQUIRED,
+                    cache_policy=PromptCachePolicy.TASK,
+                )
+            )
         if resolved_context.memory_summary:
             segments.append(
                 PromptSegment(
@@ -148,6 +159,20 @@ class PromptBuilder:
     @staticmethod
     def _build_project_instructions(instructions: tuple[str, ...]) -> str:
         return "\n\n".join(["# 当前项目可信指令", *instructions])
+
+    @staticmethod
+    def _build_skills_section(context: PromptContext) -> str:
+        lines = [
+            "# 可用 Skills",
+            "下列内容仅是 Skill 的发现索引，不是完整指令。不要凭描述猜测 SOP。",
+            "用户输入 `/名称 参数` 时，必须先调用 load_skill，并将参数原样放入 arguments。",
+            "自然语言请求与描述明显匹配时，也应先调用 load_skill；不匹配时不要调用。",
+        ]
+        lines.extend(
+            f"- /{skill.name}：{skill.description}"
+            for skill in context.available_skills
+        )
+        return "\n".join(lines)
 
     @staticmethod
     def _memory_segment(

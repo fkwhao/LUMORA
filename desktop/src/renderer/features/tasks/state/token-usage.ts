@@ -34,7 +34,7 @@ export function normalizeTokenUsage(
     reasoningTokens,
     cacheReadTokens,
     cacheWriteTokens,
-    totalTokens: detailedTotal || positive(usage.totalTokens),
+    totalTokens: Math.max(detailedTotal, positive(usage.totalTokens)),
     cacheMetricsAvailable: usage.cacheMetricsAvailable === true,
   };
 }
@@ -42,10 +42,18 @@ export function normalizeTokenUsage(
 export function aggregateMessageUsage(
   messages: ChatMessage[],
 ): NormalizedTokenUsage {
-  return messages
+  return durableMessages(messages)
     .filter((message) => message.role === "assistant")
     .map((message) => normalizeTokenUsage(message.usage))
     .reduce(addTokenUsage, emptyTokenUsage());
+}
+
+export function countModelRequests(messages: ChatMessage[]): number {
+  return durableMessages(messages).filter(
+    (message) =>
+      message.role === "assistant"
+      && normalizeTokenUsage(message.usage).totalTokens > 0,
+  ).length;
 }
 
 export function cacheHitRate(
@@ -86,6 +94,40 @@ function emptyTokenUsage(): NormalizedTokenUsage {
     totalTokens: 0,
     cacheMetricsAvailable: false,
   };
+}
+
+function durableMessages(messages: ChatMessage[]): ChatMessage[] {
+  const result: ChatMessage[] = [];
+  const seenIds = new Set<string>();
+  const seenObjects = new Set<ChatMessage>();
+  const failedUsageParents = new Set(
+    messages.flatMap((message) =>
+      (message.threadMessages ?? []).flatMap((candidate) =>
+        candidate.usageRecordOnly === true && candidate.parentMessageId
+          ? [candidate.parentMessageId]
+          : [],
+      ),
+    ),
+  );
+  const visit = (message: ChatMessage) => {
+    const id = message.messageId ?? message.runtimeId;
+    if (id ? seenIds.has(id) : seenObjects.has(message)) return;
+    if (id) seenIds.add(id);
+    seenObjects.add(message);
+    result.push(message);
+  };
+  messages.forEach((message, index) => {
+    const previous = messages[index - 1];
+    const duplicatesFailedRecord =
+      message.role === "assistant"
+      && !message.messageId
+      && previous?.role === "user"
+      && Boolean(previous.messageId)
+      && failedUsageParents.has(previous.messageId!);
+    if (!duplicatesFailedRecord) visit(message);
+    message.threadMessages?.forEach(visit);
+  });
+  return result;
 }
 
 function positive(value?: number): number {

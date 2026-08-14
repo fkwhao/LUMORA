@@ -1,6 +1,11 @@
+import asyncio
+import hashlib
+import json
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
+
+import httpx
 
 from app.context.estimator import TokenEstimator
 from app.context.planner import ContextPlanner
@@ -30,6 +35,12 @@ from app.provider.token_usage import add_token_usage, empty_token_usage
 from app.tool.base import ToolContext
 from app.tool.registry import ToolRegistry
 
+DEFAULT_MAX_TOOL_ITERATIONS = 64
+MAX_IDENTICAL_TOOL_ITERATIONS = 3
+DEFAULT_MAX_STREAM_RETRIES = 2
+DEFAULT_STREAM_RETRY_BASE_DELAY = 0.5
+_TRANSIENT_STREAM_ERRORS = (httpx.TransportError, json.JSONDecodeError)
+
 
 class AgentLoopRunner:
     """编排模型回合、工具执行和公开工作事件。"""
@@ -46,6 +57,10 @@ class AgentLoopRunner:
         result_processor: ToolResultProcessor | None = None,
         stream_turn: TurnStreamer | None = None,
         approval_reviewer: ApprovalReviewer | None = None,
+        max_tool_iterations: int = DEFAULT_MAX_TOOL_ITERATIONS,
+        max_identical_tool_iterations: int = MAX_IDENTICAL_TOOL_ITERATIONS,
+        max_stream_retries: int = DEFAULT_MAX_STREAM_RETRIES,
+        stream_retry_base_delay: float = DEFAULT_STREAM_RETRY_BASE_DELAY,
     ) -> None:
         self._complete_turn = complete_turn
         self._compact_history = compact_history
@@ -59,6 +74,13 @@ class AgentLoopRunner:
             if approval_reviewer is not None
             else ModelApprovalReviewer(complete_turn)
         )
+        self._max_tool_iterations = max(1, max_tool_iterations)
+        self._max_identical_tool_iterations = max(
+            2,
+            max_identical_tool_iterations,
+        )
+        self._max_stream_retries = max(0, max_stream_retries)
+        self._stream_retry_base_delay = max(0.0, stream_retry_base_delay)
 
     async def stream(
         self,
@@ -93,6 +115,8 @@ class AgentLoopRunner:
         resolved_model = settings.model
         active_summary = conversation_summary
         blocked_call_signatures: set[str] = set()
+        previous_tool_fingerprint = ""
+        identical_tool_iterations = 0
         tool_executor = ToolCallExecutor(
             registry,
             permission_engine,
@@ -103,9 +127,11 @@ class AgentLoopRunner:
             blocked_call_signatures,
         )
 
-        for _iteration in range(20):
+        for _iteration in range(self._max_tool_iterations):
             content_was_streamed = False
             stage_content_seen = False
+            stage_item_id = ""
+            stage_content_value = ""
             if self._stream_turn is None:
                 turn = await self._complete_turn(
                     settings,
@@ -119,18 +145,101 @@ class AgentLoopRunner:
                 pending_chars = 0
                 visible_content: list[str] = []
                 visible_chars = 0
+                turn_content_parts: list[str] = []
                 tool_call_seen = False
-                async for turn_event in self._stream_turn(
+                stream_retries = 0
+                turn_stream = self._stream_turn(
                     settings,
                     request_messages,
                     prompt.tools,
                     reasoning_effort,
-                ):
+                )
+                while True:
+                    stream_error: Exception | None = None
+                    try:
+                        turn_event = await anext(turn_stream)
+                    except StopAsyncIteration:
+                        if turn is not None:
+                            break
+                        stream_error = ValueError(
+                            "模型流在 completed 事件前提前结束"
+                        )
+                    except _TRANSIENT_STREAM_ERRORS as error:
+                        if turn is not None:
+                            break
+                        stream_error = error
+                    if stream_error is not None:
+                        if stream_retries >= self._max_stream_retries:
+                            raise stream_error
+                        stream_retries += 1
+                        yield RunEvent(
+                            type="progress_message",
+                            item_id=str(uuid.uuid4()),
+                            delta=(
+                                "模型连接暂时中断，正在自动重试"
+                                f"（{stream_retries}/"
+                                f"{self._max_stream_retries}）"
+                            ),
+                            model=resolved_model,
+                            metadata={"replacesAssistantContent": True},
+                        )
+                        if content_was_streamed:
+                            yield RunEvent(
+                                type="text_reset",
+                                model=resolved_model,
+                            )
+                        content_was_streamed = False
+                        stage_content_seen = False
+                        pending_content.clear()
+                        pending_chars = 0
+                        visible_content.clear()
+                        visible_chars = 0
+                        turn_content_parts.clear()
+                        tool_call_seen = False
+                        stage_item_id = ""
+                        stage_content_value = ""
+                        delay = self._stream_retry_base_delay * (
+                            2 ** (stream_retries - 1)
+                        )
+                        if delay:
+                            await asyncio.sleep(delay)
+                        turn_stream = self._stream_turn(
+                            settings,
+                            request_messages,
+                            prompt.tools,
+                            reasoning_effort,
+                        )
+                        continue
                     if turn_event.type == "reasoning_delta":
                         continue
                     elif is_web_search_event(turn_event):
                         yield web_search_run_event(turn_event)
                     elif turn_event.type == "tool_call_delta":
+                        if not tool_call_seen:
+                            stage_text = "".join(turn_content_parts).strip()
+                            if stage_text:
+                                stage_item_id = stage_item_id or str(uuid.uuid4())
+                                stage_content_seen = True
+                                stage_content_value = stage_text
+                                yield RunEvent(
+                                    type="progress_message",
+                                    item_id=stage_item_id,
+                                    delta=stage_text,
+                                    model=turn_event.model or resolved_model,
+                                    metadata={
+                                        "replacesAssistantContent": True,
+                                    },
+                                )
+                            if content_was_streamed:
+                                yield RunEvent(
+                                    type="text_reset",
+                                    model=turn_event.model or resolved_model,
+                                )
+                            content_was_streamed = False
+                            pending_content.clear()
+                            pending_chars = 0
+                            visible_content.clear()
+                            visible_chars = 0
                         tool_call_seen = True
                     elif turn_event.type in {"content_reset", "stage_content"}:
                         if (
@@ -138,16 +247,24 @@ class AgentLoopRunner:
                             and turn_event.delta.strip()
                         ):
                             stage_content_seen = True
+                            stage_item_id = (
+                                turn_event.item_id
+                                or stage_item_id
+                                or str(uuid.uuid4())
+                            )
+                            stage_content_value = turn_event.delta.strip()
                             yield RunEvent(
                                 type="progress_message",
-                                item_id=turn_event.item_id or str(uuid.uuid4()),
-                                delta=turn_event.delta.strip(),
+                                item_id=stage_item_id,
+                                delta=stage_content_value,
                                 model=turn_event.model or resolved_model,
+                                metadata={"replacesAssistantContent": True},
                             )
                         pending_content.clear()
                         pending_chars = 0
                         visible_content.clear()
                         visible_chars = 0
+                        turn_content_parts.clear()
                         if content_was_streamed:
                             yield RunEvent(
                                 type="text_reset",
@@ -155,6 +272,7 @@ class AgentLoopRunner:
                             )
                         content_was_streamed = False
                     elif turn_event.type == "content_delta":
+                        turn_content_parts.append(turn_event.delta)
                         if content_was_streamed:
                             visible_content.append(turn_event.delta)
                             visible_chars += len(turn_event.delta)
@@ -225,16 +343,18 @@ class AgentLoopRunner:
                 yield RunEvent(type="completed", model=resolved_model)
                 return
 
-            if (
-                turn.content.strip()
-                and not content_was_streamed
-                and not stage_content_seen
+            final_stage_content = turn.content.strip()
+            if final_stage_content and (
+                not stage_content_seen
+                or final_stage_content != stage_content_value
             ):
+                stage_item_id = stage_item_id or str(uuid.uuid4())
                 yield RunEvent(
                     type="progress_message",
-                    item_id=str(uuid.uuid4()),
-                    delta=turn.content.strip(),
+                    item_id=stage_item_id,
+                    delta=final_stage_content,
                     model=resolved_model,
+                    metadata={"replacesAssistantContent": True},
                 )
             yield RunEvent(
                 type="usage",
@@ -259,6 +379,7 @@ class AgentLoopRunner:
             })
             inline_result_chars = 0
             pending_tool_messages: list[dict[str, Any]] = []
+            tool_results: list[str] = []
             latest_user_request = _latest_user_request(request_messages)
             for call in turn.tool_calls:
                 result_text = "工具调用未返回结果"
@@ -274,6 +395,7 @@ class AgentLoopRunner:
                 ):
                     yield event
                 inline_result_chars += len(result_text)
+                tool_results.append(result_text)
                 tool_message = {
                     "role": "tool",
                     "tool_call_id": call.call_id,
@@ -294,6 +416,24 @@ class AgentLoopRunner:
                 usage=_to_run_usage(cumulative_usage),
                 active_context_tokens=active_tokens,
             )
+            tool_fingerprint = _tool_iteration_fingerprint(
+                turn.tool_calls,
+                tool_results,
+            )
+            if tool_fingerprint == previous_tool_fingerprint:
+                identical_tool_iterations += 1
+            else:
+                previous_tool_fingerprint = tool_fingerprint
+                identical_tool_iterations = 1
+            if (
+                identical_tool_iterations
+                >= self._max_identical_tool_iterations
+            ):
+                raise ValueError(
+                    "检测到连续"
+                    f"{identical_tool_iterations} 轮完全相同的工具调用和结果，"
+                    "已停止无进展循环"
+                )
             should_compact, _threshold = self._context_planner.should_compact_tokens(
                 settings, active_tokens
             )
@@ -357,9 +497,12 @@ class AgentLoopRunner:
                             "usage": compacted.usage.model_dump(by_alias=True),
                         },
                         model=compacted.model,
+                        usage=_to_run_usage(cumulative_usage),
                         active_context_tokens=after_tokens,
                     )
-        raise ValueError("工具调用轮次超过限制")
+        raise ValueError(
+            f"工具调用达到长任务上限（{self._max_tool_iterations} 轮）"
+        )
 
 
 def _to_run_usage(usage: TokenUsageResponse) -> RunUsage:
@@ -374,6 +517,21 @@ def _to_run_usage(usage: TokenUsageResponse) -> RunUsage:
         cache_write_tokens=usage.cache_write_tokens,
         cache_metrics_available=usage.cache_metrics_available,
     )
+
+
+def _tool_iteration_fingerprint(
+    calls: tuple[Any, ...],
+    results: list[str],
+) -> str:
+    digest = hashlib.sha256()
+    for call, result in zip(calls, results, strict=True):
+        digest.update(call.name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(call.arguments_json.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(result.encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def _latest_user_request(messages: list[dict[str, Any]]) -> str:

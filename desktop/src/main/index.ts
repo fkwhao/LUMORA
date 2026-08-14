@@ -6,6 +6,7 @@ import { registerAppearanceIpc } from "./appearance-ipc";
 import { registerModelIpc } from "./model-ipc";
 import { registerMemoryIpc } from "./memory-ipc";
 import { registerMcpIpc } from "./mcp-ipc";
+import { registerSkillIpc } from "./skill-ipc";
 import { registerWorkspaceIpc } from "./workspace-ipc";
 import { RestModelGateway } from "./rest-model-gateway";
 import { RestMemoryGateway } from "./rest-memory-gateway";
@@ -53,6 +54,7 @@ let unregisterIpc: (() => void) | undefined;
 let unregisterModelIpc: (() => void) | undefined;
 let unregisterMemoryIpc: (() => void) | undefined;
 let unregisterMcpIpc: (() => void) | undefined;
+let unregisterSkillIpc: (() => void) | undefined;
 let unregisterAppearanceIpc: (() => void) | undefined;
 let unregisterWorkspaceIpc: (() => void) | undefined;
 
@@ -107,6 +109,7 @@ app.whenReady().then(async () => {
   unregisterModelIpc = registerModelIpc(modelGateway);
   unregisterMemoryIpc = registerMemoryIpc(memoryGateway);
   unregisterMcpIpc = registerMcpIpc(mcpGateway);
+  unregisterSkillIpc = registerSkillIpc();
   unregisterAppearanceIpc = registerAppearanceIpc();
   unregisterWorkspaceIpc = registerWorkspaceIpc();
   await createWindow();
@@ -129,6 +132,7 @@ app.on("before-quit", () => {
   unregisterModelIpc?.();
   unregisterMemoryIpc?.();
   unregisterMcpIpc?.();
+  unregisterSkillIpc?.();
   unregisterAppearanceIpc?.();
   unregisterWorkspaceIpc?.();
   gateway.dispose();

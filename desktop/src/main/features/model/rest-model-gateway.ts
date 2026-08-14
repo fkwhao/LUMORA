@@ -157,7 +157,10 @@ export class RestModelGateway implements ModelGateway {
     );
     const threadMessages = messages.map(hydrateWorkLog);
     return threadMessages
-      .filter((message) => message.activePath !== false)
+      .filter(
+        (message) =>
+          message.activePath !== false && message.usageRecordOnly !== true,
+      )
       .sort(
         (left, right) =>
           (left.messageDepth ?? left.sequence ?? 0) -

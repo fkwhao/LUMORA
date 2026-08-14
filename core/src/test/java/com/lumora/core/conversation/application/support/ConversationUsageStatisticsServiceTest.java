@@ -49,6 +49,31 @@ class ConversationUsageStatisticsServiceTest {
         assertThat(statistics.daily()).hasSize(3);
     }
 
+    @Test
+    void providerTotalIsNotReducedByAnIncompleteBreakdown() {
+        ConversationMessageMapper mapper = mock(ConversationMessageMapper.class);
+        ConversationMessage message = new ConversationMessage(
+                "message-1",
+                "conversation-1",
+                1,
+                ChatMessageRole.ASSISTANT,
+                "answer",
+                "model",
+                40,
+                10,
+                100,
+                Instant.parse("2026-08-12T03:00:00Z")
+        );
+        message.applyUsageDetails(40, 10, 0, 0, 0, true);
+        when(mapper.selectList(any(Wrapper.class))).thenReturn(List.of(message));
+
+        var statistics = new ConversationUsageStatisticsService(mapper, CLOCK)
+                .statistics(365);
+
+        assertThat(statistics.usage().totalTokens()).isEqualTo(100);
+        assertThat(statistics.requestCount()).isEqualTo(1);
+    }
+
     private static ConversationMessage message(
             String conversationId,
             String createdAt,

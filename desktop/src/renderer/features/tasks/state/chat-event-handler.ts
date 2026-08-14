@@ -75,6 +75,11 @@ export function applyChatEvent(
     messages[messages.length - 1] = {
       ...last,
       workLog,
+      content:
+        event.type === "progress_message" &&
+        event.metadata?.replacesAssistantContent === true
+          ? ""
+          : last.content,
       model: event.model || last.model,
       activeContextTokens:
         event.activeContextTokens || last.activeContextTokens,

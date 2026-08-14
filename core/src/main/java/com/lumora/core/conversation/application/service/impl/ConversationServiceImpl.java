@@ -316,6 +316,19 @@ public class ConversationServiceImpl implements ConversationService {
             completionCallback.run();
             scheduleMemoryExtraction(context, accumulator, correlationId);
         } catch (Throwable error) {
+            if (!accumulator.isCompleted()
+                    && accumulator.hasBillableUsage()) {
+                try {
+                    persistenceService.persistFailedUsage(
+                            context, accumulator
+                    );
+                } catch (RuntimeException persistenceError) {
+                    LOGGER.warn(
+                            "Failed to persist usage from an incomplete model run",
+                            persistenceError
+                    );
+                }
+            }
             if (!Thread.currentThread().isInterrupted()) {
                 errorCallback.accept(error);
             }

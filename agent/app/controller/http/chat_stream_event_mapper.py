@@ -1,3 +1,5 @@
+from typing import Any
+
 from app.dto.response.chat_completion_response import TokenUsageResponse
 from app.dto.response.chat_stream_event_response import ChatStreamEventResponse
 from app.harness.run_event import RunEvent
@@ -36,7 +38,7 @@ class ChatStreamEventMapper:
             output=event.output,
             durationMs=event.duration_ms,
             exitCode=event.exit_code,
-            metadata=event.metadata,
+            metadata=_without_none_values(event.metadata),
             approvalId=event.approval_id,
             permissionLayer=event.permission_layer,
             reason=event.reason,
@@ -44,3 +46,30 @@ class ChatStreamEventMapper:
             reversible=event.reversible,
             decision=event.decision,
         )
+
+
+def _without_none_values(values: dict[str, Any]) -> dict[str, Any]:
+    """Keep Java's immutable-map transport contract free of null values."""
+    return {
+        key: _clean_transport_value(value)
+        for key, value in values.items()
+        if value is not None
+    }
+
+
+def _clean_transport_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return _without_none_values(value)
+    if isinstance(value, list):
+        return [
+            _clean_transport_value(item)
+            for item in value
+            if item is not None
+        ]
+    if isinstance(value, tuple):
+        return tuple(
+            _clean_transport_value(item)
+            for item in value
+            if item is not None
+        )
+    return value

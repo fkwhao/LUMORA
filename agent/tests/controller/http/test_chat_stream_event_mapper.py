@@ -62,3 +62,23 @@ def test_mapper_preserves_public_sse_json_contract() -> None:
         "reversible": True,
         "decision": "allow",
     }
+
+
+def test_mapper_removes_null_values_from_transport_metadata() -> None:
+    response = ChatStreamEventMapper.to_response(
+        RunEvent(
+            type="tool_completed",
+            metadata={
+                "processStatus": "running",
+                "exitCode": None,
+                "nested": {"present": 1, "missing": None},
+                "items": ["log", None],
+            },
+        )
+    )
+
+    assert response.metadata == {
+        "processStatus": "running",
+        "nested": {"present": 1},
+        "items": ["log"],
+    }

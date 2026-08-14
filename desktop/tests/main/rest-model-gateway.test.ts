@@ -255,6 +255,21 @@ describe("Java REST model gateway", () => {
         role: "assistant",
         content: "new answer",
       },
+      {
+        messageId: "failed-usage",
+        sequence: 5,
+        parentMessageId: "user-new",
+        messageDepth: 2,
+        activePath: true,
+        usageRecordOnly: true,
+        role: "assistant",
+        content: "",
+        usage: {
+          promptTokens: 20,
+          completionTokens: 2,
+          totalTokens: 22,
+        },
+      },
     ]);
     const gateway = new RestModelGateway({
       baseUrl,
@@ -271,6 +286,7 @@ describe("Java REST model gateway", () => {
       "user-old",
       "user-new",
       "answer-new",
+      "failed-usage",
     ]);
   });
 

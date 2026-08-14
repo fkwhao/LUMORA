@@ -119,6 +119,15 @@ public class ConversationPersistenceService {
         );
     }
 
+    public void persistFailedUsage(
+            ConversationRunContext context,
+            ConversationStreamAccumulator accumulator
+    ) {
+        transactionTemplate.executeWithoutResult(
+                status -> insertFailedUsage(context, accumulator)
+        );
+    }
+
     public ContextCompactionInput prepareCompaction(String taskId) {
         taskService.getTask(taskId);
         Conversation conversation = requireConversation(taskId);
@@ -333,6 +342,55 @@ public class ConversationPersistenceService {
                 accumulator.getActiveContextTokens()
         );
         messageMapper.insert(assistantMessage);
+        Conversation conversation = conversationMapper.selectById(
+                context.getConversationId()
+        );
+        touchConversation(conversation, context.getTaskId(), now);
+    }
+
+    /**
+     * Preserve provider billing from a run that failed after reporting usage.
+     * The row participates in durable totals but never becomes a chat branch.
+     */
+    private void insertFailedUsage(
+            ConversationRunContext context,
+            ConversationStreamAccumulator accumulator
+    ) {
+        TokenUsage usage = accumulator.getUsage();
+        if (usage == null) {
+            return;
+        }
+        Instant now = clock.instant();
+        long durationMs = Math.max(
+                1L,
+                (System.nanoTime() - context.getStartedAtNanos())
+                        / 1_000_000L
+        );
+        ConversationMessage usageRecord = new ConversationMessage(
+                UUID.randomUUID().toString(),
+                context.getConversationId(),
+                nextSequence(context.getConversationId()),
+                ChatMessageRole.ASSISTANT,
+                "",
+                accumulator.getModel(),
+                usage.getPromptTokens(),
+                usage.getCompletionTokens(),
+                usage.getTotalTokens(),
+                durationMs,
+                now
+        );
+        ConversationMessage parent = messageMapper.selectById(
+                context.getCurrentUserMessageId()
+        );
+        usageRecord.setParentMessageId(context.getCurrentUserMessageId());
+        usageRecord.setMessageDepth(parent.getMessageDepth() + 1);
+        usageRecord.setActivePath(false);
+        usageRecord.setUsageRecordOnly(true);
+        applyUsageDetails(usageRecord, usage);
+        usageRecord.setActiveContextTokens(
+                accumulator.getActiveContextTokens()
+        );
+        messageMapper.insert(usageRecord);
         Conversation conversation = conversationMapper.selectById(
                 context.getConversationId()
         );
@@ -566,11 +624,14 @@ public class ConversationPersistenceService {
                         message -> message
                 ));
         ConversationMessage cursor = byId.get(messageId);
-        if (cursor == null) throw new IllegalArgumentException("回复分支不存在");
+        if (cursor == null || cursor.isUsageRecordOnly()) {
+            throw new IllegalArgumentException("回复分支不存在");
+        }
         ConversationMessage child;
         do {
             String parentId = cursor.getMessageId();
             child = all.stream()
+                    .filter(message -> !message.isUsageRecordOnly())
                     .filter(message -> parentId.equals(
                             message.getParentMessageId()
                     ))
@@ -606,10 +667,12 @@ public class ConversationPersistenceService {
     }
 
     private boolean isModelVisible(ConversationMessage message) {
-        return message.getRole() != ChatMessageRole.ASSISTANT
+        return !message.isUsageRecordOnly() && (
+                message.getRole() != ChatMessageRole.ASSISTANT
                 || (message.getContent() != null
                 && !message.getContent().isBlank())
                 || message.getWorkLogJson() == null
-                || message.getWorkLogJson().equals("[]");
+                || message.getWorkLogJson().equals("[]")
+        );
     }
 }

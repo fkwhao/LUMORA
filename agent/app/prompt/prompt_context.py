@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Any
 
+from app.skill.catalog import SkillSummary
+
 
 @dataclass(frozen=True, slots=True)
 class PromptContext:
@@ -17,3 +19,4 @@ class PromptContext:
     conversation_memory: tuple[str, ...] = ()
     selected_memory_ids: tuple[str, ...] = ()
     conversation_summary: str | None = None
+    available_skills: tuple[SkillSummary, ...] = ()

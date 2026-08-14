@@ -22,14 +22,11 @@ public class ConversationStreamAccumulator {
     private final List<ChatStreamEvent> workLogEvents = new ArrayList<>();
 
     public void accept(ChatStreamEvent event) {
+        boolean failed = event.getType() == ChatStreamEventType.FAILED;
         if (event.getType() == ChatStreamEventType.TEXT_DELTA) {
             content.append(valueOrEmpty(event.getDelta()));
         } else if (event.getType() == ChatStreamEventType.TEXT_RESET) {
             content.setLength(0);
-        } else if (event.getType() == ChatStreamEventType.FAILED) {
-            throw new IllegalStateException(valueOrEmpty(
-                    event.getErrorMessage()
-            ));
         } else if (event.getType() == ChatStreamEventType.COMPLETED) {
             completed = true;
         }
@@ -60,6 +57,11 @@ public class ConversationStreamAccumulator {
         if (event.getActiveContextTokens() > 0) {
             activeContextTokens = event.getActiveContextTokens();
         }
+        if (failed) {
+            throw new IllegalStateException(valueOrEmpty(
+                    event.getErrorMessage()
+            ));
+        }
     }
 
     public String getContent() {
@@ -80,6 +82,19 @@ public class ConversationStreamAccumulator {
 
     public boolean isCompleted() {
         return completed;
+    }
+
+    public boolean hasBillableUsage() {
+        return usage != null && (
+                usage.getPromptTokens() > 0
+                        || usage.getCompletionTokens() > 0
+                        || usage.getTotalTokens() > 0
+                        || usage.getInputTokens() > 0
+                        || usage.getOutputTokens() > 0
+                        || usage.getReasoningTokens() > 0
+                        || usage.getCacheReadTokens() > 0
+                        || usage.getCacheWriteTokens() > 0
+        );
     }
 
     public List<ChatStreamEvent> getWorkLogEvents() {

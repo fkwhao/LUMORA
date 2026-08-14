@@ -31,6 +31,7 @@ import type {
 } from "../../../../shared/model-contract";
 import type { LumoraMemoryApi } from "../../../../shared/memory-contract";
 import type { LumoraMcpApi } from "../../../../shared/mcp-contract";
+import type { LumoraSkillApi } from "../../../../shared/skill-contract";
 import type { TaskSummary } from "../../../../shared/task-contract";
 import {
   Dialog,
@@ -58,6 +59,8 @@ interface SettingsPageProps {
   api?: LumoraModelApi;
   memoryApi?: LumoraMemoryApi;
   mcpApi?: LumoraMcpApi;
+  skillApi?: LumoraSkillApi;
+  workspacePath?: string;
   archivedTasks: TaskSummary[];
   onBack(): void;
   onRestoreTask(taskId: string): void;
@@ -87,6 +90,8 @@ export function SettingsPage({
   api,
   memoryApi,
   mcpApi,
+  skillApi,
+  workspacePath,
   archivedTasks,
   onBack,
   onRestoreTask,
@@ -228,7 +233,7 @@ export function SettingsPage({
         ) : section === "personalization" ? (
           <PersonalizationPage api={memoryApi} notify={notify} />
         ) : section === "plugins" ? (
-          <PluginsSettingsPage api={mcpApi} notify={notify} />
+          <PluginsSettingsPage api={mcpApi} skillApi={skillApi} workspacePath={workspacePath} notify={notify} />
         ) : section === "appearance" ? (
           <AppearancePage />
         ) : (

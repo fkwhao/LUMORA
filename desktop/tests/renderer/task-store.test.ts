@@ -359,6 +359,74 @@ describe("task store", () => {
     expect(store.getState().chatWasStopped).toBe(true);
   });
 
+  it("moves a streamed stage reply into the work log without a blank frame", async () => {
+    const api = createApi();
+    const modelApi = createModelApi();
+    let onEvent: Parameters<LumoraModelApi["streamMessage"]>[2] | undefined;
+    vi.mocked(modelApi.streamMessage).mockImplementation(
+      (_taskId, _content, eventHandler) => {
+        onEvent = eventHandler;
+        return () => undefined;
+      },
+    );
+    const store = createTaskStore(api, modelApi);
+    await store.getState().openTask(createdTask.taskId);
+    const pendingSend = store.getState().sendMessage("继续完成项目");
+    const renderedStates: Array<{ content: string; progress?: string }> = [];
+    const unsubscribe = store.subscribe((state) => {
+      const assistant = state.messages.at(-1);
+      renderedStates.push({
+        content: assistant?.content ?? "",
+        progress: assistant?.workLog?.find((item) => item.kind === "progress")
+          ?.content,
+      });
+    });
+
+    onEvent?.({
+      type: "text_delta",
+      delta: "环境已确认，接下来启动服务并验证。",
+      model: "demo",
+      errorMessage: "",
+    });
+    onEvent?.({
+      type: "progress_message",
+      delta: "环境已确认，接下来启动服务并验证。",
+      model: "demo",
+      errorMessage: "",
+      itemId: "stage-1",
+      metadata: { replacesAssistantContent: true },
+    });
+    onEvent?.({
+      type: "text_reset",
+      delta: "",
+      model: "demo",
+      errorMessage: "",
+    });
+
+    expect(store.getState().messages.at(-1)).toMatchObject({
+      content: "",
+      workLog: [
+        expect.objectContaining({
+          itemId: "stage-1",
+          content: "环境已确认，接下来启动服务并验证。",
+        }),
+      ],
+    });
+    expect(renderedStates).not.toContainEqual({
+      content: "",
+      progress: undefined,
+    });
+
+    onEvent?.({
+      type: "completed",
+      delta: "",
+      model: "demo",
+      errorMessage: "",
+    });
+    unsubscribe();
+    await pendingSend;
+  });
+
   it("pauses on a tool approval event and forwards the human decision", async () => {
     const api = createApi();
     const modelApi = createModelApi();

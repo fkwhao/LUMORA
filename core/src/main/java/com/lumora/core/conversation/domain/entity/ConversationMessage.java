@@ -25,6 +25,8 @@ public class ConversationMessage {
     private int messageDepth;
     @TableField("active_path")
     private boolean activePath;
+    @TableField("usage_record_only")
+    private boolean usageRecordOnly;
     @TableField("role")
     private ChatMessageRole role;
     @TableField("content")
@@ -155,6 +157,10 @@ public class ConversationMessage {
     public boolean isActivePath() { return activePath; }
     public void setActivePath(boolean activePath) {
         this.activePath = activePath;
+    }
+    public boolean isUsageRecordOnly() { return usageRecordOnly; }
+    public void setUsageRecordOnly(boolean usageRecordOnly) {
+        this.usageRecordOnly = usageRecordOnly;
     }
 
     public ChatMessageRole getRole() {

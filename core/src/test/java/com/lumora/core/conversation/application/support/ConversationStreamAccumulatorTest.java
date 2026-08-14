@@ -2,11 +2,13 @@ package com.lumora.core.conversation.application.support;
 
 import com.lumora.core.conversation.domain.model.ChatStreamEvent;
 import com.lumora.core.conversation.domain.model.ChatStreamEventType;
+import com.lumora.core.conversation.domain.model.TokenUsage;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ConversationStreamAccumulatorTest {
 
@@ -61,6 +63,46 @@ class ConversationStreamAccumulatorTest {
         assertThat(persisted.getOutput()).isEqualTo("Approved for this call.");
         assertThat(persisted.getMetadata())
                 .containsEntry("approvalReviewDecision", "allow_once");
+    }
+
+    @Test
+    void keepsTheLatestCumulativeUsageSnapshot() {
+        ConversationStreamAccumulator accumulator =
+                new ConversationStreamAccumulator();
+
+        accumulator.accept(usageEvent(new TokenUsage(10, 2, 12)));
+        accumulator.accept(usageEvent(new TokenUsage(30, 5, 35)));
+
+        assertThat(accumulator.hasBillableUsage()).isTrue();
+        assertThat(accumulator.getUsage().getTotalTokens()).isEqualTo(35);
+    }
+
+    @Test
+    void capturesUsageAttachedToAFailedEventBeforeThrowing() {
+        ConversationStreamAccumulator accumulator =
+                new ConversationStreamAccumulator();
+        ChatStreamEvent failed = new ChatStreamEvent(
+                ChatStreamEventType.FAILED,
+                "",
+                "model",
+                new TokenUsage(18, 3, 21),
+                "provider failed"
+        );
+
+        assertThrows(IllegalStateException.class, () -> accumulator.accept(failed));
+
+        assertThat(accumulator.hasBillableUsage()).isTrue();
+        assertThat(accumulator.getUsage().getTotalTokens()).isEqualTo(21);
+    }
+
+    private ChatStreamEvent usageEvent(TokenUsage usage) {
+        return new ChatStreamEvent(
+                ChatStreamEventType.USAGE,
+                "",
+                "model",
+                usage,
+                ""
+        );
     }
 
     private ChatStreamEvent reviewEvent(
