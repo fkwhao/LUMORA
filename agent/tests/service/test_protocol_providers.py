@@ -763,6 +763,53 @@ class _AnthropicStreamingResponse:
             yield "data: " + json.dumps(event, ensure_ascii=False)
 
 
+class _AnthropicRepeatedUsageResponse:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    def raise_for_status(self) -> None:
+        return None
+
+    async def aiter_lines(self):
+        events = [
+            {
+                "type": "message_start",
+                "message": {
+                    "model": "deepseek-v4-pro",
+                    "usage": {
+                        "input_tokens": 40,
+                        "cache_read_input_tokens": 960,
+                        "output_tokens": 1,
+                    },
+                },
+            },
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text", "text": ""},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "done"},
+            },
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {
+                    "input_tokens": 40,
+                    "cache_read_input_tokens": 960,
+                    "output_tokens": 12,
+                },
+            },
+        ]
+        for event in events:
+            yield "data: " + json.dumps(event)
+
+
 class _AnthropicStreamingClient:
     def __init__(self, *_args, **_kwargs) -> None:
         pass
@@ -775,6 +822,11 @@ class _AnthropicStreamingClient:
 
     def stream(self, *_args, **_kwargs):
         return _AnthropicStreamingResponse()
+
+
+class _AnthropicRepeatedUsageClient(_AnthropicStreamingClient):
+    def stream(self, *_args, **_kwargs):
+        return _AnthropicRepeatedUsageResponse()
 
 
 class _AnthropicContinuationResponse:
@@ -885,6 +937,37 @@ def test_anthropic_stream_buffers_search_narration(monkeypatch) -> None:
     assert events[-1].turn is not None
     assert events[-1].turn.content == "最终核实结果。"
     assert events[-1].turn.usage.total_tokens == 7
+
+
+def test_anthropic_stream_replaces_repeated_usage_snapshot(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.provider.anthropic_provider.httpx.AsyncClient",
+        _AnthropicRepeatedUsageClient,
+    )
+
+    async def collect():
+        return [
+            event
+            async for event in AnthropicProvider().stream_agent_turn(
+                replace(
+                    _settings("anthropic"),
+                    provider_name="DeepSeek",
+                    model="deepseek-v4-pro",
+                ),
+                [{"role": "user", "content": "continue"}],
+                (),
+                None,
+            )
+        ]
+
+    events = asyncio.run(collect())
+    usage = events[-1].turn.usage
+
+    assert usage.prompt_tokens == 1000
+    assert usage.input_tokens == 40
+    assert usage.cache_read_tokens == 960
+    assert usage.completion_tokens == 12
+    assert usage.total_tokens == 1012
 
 
 def test_anthropic_stream_continues_pause_turn_until_final_answer(monkeypatch) -> None:

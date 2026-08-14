@@ -106,6 +106,11 @@ class AnthropicProvider(ProtocolProviderBase):
                 stop_reason = ""
                 candidate_streaming = False
                 candidate_content_emitted = False
+                # Anthropic streaming usage is one call-level snapshot split
+                # across message_start and message_delta. Newer compatible
+                # endpoints may repeat input/cache fields in message_delta, so
+                # adding both events would count the same tokens twice.
+                call_usage: dict[str, Any] = {}
                 async with client.stream(
                     "POST",
                     f"{settings.base_url}/messages",
@@ -124,10 +129,9 @@ class AnthropicProvider(ProtocolProviderBase):
                         if event_type == "message_start":
                             message = event.get("message") or {}
                             model = str(message.get("model") or model)
-                            usage_parts.append(
-                                parse_anthropic_usage(
-                                    message.get("usage") or {}
-                                )
+                            _merge_anthropic_stream_usage(
+                                call_usage,
+                                message.get("usage"),
                             )
                         elif event_type == "content_block_start":
                             index = int(event.get("index") or 0)
@@ -292,8 +296,9 @@ class AnthropicProvider(ProtocolProviderBase):
                                 (event.get("delta") or {}).get("stop_reason")
                                 or stop_reason
                             )
-                            usage_parts.append(
-                                parse_anthropic_usage(event.get("usage") or {})
+                            _merge_anthropic_stream_usage(
+                                call_usage,
+                                event.get("usage"),
                             )
                         elif event_type == "error":
                             for search in searches.values():
@@ -306,6 +311,8 @@ class AnthropicProvider(ProtocolProviderBase):
                                 )
                             raise ValueError("Anthropic Messages API 流式调用失败")
 
+                if call_usage:
+                    usage_parts.append(parse_anthropic_usage(call_usage))
                 if stop_reason != "pause_turn":
                     break
                 if candidate_content_emitted:
@@ -365,6 +372,20 @@ class AnthropicProvider(ProtocolProviderBase):
                 tool_calls=tool_calls,
             ),
         )
+
+
+def _merge_anthropic_stream_usage(
+    current: dict[str, Any],
+    update: Any,
+) -> None:
+    """Merge partial snapshots for one Anthropic streaming API call.
+
+    Each field is cumulative for the current call. A later occurrence replaces
+    the earlier value; separate server-tool continuation calls are still summed.
+    """
+    if not isinstance(update, dict):
+        return
+    current.update(update)
 
 
 def _headers(settings: ModelConnectionSettings) -> dict[str, str]:
