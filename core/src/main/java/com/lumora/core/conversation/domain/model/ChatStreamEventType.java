@@ -7,6 +7,7 @@ public enum ChatStreamEventType {
     TEXT_DELTA("text_delta"),
     TEXT_RESET("text_reset"),
     REASONING_DELTA("reasoning_delta"),
+    PROTOCOL_MESSAGE("protocol_message"),
     PROGRESS_MESSAGE("progress_message"),
     TOOL_STARTED("tool_started"),
     TOOL_COMPLETED("tool_completed"),
@@ -24,6 +25,7 @@ public enum ChatStreamEventType {
     WEB_SEARCH_COMPLETED("web_search_completed"),
     WEB_SEARCH_FAILED("web_search_failed"),
     USAGE("usage"),
+    PAUSED("paused"),
     COMPLETED("completed"),
     FAILED("failed");
 

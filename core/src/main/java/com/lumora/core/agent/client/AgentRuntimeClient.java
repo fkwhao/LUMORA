@@ -108,4 +108,6 @@ public interface AgentRuntimeClient {
 
     void streamChat(AgentChatStreamRequest request,
                     Consumer<ChatStreamEvent> eventConsumer);
+
+    boolean pauseRun(String runId, String correlationId);
 }

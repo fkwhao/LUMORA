@@ -5,7 +5,10 @@ import httpx
 import pytest
 
 from app.artifact.store import ArtifactStore
-from app.dto.request.chat_completion_request import ChatMessageRequest
+from app.dto.request.chat_completion_request import (
+    ChatMessageRequest,
+    ChatToolCallRequest,
+)
 from app.dto.response.chat_completion_response import (
     ChatCompletionResponse,
     TokenUsageResponse,
@@ -17,6 +20,7 @@ from app.harness.contracts import (
     ProviderTurn,
     ProviderTurnEvent,
 )
+from app.harness.run_control import RunControlRegistry
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.prompt.prompt_assembly import PromptAssembly
 from app.tool.base import ToolContext, ToolResult, function_tool
@@ -102,6 +106,269 @@ def test_agent_loop_stops_identical_no_progress_iterations() -> None:
 
 def test_agent_loop_retries_transient_stream_disconnect() -> None:
     asyncio.run(_assert_transient_stream_disconnect_is_retried())
+
+
+def test_agent_loop_seals_after_completed_tool_without_starting_next_turn() -> None:
+    asyncio.run(_assert_pause_keeps_completed_tool_state())
+
+
+def test_agent_loop_cancels_a_stalled_model_stream_on_pause() -> None:
+    asyncio.run(_assert_stalled_model_stream_is_cancelled())
+
+
+def test_agent_loop_preserves_native_protocol_history() -> None:
+    asyncio.run(_assert_native_protocol_history_is_preserved())
+
+
+def test_agent_loop_balances_undispatched_tool_calls_on_pause() -> None:
+    asyncio.run(_assert_undispatched_calls_are_balanced())
+
+
+async def _assert_native_protocol_history_is_preserved() -> None:
+    captured: list[dict[str, object]] = []
+
+    async def complete_turn(_settings, messages, _tools, _effort):
+        captured.extend(messages)
+        return ProviderTurn(
+            content="继续完成。",
+            reasoning="",
+            model="test-model",
+            usage=TokenUsageResponse(
+                promptTokens=8,
+                completionTokens=2,
+                totalTokens=10,
+            ),
+            tool_calls=(),
+        )
+
+    messages = [
+        ChatMessageRequest(role="user", content="检查项目"),
+        ChatMessageRequest(
+            role="assistant",
+            content="先运行测试。",
+            toolCalls=[ChatToolCallRequest(
+                id="call-1",
+                name="shell_command",
+                arguments='{"command":"mvn test"}',
+            )],
+        ),
+        ChatMessageRequest(
+            role="tool",
+            content="BUILD SUCCESS",
+            toolCallId="call-1",
+        ),
+        ChatMessageRequest(role="user", content="继续"),
+    ]
+    events = [
+        event
+        async for event in AgentLoopRunner(complete_turn).stream(
+            _settings(),
+            PromptAssembly(()),
+            messages,
+            None,
+            ToolRegistry(),
+            ToolContext(Path(".")),
+        )
+    ]
+
+    assert captured[1]["tool_calls"][0]["id"] == "call-1"
+    assert captured[2] == {
+        "role": "tool",
+        "content": "BUILD SUCCESS",
+        "tool_call_id": "call-1",
+    }
+    assert events[-1].type == "completed"
+
+
+async def _assert_undispatched_calls_are_balanced() -> None:
+    registry = RunControlRegistry()
+    control = registry.register("run-before-dispatch")
+    executed = 0
+
+    async def complete_turn(*_args):
+        assert await registry.pause("run-before-dispatch") is True
+        return ProviderTurn(
+            content="准备执行两个步骤。",
+            reasoning="",
+            model="test-model",
+            usage=TokenUsageResponse(
+                promptTokens=10,
+                completionTokens=3,
+                totalTokens=13,
+            ),
+            tool_calls=(
+                ProviderToolCall("call-1", "run_step", '{"step":1}'),
+                ProviderToolCall("call-2", "run_step", '{"step":2}'),
+            ),
+        )
+
+    async def execute(_context, _input):
+        nonlocal executed
+        executed += 1
+        return ToolResult("done")
+
+    tools = ToolRegistry((function_tool(
+        name="run_step",
+        description="运行步骤",
+        input_schema={"type": "object", "properties": {}},
+        execute=execute,
+        read_only=True,
+    ),))
+    events = [
+        event
+        async for event in AgentLoopRunner(complete_turn).stream(
+            _settings(),
+            PromptAssembly(()),
+            [ChatMessageRequest(role="user", content="完成任务")],
+            None,
+            tools,
+            ToolContext(Path(".")),
+            run_control=control,
+        )
+    ]
+    registry.unregister("run-before-dispatch", control)
+
+    protocol = [
+        event.metadata["message"]
+        for event in events
+        if event.type == "protocol_message"
+    ]
+    assert executed == 0
+    assert protocol[0]["role"] == "assistant"
+    assert [message["toolCallId"] for message in protocol[1:]] == [
+        "call-1",
+        "call-2",
+    ]
+    assert all(
+        "ABORTED_BEFORE_DISPATCH" in message["content"]
+        for message in protocol[1:]
+    )
+    assert events[-1].type == "paused"
+
+
+async def _assert_pause_keeps_completed_tool_state() -> None:
+    turns = iter((
+        ProviderTurn(
+            content="先执行第一步。",
+            reasoning="",
+            model="test-model",
+            usage=TokenUsageResponse(
+                promptTokens=10,
+                completionTokens=4,
+                totalTokens=14,
+            ),
+            tool_calls=(ProviderToolCall("call-1", "run_step", "{}"),),
+        ),
+        ProviderTurn(
+            content="任务已经完成。",
+            reasoning="",
+            model="test-model",
+            usage=TokenUsageResponse(
+                promptTokens=18,
+                completionTokens=4,
+                totalTokens=22,
+            ),
+            tool_calls=(),
+        ),
+    ))
+    executed: list[str] = []
+    pause_task: asyncio.Task[bool] | None = None
+    registry = RunControlRegistry()
+    control = registry.register("run-1")
+
+    async def complete_turn(*_args):
+        return next(turns)
+
+    async def execute(_context, _input):
+        nonlocal pause_task
+        executed.append("call-1")
+        pause_task = asyncio.create_task(
+            registry.pause("run-1")
+        )
+        await asyncio.sleep(0)
+        return ToolResult("done")
+
+    tools = ToolRegistry((
+        function_tool(
+            name="run_step",
+            description="运行一个步骤",
+            input_schema={"type": "object", "properties": {}},
+            execute=execute,
+            read_only=True,
+        ),
+    ))
+
+    async def collect() -> list:
+        return [
+            event
+            async for event in AgentLoopRunner(complete_turn).stream(
+                _settings(),
+                PromptAssembly(()),
+                [ChatMessageRequest(role="user", content="完成任务")],
+                None,
+                tools,
+                ToolContext(Path(".")),
+                run_control=control,
+            )
+        ]
+
+    run_task = asyncio.create_task(collect())
+    while pause_task is None:
+        await asyncio.sleep(0)
+    assert await pause_task is True
+    assert executed == ["call-1"]
+
+    events = await run_task
+    registry.unregister("run-1", control)
+
+    assert executed == ["call-1"]
+    assert any(event.type == "tool_completed" for event in events)
+    assert events[-1].type == "paused"
+    assert all(event.type != "completed" for event in events)
+
+
+async def _assert_stalled_model_stream_is_cancelled() -> None:
+    registry = RunControlRegistry()
+    control = registry.register("run-stalled")
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def complete_turn(*_args):
+        raise AssertionError("存在流式回合能力时不应调用一次性完成接口")
+
+    async def stream_turn(*_args):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+        yield ProviderTurnEvent(type="content_delta", delta="不会到达")
+
+    async def collect() -> list:
+        return [
+            event
+            async for event in AgentLoopRunner(
+                complete_turn,
+                stream_turn=stream_turn,
+            ).stream(
+                _settings(),
+                PromptAssembly(()),
+                [ChatMessageRequest(role="user", content="继续")],
+                None,
+                ToolRegistry(),
+                ToolContext(Path(".")),
+                run_control=control,
+            )
+        ]
+
+    run_task = asyncio.create_task(collect())
+    await asyncio.wait_for(started.wait(), timeout=1)
+    assert await registry.pause("run-stalled") is True
+    events = await asyncio.wait_for(run_task, timeout=1)
+    registry.unregister("run-stalled", control)
+
+    assert cancelled.is_set()
+    assert [event.type for event in events] == ["paused"]
 
 
 async def _assert_transient_stream_disconnect_is_retried() -> None:
@@ -734,16 +1001,19 @@ async def _assert_tool_lifecycle_before_final_answer() -> None:
     ]
 
     assert [event.type for event in events] == [
+        "protocol_message",
         "progress_message",
         "usage",
         "tool_started",
         "tool_completed",
+        "protocol_message",
         "usage",
+        "protocol_message",
         "text_delta",
         "usage",
         "completed",
     ]
-    assert events[3].output == "文件内容"
+    assert events[4].output == "文件内容"
     usage_events = [event for event in events if event.type == "usage"]
     assert [event.usage.total_tokens for event in usage_events if event.usage] == [
         12,

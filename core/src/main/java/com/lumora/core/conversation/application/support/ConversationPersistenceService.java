@@ -1,7 +1,5 @@
 package com.lumora.core.conversation.application.support;
 
-import com.lumora.core.conversation.domain.model.ConversationConstants;
-
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,6 +12,7 @@ import com.lumora.core.conversation.infrastructure.persistence.ConversationMappe
 import com.lumora.core.conversation.infrastructure.persistence.ConversationMessageMapper;
 import com.lumora.core.conversation.domain.model.ChatMessage;
 import com.lumora.core.conversation.domain.model.ChatStreamEvent;
+import com.lumora.core.conversation.domain.model.ChatStreamEventType;
 import com.lumora.core.conversation.domain.model.TokenUsage;
 import com.lumora.core.task.application.service.TaskService;
 import com.lumora.core.memory.application.service.MemoryService;
@@ -33,6 +32,10 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class ConversationPersistenceService {
+
+    private static final String CONTINUATION_INSTRUCTION =
+            "继续完成上一轮尚未完成的任务。优先复用已保存的执行结果，"
+                    + "不要重复已经成功完成的工具操作；先核对外部状态再继续。";
 
     private final ConversationMapper conversationMapper;
     private final ConversationMessageMapper messageMapper;
@@ -89,7 +92,7 @@ public class ConversationPersistenceService {
         return prepareRegeneration(taskId, messageId, content, null);
     }
 
-    public ConversationRunContext prepareRegeneration(
+    public synchronized ConversationRunContext prepareRegeneration(
             String taskId,
             String messageId,
             String content,
@@ -110,6 +113,21 @@ public class ConversationPersistenceService {
         return context;
     }
 
+    public synchronized ConversationRunContext prepareContinuation(
+            String taskId,
+            String workspacePath
+    ) {
+        ConversationRunContext context = transactionTemplate.execute(
+                status -> prepareContinuationInTransaction(
+                        taskId, workspacePath
+                )
+        );
+        if (context == null) {
+            throw new IllegalStateException("无法继续会话");
+        }
+        return context;
+    }
+
     public synchronized void persistAssistant(
             ConversationRunContext context,
             ConversationStreamAccumulator accumulator
@@ -125,6 +143,32 @@ public class ConversationPersistenceService {
     ) {
         transactionTemplate.executeWithoutResult(
                 status -> insertFailedUsage(context, accumulator)
+        );
+    }
+
+    public synchronized void persistPausedTurn(
+            ConversationRunContext context,
+            ConversationStreamAccumulator accumulator,
+            String runtimeTurnId
+    ) {
+        transactionTemplate.executeWithoutResult(
+                status -> insertAssistant(
+                        context,
+                        accumulator,
+                        RunProtocolContextCodec.markerItemId(runtimeTurnId)
+                )
+        );
+    }
+
+    public synchronized void persistRecoveredTurn(
+            String taskId,
+            String runtimeTurnId,
+            List<ChatStreamEvent> events
+    ) {
+        transactionTemplate.executeWithoutResult(
+                status -> insertRecoveredTurn(
+                        taskId, runtimeTurnId, events
+                )
         );
     }
 
@@ -157,7 +201,7 @@ public class ConversationPersistenceService {
                 .filter(message -> summary == null
                         || message.getSequence() > summary.getThroughSequence())
                 .filter(this::isModelVisible)
-                .map(this::toModelMessage)
+                .flatMap(message -> toModelMessages(message).stream())
                 .toList();
         if (messages.isEmpty()) {
             throw new IllegalArgumentException("当前会话已经完成压缩");
@@ -256,7 +300,6 @@ public class ConversationPersistenceService {
         return createRunContext(
                 taskId,
                 conversation.getConversationId(),
-                sequence + 1,
                 history,
                 userMessage,
                 workspacePath
@@ -310,10 +353,77 @@ public class ConversationPersistenceService {
         return createRunContext(
                 taskId,
                 conversation.getConversationId(),
-                nextSequence(conversation.getConversationId()),
                 precedingMessages,
                 currentUser,
                 workspacePath
+        );
+    }
+
+    private ConversationRunContext prepareContinuationInTransaction(
+            String taskId,
+            String workspacePath
+    ) {
+        taskService.getTask(taskId);
+        Conversation conversation = requireConversation(taskId);
+        List<ConversationMessage> history = loadMessages(
+                conversation.getConversationId()
+        );
+        if (history.isEmpty()) {
+            throw new IllegalStateException("当前会话没有可继续的执行记录");
+        }
+        ConversationMessage currentUser = history.stream()
+                .filter(message -> message.getRole() == ChatMessageRole.USER)
+                .reduce((first, second) -> second)
+                .orElseThrow(() -> new IllegalStateException(
+                        "当前会话缺少用户消息"
+                ));
+        ConversationMessage parent = history.get(history.size() - 1);
+        ConversationContextSummary summary = contextSummaryService.latest(
+                conversation.getConversationId()
+        );
+        List<ConversationMessage> uncompactedHistory = summary == null
+                ? history.stream().filter(this::isModelVisible).toList()
+                : history.stream()
+                        .filter(message -> message.getSequence()
+                                > summary.getThroughSequence())
+                        .filter(this::isModelVisible)
+                        .toList();
+        int retainedHistoryCount = Math.max(
+                0, ConversationConstants.MAX_MODEL_CONTEXT_MESSAGES - 1
+        );
+        int firstContextIndex = Math.max(
+                0, uncompactedHistory.size() - retainedHistoryCount
+        );
+        List<ChatMessage> modelMessages = new ArrayList<>(
+                uncompactedHistory.subList(
+                        firstContextIndex, uncompactedHistory.size()
+                ).stream()
+                        .flatMap(message -> toModelMessages(message).stream())
+                        .toList()
+        );
+        modelMessages.add(new ChatMessage("user", CONTINUATION_INSTRUCTION));
+        String projectScopeId = memoryService.resolveProjectScopeId(
+                workspacePath
+        );
+        return new ConversationRunContext(
+                taskId,
+                conversation.getConversationId(),
+                modelMessages,
+                currentUser.getMessageId(),
+                currentUser.getContent(),
+                memoryService.buildPromptSummary(
+                        conversation.getConversationId()
+                ),
+                memoryService.buildExtractionContext(
+                        conversation.getConversationId(), workspacePath
+                ),
+                summary == null ? null : summary.getSummaryText(),
+                memoryService.buildPromptCandidates(
+                        conversation.getConversationId(), workspacePath
+                ),
+                projectScopeId,
+                parent.getMessageId(),
+                System.nanoTime()
         );
     }
 
@@ -324,13 +434,13 @@ public class ConversationPersistenceService {
             ConversationRunContext context,
             ConversationStreamAccumulator accumulator
     ) {
-        insertAssistant(context, accumulator, false);
+        insertAssistant(context, accumulator, (String) null);
     }
 
     private void insertAssistant(
             ConversationRunContext context,
             ConversationStreamAccumulator accumulator,
-            boolean interrupted
+            String protocolMarkerId
     ) {
         TokenUsage usage = accumulator.getUsage() == null
                 ? new TokenUsage(0, 0, 0)
@@ -344,7 +454,7 @@ public class ConversationPersistenceService {
         ConversationMessage assistantMessage = new ConversationMessage(
                 UUID.randomUUID().toString(),
                 context.getConversationId(),
-                context.getAssistantSequence(),
+                nextSequence(context.getConversationId()),
                 ChatMessageRole.ASSISTANT,
                 accumulator.getContent(),
                 accumulator.getModel(),
@@ -356,12 +466,14 @@ public class ConversationPersistenceService {
         );
         assistantMessage.setWorkLogJson(serializeWorkLog(
                 accumulator,
-                interrupted
+                protocolMarkerId
         ));
         ConversationMessage parent = messageMapper.selectById(
-                context.getCurrentUserMessageId()
+                context.getAssistantParentMessageId()
         );
-        assistantMessage.setParentMessageId(context.getCurrentUserMessageId());
+        assistantMessage.setParentMessageId(
+                context.getAssistantParentMessageId()
+        );
         assistantMessage.setMessageDepth(parent.getMessageDepth() + 1);
         assistantMessage.setActivePath(true);
         applyUsageDetails(assistantMessage, usage);
@@ -375,13 +487,74 @@ public class ConversationPersistenceService {
         touchConversation(conversation, context.getTaskId(), now);
     }
 
+    private void insertRecoveredTurn(
+            String taskId,
+            String runtimeTurnId,
+            List<ChatStreamEvent> events
+    ) {
+        Conversation conversation = findConversation(taskId);
+        if (conversation == null) {
+            return;
+        }
+        String protocolMarkerId =
+                RunProtocolContextCodec.markerItemId(runtimeTurnId);
+        List<ConversationMessage> history = loadMessages(
+                conversation.getConversationId()
+        );
+        if (history.isEmpty() || history.stream().anyMatch(message ->
+                message.getWorkLogJson() != null
+                                && message.getWorkLogJson().contains(
+                                protocolMarkerId
+                        )
+        )) {
+            return;
+        }
+        ConversationMessage currentUser = history.stream()
+                .filter(message -> message.getRole() == ChatMessageRole.USER)
+                .reduce((first, second) -> second)
+                .orElse(null);
+        if (currentUser == null) {
+            return;
+        }
+        ConversationStreamAccumulator accumulator =
+                new ConversationStreamAccumulator();
+        for (ChatStreamEvent event : events) {
+            if (event.getType() == ChatStreamEventType.FAILED
+                    || event.getType() == ChatStreamEventType.COMPLETED
+                    || event.getType() == ChatStreamEventType.PAUSED) {
+                continue;
+            }
+            accumulator.accept(event);
+        }
+        ConversationMessage parent = history.get(history.size() - 1);
+        ConversationRunContext context = new ConversationRunContext(
+                taskId,
+                conversation.getConversationId(),
+                List.of(),
+                currentUser.getMessageId(),
+                currentUser.getContent(),
+                null,
+                null,
+                null,
+                List.of(),
+                null,
+                parent.getMessageId(),
+                System.nanoTime()
+        );
+        insertAssistant(context, accumulator, protocolMarkerId);
+    }
+
     /** Preserve visible partial output, or a hidden usage-only failed call. */
     private void insertFailedUsage(
             ConversationRunContext context,
             ConversationStreamAccumulator accumulator
     ) {
         if (accumulator.hasVisibleOutput()) {
-            insertAssistant(context, accumulator, true);
+            insertAssistant(
+                    context,
+                    accumulator,
+                    RunProtocolContextCodec.MARKER_ITEM_ID
+            );
             return;
         }
         TokenUsage usage = accumulator.getUsage();
@@ -492,15 +665,20 @@ public class ConversationPersistenceService {
 
     private String serializeWorkLog(
             ConversationStreamAccumulator accumulator,
-            boolean interrupted
+            String protocolMarkerId
     ) {
         try {
             List<ChatStreamEvent> events = new ArrayList<>(
                     accumulator.getWorkLogEvents()
             );
-            if (interrupted) {
-                events.add(InterruptedRunContextRenderer.marker(
-                        accumulator.getModel()
+            if (protocolMarkerId != null
+                    || !accumulator.getProtocolMessages().isEmpty()) {
+                events.add(RunProtocolContextCodec.marker(
+                        accumulator.getModel(),
+                        accumulator.getProtocolMessages(),
+                        protocolMarkerId == null
+                                ? RunProtocolContextCodec.MARKER_ITEM_ID
+                                : protocolMarkerId
                 ));
             }
             return objectMapper.writeValueAsString(
@@ -527,7 +705,6 @@ public class ConversationPersistenceService {
     private ConversationRunContext createRunContext(
             String taskId,
             String conversationId,
-            int assistantSequence,
             List<ConversationMessage> history,
             ConversationMessage currentUserMessage,
             String workspacePath
@@ -555,17 +732,16 @@ public class ConversationPersistenceService {
                         firstContextIndex, uncompactedHistory.size()
                 )
                         .stream()
-                        .map(this::toModelMessage)
+                        .flatMap(message -> toModelMessages(message).stream())
                         .toList()
         );
-        modelMessages.add(toModelMessage(currentUserMessage));
+        modelMessages.addAll(toModelMessages(currentUserMessage));
         String projectScopeId = memoryService.resolveProjectScopeId(
                 workspacePath
         );
         return new ConversationRunContext(
                 taskId,
                 conversationId,
-                assistantSequence,
                 modelMessages,
                 currentUserMessage.getMessageId(),
                 currentUserMessage.getContent(),
@@ -745,24 +921,30 @@ public class ConversationPersistenceService {
         touchConversation(conversation, taskId, clock.instant());
     }
 
-    private ChatMessage toModelMessage(ConversationMessage message) {
-        String content = message.getContent();
-        if (message.getRole() == ChatMessageRole.ASSISTANT
-                && InterruptedRunContextRenderer.isInterrupted(
+    private List<ChatMessage> toModelMessages(ConversationMessage message) {
+        List<ChatMessage> protocolMessages = RunProtocolContextCodec.decode(
+                message.getWorkLogJson(),
+                message.getMessageId(),
+                message.getSequence(),
+                objectMapper
+        );
+        if (!protocolMessages.isEmpty()) {
+            return protocolMessages;
+        }
+        if (RunProtocolContextCodec.hasMarker(
                 message.getWorkLogJson(), objectMapper
         )) {
-            content = InterruptedRunContextRenderer.render(
-                    content,
-                    message.getWorkLogJson(),
-                    objectMapper
-            );
+            // A newly sealed turn that ended before a complete assistant
+            // message has no provider-visible replay state. Its partial text
+            // remains UI-only, matching the append-only Harness model.
+            return List.of();
         }
-        return new ChatMessage(
+        return List.of(new ChatMessage(
                 message.getRole().name().toLowerCase(),
-                content,
+                message.getContent(),
                 message.getMessageId(),
                 message.getSequence()
-        );
+        ));
     }
 
     private boolean isModelVisible(ConversationMessage message) {
@@ -770,7 +952,7 @@ public class ConversationPersistenceService {
                 message.getRole() != ChatMessageRole.ASSISTANT
                 || (message.getContent() != null
                 && !message.getContent().isBlank())
-                || InterruptedRunContextRenderer.isInterrupted(
+                || RunProtocolContextCodec.hasMarker(
                 message.getWorkLogJson(), objectMapper
                 )
                 || message.getWorkLogJson() == null

@@ -64,6 +64,7 @@ public final class WorkLogEventProjector {
             "failureKind",
             "toolExecutionState",
             "executionLocation",
+            "callSignature",
             "sources"
     );
 

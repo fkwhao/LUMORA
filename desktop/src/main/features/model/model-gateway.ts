@@ -3,6 +3,8 @@ import type {
   ChatMessage,
   ChatRequestOptions,
   ChatStreamEvent,
+  ConversationRunEvent,
+  ConversationRunSnapshot,
   ContextCompactionResult,
   ArtifactChunk,
   ListModelsInput,
@@ -42,6 +44,16 @@ export interface ModelGateway {
     approvalId: string,
     decision: ToolApprovalDecision,
   ): Promise<void>;
+  getActiveRun(taskId: string): Promise<ConversationRunSnapshot | undefined>;
+  pauseRun(taskId: string, runId: string): Promise<ConversationRunSnapshot>;
+  resumeRun(taskId: string, runId: string): Promise<ConversationRunSnapshot>;
+  cancelRun(taskId: string, runId: string): Promise<ConversationRunSnapshot>;
+  subscribeRun(
+    taskId: string,
+    runId: string,
+    afterSequence: number,
+    onEvent: (event: ConversationRunEvent) => void,
+  ): ModelStreamSubscription;
   streamMessage(
     taskId: string,
     content: string,

@@ -131,10 +131,12 @@ def test_model_reviewer_retries_and_accepts_embedded_json(
     tmp_path: Path,
 ) -> None:
     attempts = 0
+    captured_messages: list[list[dict]] = []
 
-    async def complete_turn(*_args):
+    async def complete_turn(_settings, messages, *_args):
         nonlocal attempts
         attempts += 1
+        captured_messages.append(messages)
         content = (
             "暂时无法判断"
             if attempts == 1
@@ -166,6 +168,36 @@ def test_model_reviewer_retries_and_accepts_embedded_json(
     assert result.fallback is False
     assert attempts == 2
     assert result.usage.total_tokens == 4
+    assert len(captured_messages[0]) == 2
+    assert len(captured_messages[1]) == 3
+    assert "previous response" in captured_messages[1][-1]["content"]
+
+
+def test_model_reviewer_normalizes_safe_schema_variants(
+    tmp_path: Path,
+) -> None:
+    async def complete_turn(*_args):
+        return ProviderTurn(
+            content=(
+                '{"decision":"ALLOW","explanation":'
+                '"The requested project test is bounded."}'
+            ),
+            reasoning="",
+            model="reviewer-model",
+            usage=TokenUsageResponse(),
+            tool_calls=(),
+        )
+
+    result = asyncio.run(
+        ModelApprovalReviewer(complete_turn).review(
+            _settings(),
+            _request(tmp_path),
+        )
+    )
+
+    assert result.decision is ApprovalReviewDecision.ALLOW_ONCE
+    assert result.risk_level == "MEDIUM"
+    assert result.fallback is False
 
 
 def test_model_reviewer_never_auto_approves_external_paths(

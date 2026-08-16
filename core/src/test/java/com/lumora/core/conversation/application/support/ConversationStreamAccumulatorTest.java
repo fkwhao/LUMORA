@@ -121,6 +121,58 @@ class ConversationStreamAccumulatorTest {
         assertThat(accumulator.hasPersistableResult()).isTrue();
     }
 
+    @Test
+    void recordsPausedAsASealedNonCompletedTurn() {
+        ConversationStreamAccumulator accumulator =
+                new ConversationStreamAccumulator();
+
+        accumulator.accept(new ChatStreamEvent(
+                ChatStreamEventType.PAUSED,
+                "",
+                "model",
+                null,
+                ""
+        ));
+
+        assertThat(accumulator.isPaused()).isTrue();
+        assertThat(accumulator.isCompleted()).isFalse();
+    }
+
+    @Test
+    void capturesFullProtocolMessagesOutsideTheProjectedWorkLog() {
+        ConversationStreamAccumulator accumulator =
+                new ConversationStreamAccumulator();
+        accumulator.accept(new ChatStreamEvent(
+                ChatStreamEventType.PROTOCOL_MESSAGE,
+                "",
+                "model",
+                null,
+                "",
+                "",
+                "",
+                "",
+                "",
+                Map.of(),
+                "",
+                0L,
+                null,
+                Map.of("message", Map.of(
+                        "role", "tool",
+                        "content", "完整工具输出",
+                        "toolCallId", "call-1"
+                ))
+        ));
+
+        assertThat(accumulator.getProtocolMessages()).containsExactly(
+                Map.of(
+                        "role", "tool",
+                        "content", "完整工具输出",
+                        "toolCallId", "call-1"
+                )
+        );
+        assertThat(accumulator.getWorkLogEvents()).isEmpty();
+    }
+
     private ChatStreamEvent usageEvent(TokenUsage usage) {
         return new ChatStreamEvent(
                 ChatStreamEventType.USAGE,

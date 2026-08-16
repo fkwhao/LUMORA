@@ -10,6 +10,7 @@ import type {
   ChatMessage,
   ChatRequestOptions,
   ChatStreamEvent,
+  ConversationRunEvent,
   ListModelsInput,
   SaveModelProviderInput,
   SaveProviderModelInput,
@@ -126,6 +127,61 @@ const api: LumoraApi = {
         approvalId: validateMessageId(approvalId),
         decision,
       }),
+    getActiveRun: (taskId) =>
+      ipcRenderer.invoke("model:get-active-run", validateTaskId(taskId)),
+    pauseRun: (taskId, runId) =>
+      ipcRenderer.invoke(
+        "model:pause-run",
+        validateTaskId(taskId),
+        validateMessageId(runId),
+      ),
+    resumeRun: (taskId, runId) =>
+      ipcRenderer.invoke(
+        "model:resume-run",
+        validateTaskId(taskId),
+        validateMessageId(runId),
+      ),
+    cancelRun: (taskId, runId) =>
+      ipcRenderer.invoke(
+        "model:cancel-run",
+        validateTaskId(taskId),
+        validateMessageId(runId),
+      ),
+    subscribeRun: (
+      untrustedTaskId,
+      untrustedRunId,
+      afterSequence,
+      onEvent,
+    ) => {
+      const taskId = validateTaskId(untrustedTaskId);
+      const runId = validateMessageId(untrustedRunId);
+      if (!Number.isInteger(afterSequence) || afterSequence < 0) {
+        throw new TypeError("运行事件序号无效");
+      }
+      if (typeof onEvent !== "function") {
+        throw new TypeError("运行事件处理器必须是函数");
+      }
+      const requestId = globalThis.crypto.randomUUID();
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        payload: { requestId: string; runEvent?: ConversationRunEvent },
+      ) => {
+        if (payload.requestId === requestId && payload.runEvent) {
+          onEvent(payload.runEvent);
+        }
+      };
+      ipcRenderer.on("model:stream-event", listener);
+      ipcRenderer.send("model:stream-start", {
+        requestId,
+        taskId,
+        runId,
+        afterSequence,
+      });
+      return () => {
+        ipcRenderer.removeListener("model:stream-event", listener);
+        ipcRenderer.send("model:stream-cancel", requestId);
+      };
+    },
     streamMessage: (
       untrustedTaskId,
       untrustedContent,

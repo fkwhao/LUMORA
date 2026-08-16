@@ -85,3 +85,21 @@ describe("hosted web search work log", () => {
     });
   });
 });
+
+describe("hidden protocol work log", () => {
+  it("does not render internal replay metadata as a progress row", () => {
+    const item = workLogItemFromEvent({
+      type: "progress_message",
+      delta: "",
+      model: "demo",
+      errorMessage: "",
+      itemId: "lumora-model-protocol",
+      metadata: {
+        hidden: true,
+        protocolMessages: [{ role: "tool", content: "result" }],
+      },
+    });
+
+    expect(item).toBeUndefined();
+  });
+});

@@ -129,6 +129,24 @@
   background: color-mix(in srgb, var(--aui-primary) 86%, transparent) !important;
 }
 
+.aui-official-thread-shell .paused-run-resume-button {
+  color: var(--aui-primary-foreground) !important;
+  background: var(--aui-primary) !important;
+}
+
+.aui-official-thread-shell .paused-run-resume-button:hover {
+  background: color-mix(
+    in srgb,
+    var(--aui-primary) 84%,
+    transparent
+  ) !important;
+}
+
+.aui-official-thread-shell .paused-run-resume-button svg {
+  color: currentColor !important;
+  stroke: currentColor !important;
+}
+
 .aui-official-thread-shell
   :is(
     [data-slot="aui_assistant-message-footer"],

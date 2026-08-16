@@ -18,4 +18,6 @@ public interface ConversationRuntimePort {
 
     void streamChat(ConversationRunRequest request,
             Consumer<ChatStreamEvent> eventConsumer);
+
+    boolean pauseChat(String runId, String correlationId);
 }

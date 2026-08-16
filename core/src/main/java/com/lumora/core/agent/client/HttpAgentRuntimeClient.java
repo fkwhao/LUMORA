@@ -228,4 +228,12 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
             eventConsumer
         );
     }
+
+    @Override
+    public boolean pauseRun(String runId, String correlationId) {
+        return Boolean.TRUE.equals(exceptionMapper.execute(
+                () -> httpApi.pauseRun(correlationId, runId)
+        ).get("paused"));
+    }
+
 }

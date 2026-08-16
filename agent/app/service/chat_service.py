@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import uuid
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
@@ -18,6 +20,10 @@ from app.dto.response.context_compaction_response import ContextCompactionRespon
 from app.exception.provider_errors import ModelProviderError
 from app.harness.agent_harness import AgentHarness
 from app.harness.ports.model_provider import ModelProviderPort
+from app.harness.run_control import (
+    RunControlRegistry,
+    await_or_pause,
+)
 from app.harness.run_event import RunEvent, RunUsage
 from app.mcp.capability_adapter import create_mcp_capability_tools
 from app.mcp.client import McpClient, McpConnectionError
@@ -25,6 +31,7 @@ from app.mcp.exposure_policy import (
     should_connect_server,
     should_expose_capability_tools,
 )
+from app.mcp.session_pool import McpSessionLease, McpSessionPool
 from app.mcp.tool_adapter import create_mcp_tool
 from app.memory.retrieval import MemoryRetriever
 from app.model.model_connection_settings import ModelConnectionSettings
@@ -66,6 +73,8 @@ class ChatService:
         memory_retriever: MemoryRetriever | None = None,
         project_instruction_loader: ProjectInstructionLoader | None = None,
         skill_catalog: SkillCatalog | None = None,
+        run_controls: RunControlRegistry | None = None,
+        mcp_session_pool: McpSessionPool | None = None,
     ) -> None:
         self._provider = provider
         self._prompt_builder = prompt_builder
@@ -83,6 +92,14 @@ class ChatService:
             project_instruction_loader or ProjectInstructionLoader()
         )
         self._skill_catalog = skill_catalog or SkillCatalog()
+        self._run_controls = run_controls or RunControlRegistry()
+        self._mcp_session_pool = mcp_session_pool or McpSessionPool()
+
+    async def pause_run(self, run_id: str) -> bool:
+        return await self._run_controls.pause(run_id)
+
+    async def close(self) -> None:
+        await self._mcp_session_pool.close()
 
     async def list_models(self, request: ModelListRequest) -> list[str]:
         connection = request
@@ -141,11 +158,24 @@ class ChatService:
         request: ChatCompletionRequest,
         correlation_id: str = "",
     ) -> AsyncIterator[RunEvent]:
+        run_id = (
+            correlation_id
+            or request.prompt_context.task_id
+            or f"local-{uuid.uuid4()}"
+        )
+        run_control = self._run_controls.register(run_id)
         runtime_registry = self._tool_registry
-        mcp_clients: list[McpClient] = []
+        mcp_leases: list[McpSessionLease] = []
         prelude_usage = empty_token_usage()
         try:
-            runtime_registry, mcp_clients, mcp_errors = (
+            if self._selected_mcp_servers(request):
+                yield RunEvent(
+                    type="progress_message",
+                    title="正在准备可用工具",
+                    delta="正在复用或连接任务所需的 MCP 服务",
+                    metadata={"category": "runtime_preparation"},
+                )
+            runtime_registry, mcp_leases, mcp_errors = (
                 await self._prepare_mcp_registry(request)
             )
             settings = self._connection(request)
@@ -191,11 +221,25 @@ class ChatService:
                         model=settings.model,
                     )
                     try:
-                        compacted = await self._provider.compact_context(
-                            settings,
-                            compactable,
-                            request.prompt_context.conversation_summary,
+                        paused, compacted = await await_or_pause(
+                            self._provider.compact_context(
+                                settings,
+                                compactable,
+                                request.prompt_context.conversation_summary,
+                            ),
+                            run_control,
                         )
+                        if paused:
+                            yield RunEvent(
+                                type="paused",
+                                model=settings.model,
+                                metadata={
+                                    "turnStatus": "aborted",
+                                    "pauseReason": "user",
+                                },
+                            )
+                            return
+                        assert compacted is not None
                     except (httpx.HTTPError, TypeError, ValueError):
                         yield RunEvent(
                             type="context_compaction_failed",
@@ -284,6 +328,7 @@ class ChatService:
                     self._prompt_context(request, summary, runtime_registry)
                 ),
                 active_summary,
+                run_control,
             )
             async for event in stream:
                 yield _with_prelude_usage(event, prelude_usage)
@@ -302,8 +347,9 @@ class ChatService:
                 "模型 API 流式调用失败，请检查地址、Key 和模型名称"
             ) from error
         finally:
-            for client in reversed(mcp_clients):
-                await client.close()
+            for lease in reversed(mcp_leases):
+                await lease.release()
+            self._run_controls.unregister(run_id, run_control)
 
     def decide_tool_approval(
         self,
@@ -455,15 +501,10 @@ class ChatService:
         request: ChatCompletionRequest,
     ) -> tuple[
         ToolRegistry,
-        list[McpClient],
+        list[McpSessionLease],
         list[tuple[str, str]],
     ]:
-        current_request = self._current_user_request(request)
-        servers = [
-            server
-            for server in request.prompt_context.mcp_servers
-            if server.enabled and should_connect_server(current_request, server)
-        ]
+        servers = self._selected_mcp_servers(request)
         if not servers:
             return self._tool_registry, [], []
 
@@ -477,35 +518,24 @@ class ChatService:
                 if user_skills and name in self._tool_registry.names()
             )
         expose_capabilities = should_expose_capability_tools(
-            current_request
+            self._current_user_request(request)
         )
-        clients: list[McpClient] = []
         errors: list[tuple[str, str]] = []
-        for server in servers:
-            client = McpClient(to_mcp_config(server))
+        leases: list[McpSessionLease] = []
+        task_scope = (
+            request.prompt_context.task_id
+            or request.prompt_context.workspace_path
+            or "unscoped"
+        )
+
+        async def connect(server):
             try:
-                await client.connect()
-                definitions = await client.list_tools()
-                server_tools = [
-                    *(
-                        create_mcp_tool(client, definition)
-                        for definition in definitions
-                    ),
-                    *(
-                        create_mcp_capability_tools(client)
-                        if expose_capabilities
-                        else ()
-                    ),
-                ]
-                tool_names = [tool.name for tool in server_tools]
-                if len(tool_names) != len(set(tool_names)):
-                    raise ValueError("MCP Server 返回了重复的工具名称")
-                existing_names = set(registry.names())
-                if any(name in existing_names for name in tool_names):
-                    raise ValueError("MCP 工具名称与现有工具冲突")
-                for tool in server_tools:
-                    registry.register(tool)
-                clients.append(client)
+                lease = await self._mcp_session_pool.acquire(
+                    task_scope,
+                    to_mcp_config(server),
+                    McpClient,
+                )
+                return server, lease, None
             except (
                 McpConnectionError,
                 OSError,
@@ -513,17 +543,78 @@ class ChatService:
                 TypeError,
                 ValueError,
             ) as error:
-                await client.close()
-                errors.append((server.name, str(error)))
-        return registry, clients, errors
+                return server, None, error
+
+        connected = await asyncio.gather(*(connect(server) for server in servers))
+        leases.extend(
+            lease
+            for _server, lease, error in connected
+            if error is None and lease is not None
+        )
+        errors.extend(
+            (server.name, str(error))
+            for server, _lease, error in connected
+            if error is not None
+        )
+        try:
+            for server, lease, error in connected:
+                if error is None and lease is not None:
+                    session = lease.session
+                    client = session.client
+                    server_tools = [
+                        *(
+                            create_mcp_tool(client, definition)
+                            for definition in session.tools
+                        ),
+                        *(
+                            create_mcp_capability_tools(client)
+                            if expose_capabilities
+                            else ()
+                        ),
+                    ]
+                    tool_names = [tool.name for tool in server_tools]
+                    if len(tool_names) != len(set(tool_names)):
+                        raise ValueError("MCP Server 返回了重复的工具名称")
+                    existing_names = set(registry.names())
+                    if any(name in existing_names for name in tool_names):
+                        raise ValueError("MCP 工具名称与现有工具冲突")
+                    for tool in server_tools:
+                        registry.register(tool)
+        except BaseException:
+            await asyncio.gather(
+                *(lease.release() for lease in leases),
+                return_exceptions=True,
+            )
+            raise
+        return registry, leases, errors
+
+    def _selected_mcp_servers(self, request: ChatCompletionRequest) -> list:
+        current_request = self._current_user_request(request)
+        return [
+            server
+            for server in request.prompt_context.mcp_servers
+            if server.enabled and should_connect_server(current_request, server)
+        ]
 
     @staticmethod
     def _current_user_request(request: ChatCompletionRequest) -> str:
-        return next(
+        persisted = next(
             (
                 message.content
                 for message in reversed(request.messages)
                 if message.role == "user"
+                and message.content
+                and message.message_id
+            ),
+            None,
+        )
+        if persisted:
+            return persisted
+        return next(
+            (
+                message.content
+                for message in reversed(request.messages)
+                if message.role == "user" and message.content
             ),
             "",
         )

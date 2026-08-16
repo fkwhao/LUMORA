@@ -5,6 +5,7 @@ import type {
   ChatMessage,
   ChatRequestOptions,
   ChatStreamEvent,
+  ConversationRunEvent,
   ListModelsInput,
   SaveModelProviderInput,
   SaveProviderModelInput,
@@ -35,6 +36,10 @@ export const modelIpcChannels = {
   decideToolApproval: "model:decide-tool-approval",
   compactContext: "model:compact-context",
   readArtifact: "model:read-artifact",
+  getActiveRun: "model:get-active-run",
+  pauseRun: "model:pause-run",
+  resumeRun: "model:resume-run",
+  cancelRun: "model:cancel-run",
   streamStart: "model:stream-start",
   streamCancel: "model:stream-cancel",
   streamEvent: "model:stream-event",
@@ -126,15 +131,42 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
         validateToolApprovalDecision(input?.decision),
       ),
   );
+  ipcMain.handle(modelIpcChannels.getActiveRun, (_event, taskId: string) =>
+    gateway.getActiveRun(requireText(taskId, "任务 ID")));
+  ipcMain.handle(
+    modelIpcChannels.pauseRun,
+    (_event, taskId: string, runId: string) => gateway.pauseRun(
+      requireText(taskId, "任务 ID"),
+      requireText(runId, "运行 ID"),
+    ),
+  );
+  ipcMain.handle(
+    modelIpcChannels.resumeRun,
+    (_event, taskId: string, runId: string) => gateway.resumeRun(
+      requireText(taskId, "任务 ID"),
+      requireText(runId, "运行 ID"),
+    ),
+  );
+  ipcMain.handle(
+    modelIpcChannels.cancelRun,
+    (_event, taskId: string, runId: string) => gateway.cancelRun(
+      requireText(taskId, "任务 ID"),
+      requireText(runId, "运行 ID"),
+    ),
+  );
   ipcMain.on(modelIpcChannels.streamStart, (event, input: StreamStartInput) => {
     const taskId = requireText(input?.taskId, "任务 ID");
-    const content = requireText(input?.content, "消息内容");
+    const content = input?.runId
+      ? undefined
+      : requireText(input?.content, "消息内容");
     const messageId =
       input?.messageId === undefined
         ? undefined
         : requireText(input.messageId, "消息 ID");
     const requestId = requireText(input?.requestId, "流请求 ID");
-    const options = validateChatRequestOptions(input?.options);
+    const options = input?.runId
+      ? undefined
+      : validateChatRequestOptions(input?.options);
     const key = subscriptionKey(event.sender.id, requestId);
     subscriptions.get(key)?.();
 
@@ -146,28 +178,61 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
           });
         }
       };
-    const subscription = messageId
+    let lastRunEventSequence = Math.max(0, input.afterSequence ?? 0);
+    const handleRunEvent = (runEvent: ConversationRunEvent) => {
+      lastRunEventSequence = Math.max(
+        lastRunEventSequence,
+        runEvent.sequence,
+      );
+      if (!event.sender.isDestroyed()) {
+        event.sender.send(modelIpcChannels.streamEvent, {
+          requestId,
+          runEvent,
+        });
+      }
+    };
+    const subscription = input.runId
+      ? gateway.subscribeRun(
+          taskId,
+          requireText(input.runId, "运行 ID"),
+          Number.isInteger(input.afterSequence)
+            ? Math.max(0, input.afterSequence ?? 0)
+            : 0,
+          handleRunEvent,
+        )
+      : messageId
       ? gateway.regenerateMessage(
           taskId,
           messageId,
-          content,
+          content!,
           handleEvent,
           options,
         )
-      : gateway.streamMessage(taskId, content, handleEvent, options);
+      : gateway.streamMessage(taskId, content!, handleEvent, options);
     subscriptions.set(key, subscription.cancel);
     void subscription.completed
       .catch((error: unknown) => {
         if (!event.sender.isDestroyed() && !isAbortError(error)) {
-          event.sender.send(modelIpcChannels.streamEvent, {
-            requestId,
-            event: {
+          const failedEvent = {
               type: "failed",
               delta: "",
               model: "",
               errorMessage: toErrorMessage(error),
-            } satisfies ChatStreamEvent,
-          });
+            } satisfies ChatStreamEvent;
+          event.sender.send(
+            modelIpcChannels.streamEvent,
+            input.runId
+              ? {
+                  requestId,
+                  runEvent: {
+                    runId: input.runId,
+                    sequence: lastRunEventSequence + 1,
+                    event: failedEvent,
+                    occurredAt: new Date().toISOString(),
+                  } satisfies ConversationRunEvent,
+                }
+              : { requestId, event: failedEvent },
+          );
         }
       })
       .finally(() => subscriptions.delete(key));
@@ -204,6 +269,10 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
     ipcMain.removeHandler(modelIpcChannels.decideToolApproval);
     ipcMain.removeHandler(modelIpcChannels.compactContext);
     ipcMain.removeHandler(modelIpcChannels.readArtifact);
+    ipcMain.removeHandler(modelIpcChannels.getActiveRun);
+    ipcMain.removeHandler(modelIpcChannels.pauseRun);
+    ipcMain.removeHandler(modelIpcChannels.resumeRun);
+    ipcMain.removeHandler(modelIpcChannels.cancelRun);
     ipcMain.removeAllListeners(modelIpcChannels.streamStart);
     ipcMain.removeAllListeners(modelIpcChannels.streamCancel);
     for (const cancel of subscriptions.values()) {
@@ -282,7 +351,9 @@ interface StreamStartInput {
   requestId: string;
   taskId: string;
   messageId?: string;
-  content: string;
+  content?: string;
+  runId?: string;
+  afterSequence?: number;
   options?: ChatRequestOptions;
 }
 

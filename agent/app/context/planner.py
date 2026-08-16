@@ -46,10 +46,7 @@ class ContextPlanner:
         rendered = [
             *prompt.system_messages,
             *prompt.context_messages,
-            *[
-                {"role": message.role, "content": message.content}
-                for message in messages
-            ],
+            *[message.as_provider_message() for message in messages],
         ]
         before_tokens = (
             self._estimator.estimate_messages(rendered)
@@ -122,23 +119,30 @@ class ContextPlanner:
     ) -> tuple[list[ChatMessageRequest], list[ChatMessageRequest]]:
         if len(messages) <= MIN_RECENT_MESSAGES:
             return [], list(messages)
-        if force:
-            return (
-                messages[:-MIN_RECENT_MESSAGES],
-                messages[-MIN_RECENT_MESSAGES:],
-            )
-        retained: list[ChatMessageRequest] = []
+        groups: list[list[ChatMessageRequest]] = []
+        for message in messages:
+            if message.role == "tool" and groups:
+                groups[-1].append(message)
+            else:
+                groups.append([message])
+        retained_groups: list[list[ChatMessageRequest]] = []
         retained_tokens = 0
-        for message in reversed(messages):
-            tokens = self._estimator.estimate_text(message.content) + 4
+        for group in reversed(groups):
+            retained_count = sum(len(item) for item in retained_groups)
+            if force and retained_count >= MIN_RECENT_MESSAGES:
+                break
+            tokens = self._estimator.estimate_messages(
+                [message.as_provider_message() for message in group]
+            )
             if (
-                len(retained) >= MIN_RECENT_MESSAGES
+                retained_count >= MIN_RECENT_MESSAGES
                 and retained_tokens + tokens > RECENT_RAW_TOKENS
             ):
                 break
-            retained.append(message)
+            retained_groups.append(group)
             retained_tokens += tokens
-        retained.reverse()
+        retained_groups.reverse()
+        retained = [message for group in retained_groups for message in group]
         compacted_count = len(messages) - len(retained)
         return messages[:compacted_count], retained
 
@@ -153,10 +157,7 @@ class ContextPlanner:
         rendered = [
             *prompt.system_messages,
             {"role": "user", "content": summary},
-            *[
-                {"role": message.role, "content": message.content}
-                for message in retained
-            ],
+            *[message.as_provider_message() for message in retained],
         ]
         through_sequence = next(
             (

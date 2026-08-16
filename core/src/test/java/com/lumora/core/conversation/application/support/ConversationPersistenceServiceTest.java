@@ -28,13 +28,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ConversationPersistenceServiceTest {
 
     @Test
-    void persistsInterruptedStepsAsAVisibleAssistantMessage() {
+    void allocatesPausedAssistantSequenceAtPersistenceTime() {
         ConversationMapper conversationMapper = mock(ConversationMapper.class);
         ConversationMessageMapper messageMapper = mock(
                 ConversationMessageMapper.class
@@ -66,7 +67,23 @@ class ConversationPersistenceServiceTest {
                 now
         );
         parent.setMessageDepth(1);
+        ConversationMessage supplementalUsage = new ConversationMessage(
+                "usage-1",
+                "conversation-1",
+                2,
+                ChatMessageRole.ASSISTANT,
+                "",
+                "demo-model",
+                10,
+                2,
+                12,
+                now
+        );
+        supplementalUsage.setUsageRecordOnly(true);
         when(messageMapper.selectById("user-1")).thenReturn(parent);
+        when(messageMapper.selectList(any())).thenReturn(List.of(
+                parent, supplementalUsage
+        ));
         when(conversationMapper.selectById("conversation-1"))
                 .thenReturn(conversation);
         ConversationPersistenceService service =
@@ -83,7 +100,6 @@ class ConversationPersistenceServiceTest {
         ConversationRunContext context = new ConversationRunContext(
                 "task-1",
                 "conversation-1",
-                2,
                 List.of(),
                 "user-1",
                 "hello",
@@ -117,13 +133,13 @@ class ConversationPersistenceServiceTest {
                 ""
         ));
 
-        service.persistFailedUsage(context, accumulator);
+        service.persistPausedTurn(context, accumulator, "run-1:0");
 
         ArgumentCaptor<ConversationMessage> captor =
                 ArgumentCaptor.forClass(ConversationMessage.class);
         verify(messageMapper).insert(captor.capture());
         ConversationMessage saved = captor.getValue();
-        assertThat(saved.getSequence()).isEqualTo(2);
+        assertThat(saved.getSequence()).isEqualTo(3);
         assertThat(saved.getRole()).isEqualTo(ChatMessageRole.ASSISTANT);
         assertThat(saved.isActivePath()).isTrue();
         assertThat(saved.isUsageRecordOnly()).isFalse();
@@ -131,12 +147,12 @@ class ConversationPersistenceServiceTest {
         assertThat(saved.getTotalTokens()).isEqualTo(12);
         assertThat(saved.getWorkLogJson()).contains("progress-1");
         assertThat(saved.getWorkLogJson()).contains(
-                InterruptedRunContextRenderer.MARKER_ITEM_ID
+                RunProtocolContextCodec.markerItemId("run-1:0")
         );
     }
 
     @Test
-    void includesInterruptedExecutionHistoryInTheNextModelContext()
+    void restoresNativeAssistantAndToolMessagesForContinuation()
             throws Exception {
         ConversationMapper conversationMapper = mock(ConversationMapper.class);
         ConversationMessageMapper messageMapper = mock(
@@ -147,55 +163,48 @@ class ConversationPersistenceServiceTest {
         ConversationContextSummaryService summaryService = mock(
                 ConversationContextSummaryService.class
         );
-        TransactionTemplate transactionTemplate = mock(
-                TransactionTemplate.class
-        );
+        TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
         doAnswer(invocation -> {
             TransactionCallback<?> callback = invocation.getArgument(0);
             return callback.doInTransaction(mock(TransactionStatus.class));
         }).when(transactionTemplate).execute(any());
-        Instant now = Instant.parse("2026-08-14T08:00:00Z");
+        Instant now = Instant.parse("2026-08-16T08:00:00Z");
         ObjectMapper objectMapper = new ObjectMapper();
         Conversation conversation = new Conversation(
                 "conversation-1", "task-1", now, now
         );
-        ConversationMessage firstUser = message(
-                "user-1", 1, ChatMessageRole.USER, "检查项目", now
+        ConversationMessage user = message(
+                "user-1", 1, ChatMessageRole.USER, "检查并修复项目", now
         );
-        firstUser.setMessageDepth(1);
-        firstUser.setActivePath(true);
-        ConversationMessage interruptedAssistant = message(
-                "assistant-1", 2, ChatMessageRole.ASSISTANT, "", now
+        user.setMessageDepth(1);
+        user.setActivePath(true);
+        ConversationMessage paused = message(
+                "assistant-1", 2, ChatMessageRole.ASSISTANT,
+                "正在运行测试。", now
         );
-        interruptedAssistant.setParentMessageId("user-1");
-        interruptedAssistant.setMessageDepth(2);
-        interruptedAssistant.setActivePath(true);
-        interruptedAssistant.setWorkLogJson(objectMapper.writeValueAsString(
-                List.of(
-                        new ChatStreamEvent(
-                                ChatStreamEventType.TOOL_COMPLETED,
-                                "",
-                                "model",
-                                null,
-                                "",
-                                "tool-1",
-                                "call-1",
-                                "shell_command",
-                                "运行测试",
-                                Map.of("command", "mvn test"),
-                                "BUILD SUCCESS",
-                                100L,
-                                0,
-                                Map.of()
+        paused.setParentMessageId("user-1");
+        paused.setMessageDepth(2);
+        paused.setActivePath(true);
+        paused.setWorkLogJson(objectMapper.writeValueAsString(List.of(
+                RunProtocolContextCodec.marker("model", List.of(
+                        Map.of(
+                                "role", "assistant",
+                                "content", "正在运行测试。",
+                                "toolCalls", List.of(Map.of(
+                                        "id", "call-1",
+                                        "name", "shell_command",
+                                        "arguments", "{\"command\":\"mvn test\"}"
+                                ))
                         ),
-                        InterruptedRunContextRenderer.marker("model")
-                )
-        ));
+                        Map.of(
+                                "role", "tool",
+                                "content", "BUILD SUCCESS",
+                                "toolCallId", "call-1"
+                        )
+                ))
+        )));
         when(conversationMapper.selectOne(any())).thenReturn(conversation);
-        when(messageMapper.selectList(any())).thenReturn(List.of(
-                firstUser,
-                interruptedAssistant
-        ));
+        when(messageMapper.selectList(any())).thenReturn(List.of(user, paused));
         when(memoryService.buildPromptCandidates("conversation-1", null))
                 .thenReturn(List.of());
         ConversationPersistenceService service =
@@ -210,23 +219,27 @@ class ConversationPersistenceServiceTest {
                         objectMapper
                 );
 
-        ConversationRunContext context = service.prepareNewMessage(
-                "task-1",
-                "继续完成",
-                null
+        ConversationRunContext context = service.prepareContinuation(
+                "task-1", null
         );
 
-        assertThat(context.getModelMessages()).hasSize(3);
+        assertThat(context.getModelMessages()).hasSize(4);
         assertThat(context.getModelMessages().get(1).getRole())
                 .isEqualTo("assistant");
-        assertThat(context.getModelMessages().get(1).getContent()).contains(
-                "上一轮 Agent 在完成前被中断",
-                "运行测试",
-                "mvn test",
-                "BUILD SUCCESS"
-        );
+        assertThat(context.getModelMessages().get(1).getToolCalls())
+                .singleElement()
+                .satisfies(call -> {
+                    assertThat(call.id()).isEqualTo("call-1");
+                    assertThat(call.name()).isEqualTo("shell_command");
+                });
+        assertThat(context.getModelMessages().get(2).getRole())
+                .isEqualTo("tool");
+        assertThat(context.getModelMessages().get(2).getToolCallId())
+                .isEqualTo("call-1");
         assertThat(context.getModelMessages().get(2).getContent())
-                .isEqualTo("继续完成");
+                .isEqualTo("BUILD SUCCESS");
+        assertThat(context.getModelMessages().get(1).getContent())
+                .doesNotContain("<interrupted_agent_run>");
     }
 
     private static ConversationMessage message(

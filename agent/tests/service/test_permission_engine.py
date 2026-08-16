@@ -11,6 +11,7 @@ from app.execution.tool_call_executor import ToolCallExecutor
 from app.execution.tool_result_processor import ToolResultProcessor
 from app.harness.agent_loop import AgentLoopRunner
 from app.harness.contracts import ProviderToolCall, ProviderTurn
+from app.harness.run_control import RunControlRegistry
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.permission.broker import ApprovalBroker
 from app.permission.config_store import PermissionConfigStore
@@ -653,6 +654,7 @@ async def _assert_agent_loop_pauses(tmp_path: Path) -> None:
         PermissionConfigStore(tmp_path / "home"),
     )
 
+    assert (await anext(stream)).type == "protocol_message"
     assert (await anext(stream)).type == "progress_message"
     usage = await anext(stream)
     assert usage.type == "usage"
@@ -869,6 +871,104 @@ async def _assert_auto_reviewer_allows_once(tmp_path: Path) -> None:
 
 def test_auto_approval_reviewer_can_deny_shell_call(tmp_path: Path) -> None:
     asyncio.run(_assert_auto_reviewer_denies(tmp_path))
+
+
+def test_pause_cancels_auto_reviewer_without_unavailable_fallback(
+    tmp_path: Path,
+) -> None:
+    asyncio.run(_assert_pause_cancels_auto_reviewer(tmp_path))
+
+
+async def _assert_pause_cancels_auto_reviewer(tmp_path: Path) -> None:
+    reviewer_started = asyncio.Event()
+    reviewer_cancelled = asyncio.Event()
+    executed = False
+
+    async def complete_turn(*_args):
+        return ProviderTurn(
+            "准备执行命令。",
+            "",
+            "test-model",
+            TokenUsageResponse(),
+            (
+                ProviderToolCall(
+                    "call-paused-review",
+                    "shell",
+                    '{"command":"unknown-command --flag"}',
+                ),
+            ),
+        )
+
+    async def execute(_context, _input):
+        nonlocal executed
+        executed = True
+        return ToolResult("unexpected")
+
+    class StalledReviewer:
+        async def review(self, _settings, _request):
+            reviewer_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                reviewer_cancelled.set()
+
+    tools = ToolRegistry((
+        function_tool(
+            name="shell",
+            description="shell",
+            input_schema={
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+                "additionalProperties": False,
+            },
+            execute=execute,
+            category=ToolCategory.SHELL,
+        ),
+    ))
+    controls = RunControlRegistry()
+    control = controls.register("paused-review-run")
+
+    async def collect():
+        return [
+            event
+            async for event in AgentLoopRunner(
+                complete_turn,
+                approval_reviewer=StalledReviewer(),
+            ).stream(
+                ModelConnectionSettings(
+                    "test", "https://example.com", "model", "key"
+                ),
+                PromptAssembly(()),
+                [ChatMessageRequest(role="user", content="执行当前任务")],
+                None,
+                tools,
+                ToolContext(tmp_path.resolve(), correlation_id="corr"),
+                PermissionPolicy(PermissionMode.AUTO_APPROVE),
+                PermissionEngine(),
+                ApprovalBroker(),
+                PermissionConfigStore(tmp_path / "home"),
+                run_control=control,
+            )
+        ]
+
+    run_task = asyncio.create_task(collect())
+    await reviewer_started.wait()
+    assert await controls.pause("paused-review-run") is True
+    events = await asyncio.wait_for(run_task, timeout=0.5)
+    controls.unregister("paused-review-run", control)
+
+    assert reviewer_cancelled.is_set()
+    assert executed is False
+    assert [event.type for event in events][-1] == "paused"
+    review_completed = next(
+        event for event in events if event.type == "approval_review_completed"
+    )
+    assert review_completed.metadata["failureKind"] == "turn_paused"
+    assert all(
+        event.metadata.get("failureKind") != "approval_reviewer_unavailable"
+        for event in events
+    )
 
 
 async def _assert_auto_reviewer_denies(tmp_path: Path) -> None:

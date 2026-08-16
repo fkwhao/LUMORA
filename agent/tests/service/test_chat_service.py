@@ -244,6 +244,31 @@ def test_remote_mcp_is_available_without_workspace(monkeypatch: Any) -> None:
         "mcp__remote__echo"
     ]
     assert len(FakeMcpClient.instances) == 1
+    assert FakeMcpClient.instances[0].closed is False
+
+
+def test_mcp_session_is_reused_across_turns_and_closed_on_shutdown(
+    monkeypatch: Any,
+) -> None:
+    FakeMcpClient.instances.clear()
+    monkeypatch.setattr("app.service.chat_service.McpClient", FakeMcpClient)
+    service = ChatService(
+        ModelListProvider(),  # type: ignore[arg-type]
+        PromptBuilder(),
+        agent_harness=CapturingHarness(),  # type: ignore[arg-type]
+    )
+    request = _mcp_request("调用 MCP 工具 echo")
+    request.prompt_context.task_id = "task-1"
+
+    async def run_two_turns() -> None:
+        await _drain(service.stream(request, "turn-1"))
+        await _drain(service.stream(request, "turn-2"))
+        assert len(FakeMcpClient.instances) == 1
+        assert FakeMcpClient.instances[0].closed is False
+        await service.close()
+
+    asyncio.run(run_two_turns())
+
     assert FakeMcpClient.instances[0].closed is True
 
 

@@ -4,6 +4,9 @@ export function workLogItemFromEvent(
   event: ChatStreamEvent,
   createId: () => string = () => globalThis.crypto.randomUUID(),
 ): WorkLogItem | undefined {
+  if (event.metadata?.hidden === true) {
+    return undefined;
+  }
   if (event.type === "progress_message") {
     return {
       itemId: event.itemId || createId(),

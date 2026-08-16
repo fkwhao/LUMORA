@@ -1,11 +1,12 @@
 import json
 import unittest
 
+from fastapi.testclient import TestClient
+
 from app.config.settings import AgentSettings
 from app.harness.run_event import RunEvent
 from app.main import create_app
 from app.service.planner_service import PlannerService
-from fastapi.testclient import TestClient
 
 STARTUP_TOKEN = "a" * 64
 
@@ -147,6 +148,21 @@ class AgentControllerTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["code"], "INVALID_REQUEST")
+
+    def test_validation_error_reports_field_without_input_value(self) -> None:
+        response = self.client.post(
+            "/api/v1/chat/completions/stream",
+            headers=self.authenticated_headers(),
+            json={
+                "messages": [{"role": "user", "content": "你好"}],
+                "connection": self.model_connection(),
+                "reasoningEffort": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("reasoningEffort", response.json()["message"])
+        self.assertNotIn("secret-provider-key", response.text)
 
     def test_remote_model_api_rejects_plain_http_without_leaking_key(
         self,

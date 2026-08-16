@@ -39,6 +39,15 @@ public final class ApiPathConstants {
     public static final String APPROVAL_BY_ID = "/{approvalId}";
     public static final String TASK_TOOL_APPROVAL =
             TASK_BY_ID + "/tool-approvals/{approvalId}";
+    public static final String TASK_RUNS = TASK_BY_ID + "/runs";
+    public static final String TASK_ACTIVE_RUN = TASK_RUNS + "/active";
+    public static final String TASK_RUN = TASK_RUNS + "/{runId}";
+    public static final String TASK_RUN_EVENTS = TASK_RUN + "/events";
+    public static final String TASK_RUN_PAUSE = TASK_RUN + "/pause";
+    public static final String TASK_RUN_RESUME = TASK_RUN + "/resume";
+    public static final String TASK_RUN_CANCEL = TASK_RUN + "/cancel";
+    public static final String TASK_ACTIVE_RUN_PAUSE =
+            TASK_ACTIVE_RUN + "/pause";
 
     private ApiPathConstants() {
     }

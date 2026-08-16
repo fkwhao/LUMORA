@@ -13,6 +13,8 @@ public final class  AgentClientConstants {
     public static final String CHAT_COMPLETIONS_STREAM_PATH =
             "/api/v1/chat/completions/stream";
     public static final String CHAT_COMPACTION_PATH = "/api/v1/chat/compact";
+    public static final String CHAT_RUN_PAUSE_PATH =
+            "/api/v1/chat/runs/{runId}/pause";
     public static final String MODELS_PATH = "/api/v1/models";
     public static final String MEMORY_EXTRACTIONS_PATH =
             "/api/v1/memory/extractions";

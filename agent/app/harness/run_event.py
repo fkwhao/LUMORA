@@ -5,6 +5,7 @@ RunEventType: TypeAlias = Literal[
     "text_delta",
     "text_reset",
     "reasoning_delta",
+    "protocol_message",
     "progress_message",
     "tool_started",
     "tool_completed",
@@ -22,6 +23,7 @@ RunEventType: TypeAlias = Literal[
     "context_compacted",
     "context_compaction_failed",
     "usage",
+    "paused",
     "completed",
     "failed",
 ]

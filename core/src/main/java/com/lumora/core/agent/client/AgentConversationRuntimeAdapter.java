@@ -93,6 +93,14 @@ public class AgentConversationRuntimeAdapter implements ConversationRuntimePort,
         );
     }
 
+    @Override
+    public boolean pauseChat(String runId, String correlationId) {
+        return agentRuntimeClient.pauseRun(
+                requireText(runId, "Run ID"),
+                requireText(correlationId, "Correlation ID")
+        );
+    }
+
     private static String requireText(String value, String label) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(label + " cannot be empty");

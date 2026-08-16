@@ -31,6 +31,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -68,7 +69,15 @@ public class ConversationServiceImpl implements ConversationService {
 
     private static final class ActiveRun {
         private final CountDownLatch terminated = new CountDownLatch(1);
+        private final String correlationId;
         private FutureTask<Void> task;
+        private volatile boolean pauseRequested;
+        private volatile boolean runtimeStarted;
+        private volatile boolean pauseForwarded;
+
+        private ActiveRun(String correlationId) {
+            this.correlationId = correlationId;
+        }
 
         private void attach(FutureTask<Void> task) {
             this.task = task;
@@ -76,6 +85,30 @@ public class ConversationServiceImpl implements ConversationService {
 
         private boolean cancel() {
             return task != null && task.cancel(true);
+        }
+
+        private void requestPause() {
+            pauseRequested = true;
+        }
+
+        private boolean isPauseRequested() {
+            return pauseRequested;
+        }
+
+        private void markRuntimeStarted() {
+            runtimeStarted = true;
+        }
+
+        private boolean isRuntimeStarted() {
+            return runtimeStarted;
+        }
+
+        private boolean needsPauseForwarding() {
+            return pauseRequested && !pauseForwarded;
+        }
+
+        private void markPauseForwarded() {
+            pauseForwarded = true;
         }
 
         private boolean awaitTermination() throws InterruptedException {
@@ -170,6 +203,34 @@ public class ConversationServiceImpl implements ConversationService {
         );
     }
 
+    @Override
+    public void continueMessage(
+            String taskId,
+            String model,
+            String reasoningEffort,
+            String workspacePath,
+            String permissionMode,
+            String correlationId,
+            Consumer<ChatStreamEvent> eventConsumer,
+            Runnable completionCallback,
+            Consumer<Throwable> errorCallback
+    ) {
+        startGeneration(
+                taskId,
+                requireText(correlationId, "关联 ID"),
+                model,
+                reasoningEffort,
+                workspacePath,
+                permissionMode,
+                () -> persistenceService.prepareContinuation(
+                        taskId, workspacePath
+                ),
+                eventConsumer,
+                completionCallback,
+                errorCallback
+        );
+    }
+
     private synchronized void startGeneration(
             String taskId,
             String correlationId,
@@ -186,21 +247,61 @@ public class ConversationServiceImpl implements ConversationService {
             throw new IllegalStateException("当前任务正在生成回复");
         }
 
+        ActiveRun activeRun = new ActiveRun(correlationId);
+        AtomicReference<Runnable> terminalCallback = new AtomicReference<>();
         try {
-            ConversationRunContext context = contextSupplier.get();
-            ActiveRun activeRun = new ActiveRun();
             FutureTask<Void> run = new FutureTask<>(() -> {
-                executeStream(
-                        context,
-                        correlationId,
-                        model,
-                        reasoningEffort,
-                        workspacePath,
-                        permissionMode,
-                        eventConsumer,
-                        completionCallback,
-                        errorCallback
-                );
+                try {
+                    ConversationRunContext context = contextSupplier.get();
+                    if (activeRun.isPauseRequested()) {
+                        handleStreamEvent(
+                                context,
+                                new ConversationStreamAccumulator(),
+                                new ChatStreamEvent(
+                                        ChatStreamEventType.PAUSED,
+                                        "",
+                                        model == null ? "" : model,
+                                        null,
+                                        ""
+                                ),
+                                correlationId,
+                                eventConsumer
+                        );
+                        terminalCallback.compareAndSet(
+                                null, completionCallback
+                        );
+                        return null;
+                    }
+                    activeRun.markRuntimeStarted();
+                    Consumer<ChatStreamEvent> pauseAwareConsumer = event -> {
+                        if (activeRun.needsPauseForwarding()
+                                && conversationRuntimePort.pauseChat(
+                                correlationId, correlationId
+                        )) {
+                            activeRun.markPauseForwarded();
+                        }
+                        eventConsumer.accept(event);
+                    };
+                    executeStream(
+                            context,
+                            correlationId,
+                            model,
+                            reasoningEffort,
+                            workspacePath,
+                            permissionMode,
+                            pauseAwareConsumer,
+                            () -> terminalCallback.compareAndSet(
+                                    null, completionCallback
+                            ),
+                            error -> terminalCallback.compareAndSet(
+                                    null, () -> errorCallback.accept(error)
+                            )
+                    );
+                } catch (Throwable error) {
+                    terminalCallback.compareAndSet(
+                            null, () -> errorCallback.accept(error)
+                    );
+                }
                 return null;
             }) {
                 @Override
@@ -210,6 +311,10 @@ public class ConversationServiceImpl implements ConversationService {
                     } finally {
                         activeRuns.remove(taskId, activeRun);
                         activeRun.markTerminated();
+                        Runnable callback = terminalCallback.get();
+                        if (callback != null) {
+                            callback.run();
+                        }
                     }
                 }
             };
@@ -249,6 +354,34 @@ public class ConversationServiceImpl implements ConversationService {
             );
         }
         return true;
+    }
+
+    @Override
+    public synchronized boolean pauseGeneration(String taskId) {
+        ActiveRun run = activeRuns.get(taskId);
+        if (run == null) {
+            return false;
+        }
+        run.requestPause();
+        if (run.isRuntimeStarted()) {
+            if (conversationRuntimePort.pauseChat(
+                    run.correlationId, run.correlationId
+            )) {
+                run.markPauseForwarded();
+            }
+        }
+        return true;
+    }
+
+    @Override
+    public void sealRecoveredTurn(
+            String taskId,
+            String runtimeTurnId,
+            List<ChatStreamEvent> events
+    ) {
+        persistenceService.persistRecoveredTurn(
+                taskId, runtimeTurnId, List.copyOf(events)
+        );
     }
 
     @Override
@@ -365,6 +498,10 @@ public class ConversationServiceImpl implements ConversationService {
                             eventConsumer
                     )
             );
+            if (accumulator.isPaused()) {
+                completionCallback.run();
+                return;
+            }
             if (!accumulator.isCompleted()) {
                 throw new IllegalStateException("模型流未正常结束");
             }
@@ -372,6 +509,7 @@ public class ConversationServiceImpl implements ConversationService {
             scheduleMemoryExtraction(context, accumulator, correlationId);
         } catch (Throwable error) {
             if (!accumulator.isCompleted()
+                    && !accumulator.isPaused()
                     && accumulator.hasPersistableResult()) {
                 try {
                     persistenceService.persistFailedUsage(
@@ -438,6 +576,13 @@ public class ConversationServiceImpl implements ConversationService {
             String correlationId,
             Consumer<ChatStreamEvent> eventConsumer
     ) {
+        if (isTerminalEvent(event) && accumulator.isTerminal()) {
+            LOGGER.debug(
+                    "Ignoring duplicate terminal event {} for run {}",
+                    event.getType(), correlationId
+            );
+            return;
+        }
         if (event.getType() == ChatStreamEventType.PROGRESS_MESSAGE
                 && "memory_retrieval".equals(
                         event.getMetadata().get("category")
@@ -487,12 +632,21 @@ public class ConversationServiceImpl implements ConversationService {
         accumulator.accept(event);
         if (event.getType() == ChatStreamEventType.COMPLETED) {
             persistenceService.persistAssistant(context, accumulator);
+        } else if (event.getType() == ChatStreamEventType.PAUSED) {
+            persistenceService.persistPausedTurn(
+                    context, accumulator, correlationId
+            );
         }
         eventConsumer.accept(
                 event.getType() == ChatStreamEventType.CONTEXT_COMPACTED
                         ? WorkLogEventProjector.project(event)
                         : event
         );
+    }
+
+    private static boolean isTerminalEvent(ChatStreamEvent event) {
+        return event.getType() == ChatStreamEventType.COMPLETED
+                || event.getType() == ChatStreamEventType.PAUSED;
     }
 
     private static int number(Object value) {

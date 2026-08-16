@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 import json
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable
 from typing import Any
 
 import httpx
@@ -23,6 +23,7 @@ from app.harness.provider_event_mapper import (
     is_web_search_event,
     web_search_run_event,
 )
+from app.harness.run_control import RunControl, await_or_pause
 from app.harness.run_event import RunEvent, RunUsage
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.permission.broker import ApprovalBroker
@@ -40,8 +41,6 @@ MAX_IDENTICAL_TOOL_ITERATIONS = 3
 DEFAULT_MAX_STREAM_RETRIES = 2
 DEFAULT_STREAM_RETRY_BASE_DELAY = 0.5
 _TRANSIENT_STREAM_ERRORS = (httpx.TransportError, json.JSONDecodeError)
-
-
 class AgentLoopRunner:
     """编排模型回合、工具执行和公开工作事件。"""
 
@@ -95,6 +94,7 @@ class AgentLoopRunner:
         approval_broker: ApprovalBroker | None = None,
         permission_config_store: PermissionConfigStore | None = None,
         conversation_summary: str | None = None,
+        run_control: RunControl | None = None,
     ) -> AsyncIterator[RunEvent]:
         permission_policy = permission_policy or PermissionPolicy()
         permission_engine = permission_engine or PermissionEngine()
@@ -105,10 +105,7 @@ class AgentLoopRunner:
         request_messages: list[dict[str, Any]] = [
             *prompt.system_messages,
             *prompt.context_messages,
-            *[
-                {"role": message.role, "content": message.content}
-                for message in messages
-            ],
+            *[message.as_provider_message() for message in messages],
         ]
         cumulative_usage = empty_token_usage()
         active_context_tokens = 0
@@ -125,9 +122,13 @@ class AgentLoopRunner:
             self._result_processor,
             self._approval_reviewer,
             blocked_call_signatures,
+            run_control,
         )
 
         for _iteration in range(self._max_tool_iterations):
+            if _pause_requested(run_control):
+                yield _paused_event(resolved_model)
+                return
             retry_usage = empty_token_usage()
             provisional_usage = empty_token_usage()
             content_was_streamed = False
@@ -135,12 +136,18 @@ class AgentLoopRunner:
             stage_item_id = ""
             stage_content_value = ""
             if self._stream_turn is None:
-                turn = await self._complete_turn(
-                    settings,
-                    request_messages,
-                    prompt.tools,
-                    reasoning_effort,
+                paused, turn = await _turn_or_pause(
+                    self._complete_turn(
+                        settings,
+                        request_messages,
+                        prompt.tools,
+                        reasoning_effort,
+                    ),
+                    run_control,
                 )
+                if paused:
+                    yield _paused_event(resolved_model)
+                    return
             else:
                 turn = None
                 pending_content: list[str] = []
@@ -159,7 +166,25 @@ class AgentLoopRunner:
                 while True:
                     stream_error: Exception | None = None
                     try:
-                        turn_event = await anext(turn_stream)
+                        paused, turn_event = await _next_turn_event_or_pause(
+                            turn_stream, run_control
+                        )
+                        if paused:
+                            if pending_content:
+                                yield RunEvent(
+                                    type="text_delta",
+                                    delta="".join(pending_content),
+                                    model=resolved_model,
+                                )
+                            if visible_content:
+                                yield RunEvent(
+                                    type="text_delta",
+                                    delta="".join(visible_content),
+                                    model=resolved_model,
+                                )
+                            yield _paused_event(resolved_model)
+                            return
+                        assert turn_event is not None
                     except StopAsyncIteration:
                         if turn is not None:
                             break
@@ -216,6 +241,7 @@ class AgentLoopRunner:
                             reasoning_effort,
                         )
                         continue
+                    assert turn_event is not None
                     if turn_event.type == "usage":
                         if turn_event.usage is None:
                             continue
@@ -359,6 +385,8 @@ class AgentLoopRunner:
                 self._token_estimator.estimate_messages(request_messages)
                 + self._token_estimator.estimate_tools(prompt.tools)
             )
+            assistant_message = _assistant_protocol_message(turn)
+            yield _protocol_message_event(assistant_message, resolved_model)
             if not turn.tool_calls:
                 if not turn.content.strip():
                     raise ValueError("模型返回了空消息")
@@ -394,26 +422,21 @@ class AgentLoopRunner:
                 usage=_to_run_usage(cumulative_usage),
                 active_context_tokens=active_context_tokens,
             )
-            request_messages.append({
-                "role": "assistant",
-                "content": turn.content or None,
-                "tool_calls": [
-                    {
-                        "id": call.call_id,
-                        "type": "function",
-                        "function": {
-                            "name": call.name,
-                            "arguments": call.arguments_json,
-                        },
-                    }
-                    for call in turn.tool_calls
-                ],
-            })
+            request_messages.append(assistant_message)
             inline_result_chars = 0
             pending_tool_messages: list[dict[str, Any]] = []
             tool_results: list[str] = []
             latest_user_request = _latest_user_request(request_messages)
-            for call in turn.tool_calls:
+            for call_index, call in enumerate(turn.tool_calls):
+                if _pause_requested(run_control):
+                    for pending_call in turn.tool_calls[call_index:]:
+                        aborted_message = _aborted_tool_message(pending_call)
+                        request_messages.append(aborted_message)
+                        yield _protocol_message_event(
+                            aborted_message, resolved_model
+                        )
+                    yield _paused_event(resolved_model)
+                    return
                 result_text = "工具调用未返回结果"
                 async for event, result_text in tool_executor.execute(
                     call,
@@ -456,6 +479,22 @@ class AgentLoopRunner:
                 }
                 pending_tool_messages.append(tool_message)
                 request_messages.append(tool_message)
+                yield _protocol_message_event(tool_message, resolved_model)
+                if _pause_requested(run_control):
+                    for pending_call in turn.tool_calls[call_index + 1:]:
+                        aborted_message = _aborted_tool_message(pending_call)
+                        request_messages.append(aborted_message)
+                        yield _protocol_message_event(
+                            aborted_message, resolved_model
+                        )
+                    yield RunEvent(
+                        type="usage",
+                        model=resolved_model,
+                        usage=_to_run_usage(cumulative_usage),
+                        active_context_tokens=active_context_tokens,
+                    )
+                    yield _paused_event(resolved_model)
+                    return
 
             active_tokens = self._token_estimator.estimate_hybrid(
                 turn.usage.prompt_tokens,
@@ -609,3 +648,93 @@ def _latest_user_request(messages: list[dict[str, Any]]) -> str:
         if isinstance(content, str) and content.strip():
             return content[-20_000:]
     return ""
+
+
+def _pause_requested(run_control: RunControl | None) -> bool:
+    return run_control is not None and run_control.pause_requested
+
+
+def _paused_event(model: str) -> RunEvent:
+    return RunEvent(
+        type="paused",
+        model=model,
+        metadata={"turnStatus": "aborted", "pauseReason": "user"},
+    )
+
+
+def _assistant_protocol_message(turn: Any) -> dict[str, Any]:
+    return {
+        "role": "assistant",
+        "content": turn.content or None,
+        "tool_calls": [
+            {
+                "id": call.call_id,
+                "type": "function",
+                "function": {
+                    "name": call.name,
+                    "arguments": call.arguments_json,
+                },
+            }
+            for call in turn.tool_calls
+        ],
+    }
+
+
+def _protocol_message_event(
+    provider_message: dict[str, Any],
+    model: str,
+) -> RunEvent:
+    tool_calls = provider_message.get("tool_calls")
+    portable: dict[str, Any] = {
+        "role": provider_message["role"],
+        "content": provider_message.get("content"),
+    }
+    if isinstance(tool_calls, list):
+        portable["toolCalls"] = [
+            {
+                "id": str(call.get("id") or ""),
+                "name": str((call.get("function") or {}).get("name") or ""),
+                "arguments": str(
+                    (call.get("function") or {}).get("arguments") or "{}"
+                ),
+            }
+            for call in tool_calls
+        ]
+    tool_call_id = provider_message.get("tool_call_id")
+    if tool_call_id:
+        portable["toolCallId"] = str(tool_call_id)
+    return RunEvent(
+        type="protocol_message",
+        model=model,
+        metadata={"message": portable, "hidden": True},
+    )
+
+
+def _aborted_tool_message(call: Any) -> dict[str, Any]:
+    return {
+        "role": "tool",
+        "tool_call_id": call.call_id,
+        "content": json.dumps(
+            {
+                "error": "ABORTED_BEFORE_DISPATCH",
+                "message": "Turn paused before this tool call was dispatched.",
+                "toolExecutionState": "not_started",
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+    }
+
+
+async def _next_turn_event_or_pause(
+    stream: AsyncIterator[Any],
+    run_control: RunControl | None,
+) -> tuple[bool, Any | None]:
+    return await await_or_pause(anext(stream), run_control)
+
+
+async def _turn_or_pause(
+    turn_awaitable: Awaitable[Any],
+    run_control: RunControl | None,
+) -> tuple[bool, Any | None]:
+    return await await_or_pause(turn_awaitable, run_control)

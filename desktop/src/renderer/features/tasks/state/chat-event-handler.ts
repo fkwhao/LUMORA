@@ -7,10 +7,20 @@ import { reconcilePersistedMessages } from "./chat-message-reconciliation";
 import type { TaskState } from "./task-store";
 
 const supplementalUsageRefreshDelaysMs = [5_000, 15_000, 30_000, 60_000, 120_000];
-const supplementalUsageRefreshTimers = new Map<
+interface SupplementalUsageRefresh {
+  timer?: ReturnType<typeof setTimeout>;
+}
+
+const supplementalUsageRefreshes = new Map<
   string,
-  ReturnType<typeof setTimeout>
+  SupplementalUsageRefresh
 >();
+
+export function cancelSupplementalUsageRefresh(taskId: string): void {
+  const refresh = supplementalUsageRefreshes.get(taskId);
+  if (refresh?.timer) clearTimeout(refresh.timer);
+  supplementalUsageRefreshes.delete(taskId);
+}
 
 export function applyChatEvent(
   event: ChatStreamEvent,
@@ -119,7 +129,7 @@ export function applyChatEvent(
     }
     return;
   }
-  if (event.type === "reasoning_delta") return;
+  if (event.type === "reasoning_delta" || event.type === "protocol_message") return;
   if (event.type === "usage") {
     const messages = [...get().messages];
     const last = messages.at(-1);
@@ -139,6 +149,34 @@ export function applyChatEvent(
   const lastChatDurationMs = chatStartedAt
     ? Date.now() - chatStartedAt
     : undefined;
+  if (event.type === "paused") {
+    const currentRun = get().activeRun;
+    set({
+      activeRun: currentRun
+        ? { ...currentRun, status: "PAUSED", updatedAt: new Date().toISOString() }
+        : currentRun,
+      isChatting: false,
+      isPausing: false,
+      chatWasStopped: true,
+      chatStartedAt: undefined,
+      lastChatDurationMs,
+      pendingToolApproval: undefined,
+      isDecidingToolApproval: false,
+    });
+    void modelApi
+      .listMessages(taskId)
+      .then((persistedMessages) => {
+        set({
+          messages: reconcilePersistedMessages(
+            get().messages,
+            persistedMessages,
+          ),
+        });
+      })
+      .catch(() => undefined)
+      .finally(resolve);
+    return;
+  }
   if (event.type === "completed") {
     set({
       isChatting: false,
@@ -216,24 +254,29 @@ function scheduleSupplementalUsageRefresh(
   get: () => TaskState,
   set: (partial: Partial<TaskState>) => void,
 ): void {
-  const previous = supplementalUsageRefreshTimers.get(taskId);
-  if (previous) clearTimeout(previous);
+  cancelSupplementalUsageRefresh(taskId);
+  const refresh: SupplementalUsageRefresh = {};
+  supplementalUsageRefreshes.set(taskId, refresh);
   let attempt = 0;
 
+  const isCurrent = () => supplementalUsageRefreshes.get(taskId) === refresh;
   const stop = () => {
-    const timer = supplementalUsageRefreshTimers.get(taskId);
-    if (timer) clearTimeout(timer);
-    supplementalUsageRefreshTimers.delete(taskId);
+    if (!isCurrent()) return;
+    cancelSupplementalUsageRefresh(taskId);
   };
   const scheduleNext = () => {
+    if (!isCurrent()) return;
     if (attempt >= supplementalUsageRefreshDelaysMs.length) {
       stop();
       return;
     }
     const timer = setTimeout(() => {
       if (
-        get().activeTask?.taskId !== taskId
+        !isCurrent()
+        || get().activeTask?.taskId !== taskId
         || get().isChatting
+        || get().chatWasStopped
+        || get().activeRun?.status === "PAUSED"
       ) {
         stop();
         return;
@@ -241,7 +284,13 @@ function scheduleSupplementalUsageRefresh(
       void modelApi
         .listMessages(taskId)
         .then((persistedMessages) => {
-          if (get().activeTask?.taskId !== taskId) {
+          if (
+            !isCurrent()
+            || get().activeTask?.taskId !== taskId
+            || get().isChatting
+            || get().chatWasStopped
+            || get().activeRun?.status === "PAUSED"
+          ) {
             stop();
             return;
           }
@@ -259,11 +308,12 @@ function scheduleSupplementalUsageRefresh(
           scheduleNext();
         })
         .catch(() => {
+          if (!isCurrent()) return;
           attempt += 1;
           scheduleNext();
         });
     }, supplementalUsageRefreshDelaysMs[attempt]);
-    supplementalUsageRefreshTimers.set(taskId, timer);
+    refresh.timer = timer;
   };
 
   scheduleNext();

@@ -11,6 +11,11 @@ Python 3.12 Agent 推理与编排运行时。
 - 确定性权限分级、自动审批 Reviewer 和人工审批暂停/恢复。
 - Responses 与 Anthropic 的供应商托管 Web Search 事件和来源转换。
 - 通过 REST/SSE 接收 Java 的会话请求并返回统一运行事件。
+- 通过独立运行控制端点协作式结束当前 Turn；已启动工具在安全边界收尾，
+  Python 不长期保留被冻结的协程或模型连接。
+- 以不可见 `protocol_message` 输出完整 Assistant/Tool 轨迹；未派发工具在暂停封口时
+  获得结构化终止结果，下一 Turn 可直接恢复供应商原生消息。
+- 远程 MCP Session 按任务和配置指纹进入引用计数池，跨 Turn 复用连接与能力目录。
 
 ## 边界
 

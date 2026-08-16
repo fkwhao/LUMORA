@@ -5,7 +5,9 @@ import com.lumora.core.conversation.domain.model.ChatStreamEventType;
 import com.lumora.core.conversation.domain.model.TokenUsage;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 累积一次模型流的最终文本、模型和用量。
@@ -19,7 +21,9 @@ public class ConversationStreamAccumulator {
     private TokenUsage usage;
     private int activeContextTokens;
     private boolean completed;
+    private boolean paused;
     private final List<ChatStreamEvent> workLogEvents = new ArrayList<>();
+    private final List<Map<String, Object>> protocolMessages = new ArrayList<>();
 
     public void accept(ChatStreamEvent event) {
         boolean failed = event.getType() == ChatStreamEventType.FAILED;
@@ -29,6 +33,10 @@ public class ConversationStreamAccumulator {
             content.setLength(0);
         } else if (event.getType() == ChatStreamEventType.COMPLETED) {
             completed = true;
+        } else if (event.getType() == ChatStreamEventType.PAUSED) {
+            paused = true;
+        } else if (event.getType() == ChatStreamEventType.PROTOCOL_MESSAGE) {
+            captureProtocolMessage(event);
         }
 
         if (event.getType() == ChatStreamEventType.PROGRESS_MESSAGE
@@ -84,6 +92,14 @@ public class ConversationStreamAccumulator {
         return completed;
     }
 
+    public boolean isPaused() {
+        return paused;
+    }
+
+    public boolean isTerminal() {
+        return completed || paused;
+    }
+
     public boolean hasBillableUsage() {
         return usage != null && (
                 usage.getPromptTokens() > 0
@@ -107,6 +123,26 @@ public class ConversationStreamAccumulator {
 
     public List<ChatStreamEvent> getWorkLogEvents() {
         return List.copyOf(workLogEvents);
+    }
+
+    public List<Map<String, Object>> getProtocolMessages() {
+        return List.copyOf(protocolMessages);
+    }
+
+    private void captureProtocolMessage(ChatStreamEvent event) {
+        Object rawMessage = event.getMetadata().get("message");
+        if (!(rawMessage instanceof Map<?, ?> raw)) {
+            return;
+        }
+        Map<String, Object> message = new java.util.LinkedHashMap<>();
+        raw.forEach((key, value) -> {
+            if (key instanceof String stringKey) {
+                message.put(stringKey, value);
+            }
+        });
+        if (!message.isEmpty()) {
+            protocolMessages.add(Collections.unmodifiableMap(message));
+        }
     }
 
     private void mergeWorkLogEvent(ChatStreamEvent event) {

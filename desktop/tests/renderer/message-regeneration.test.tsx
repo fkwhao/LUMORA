@@ -1,13 +1,77 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TaskPage } from "../../src/renderer/features/tasks/TaskPage";
 import { createTaskStore } from "../../src/renderer/features/tasks/task-store";
-import type { LumoraModelApi } from "../../src/shared/model-contract";
+import type {
+  ChatMessage,
+  LumoraModelApi,
+} from "../../src/shared/model-contract";
 import type { LumoraTaskApi, TaskSnapshot } from "../../src/shared/task-contract";
 
+const task: TaskSnapshot = {
+  taskId: "task-1",
+  goal: "Explain context",
+  status: "COMPLETED",
+  lastEventSequence: 0,
+  activeStep: "",
+  resultSummary: "",
+  planSteps: [],
+};
+
+function createRegenerationHarness(
+  messages: ChatMessage[],
+  persistedMessages: ChatMessage[],
+) {
+  const taskApi = {
+    create: vi.fn(),
+    list: vi.fn(async () => []),
+    get: vi.fn(async () => task),
+    subscribe: vi.fn(() => () => undefined),
+    decideApproval: vi.fn(),
+  } as unknown as LumoraTaskApi;
+  const regenerateMessage = vi.fn(
+    (
+      _taskId: string,
+      _messageId: string,
+      _content: string,
+      onEvent: (event: {
+        type: "completed";
+        delta: string;
+        model: string;
+        errorMessage: string;
+      }) => void,
+    ) => {
+      queueMicrotask(() =>
+        onEvent({
+          type: "completed",
+          delta: "",
+          model: "demo",
+          errorMessage: "",
+        }),
+      );
+      return () => undefined;
+    },
+  );
+  const modelApi = {
+    getSettings: vi.fn(async () => ({
+      providerName: "demo",
+      baseUrl: "http://localhost",
+      model: "demo",
+      apiKeyConfigured: false,
+      models: [],
+      contextWindow: 128_000,
+    })),
+    listMessages: vi.fn(async () => persistedMessages),
+    regenerateMessage,
+  } as unknown as LumoraModelApi;
+  const store = createTaskStore(taskApi, modelApi);
+  store.setState({ activeTask: task, messages });
+  return { modelApi, regenerateMessage, store };
+}
+
 describe("persisted message regeneration", () => {
-  it("uses the real persisted parent message ID when reloading an answer", async () => {
+  beforeEach(() => {
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
       value: vi.fn(() => ({
@@ -16,73 +80,11 @@ describe("persisted message regeneration", () => {
         removeEventListener: vi.fn(),
       })),
     });
-    const task: TaskSnapshot = {
-      taskId: "task-1",
-      goal: "Explain context",
-      status: "COMPLETED",
-      lastEventSequence: 0,
-      activeStep: "",
-      resultSummary: "",
-      planSteps: [],
-    };
-    const taskApi = {
-      create: vi.fn(),
-      list: vi.fn(async () => []),
-      get: vi.fn(async () => task),
-      subscribe: vi.fn(() => () => undefined),
-      decideApproval: vi.fn(),
-    } as unknown as LumoraTaskApi;
-    const regenerateMessage = vi.fn(
-      (
-        _taskId: string,
-        _messageId: string,
-        _content: string,
-        onEvent: (event: {
-          type: "completed";
-          delta: string;
-          model: string;
-          errorMessage: string;
-        }) => void,
-      ) => {
-        queueMicrotask(() =>
-          onEvent({
-            type: "completed",
-            delta: "",
-            model: "demo",
-            errorMessage: "",
-          }),
-        );
-        return () => undefined;
-      },
-    );
-    const modelApi = {
-      getSettings: vi.fn(async () => ({
-        providerName: "demo",
-        baseUrl: "http://localhost",
-        model: "demo",
-        apiKeyConfigured: false,
-        models: [],
-        contextWindow: 128_000,
-      })),
-      listMessages: vi.fn(async () => [
-        {
-          messageId: "user-real-id",
-          role: "user" as const,
-          content: "Explain context",
-        },
-        {
-          messageId: "answer-new-id",
-          parentMessageId: "user-real-id",
-          role: "assistant" as const,
-          content: "Updated answer",
-        },
-      ]),
-      regenerateMessage,
-    } as unknown as LumoraModelApi;
-    const store = createTaskStore(taskApi, modelApi);
-    store.setState({
-      activeTask: task,
-      messages: [
+  });
+
+  it("uses the real persisted parent message ID when reloading an answer", async () => {
+    const { modelApi, regenerateMessage, store } = createRegenerationHarness(
+      [
         {
           messageId: "user-real-id",
           role: "user",
@@ -95,7 +97,20 @@ describe("persisted message regeneration", () => {
           content: "Original answer",
         },
       ],
-    });
+      [
+        {
+          messageId: "user-real-id",
+          role: "user",
+          content: "Explain context",
+        },
+        {
+          messageId: "answer-new-id",
+          parentMessageId: "user-real-id",
+          role: "assistant",
+          content: "Updated answer",
+        },
+      ],
+    );
 
     const { container } = render(
       <TaskPage
@@ -144,6 +159,53 @@ describe("persisted message regeneration", () => {
         "task-1",
         "user-real-id",
         "Explain more context",
+        expect.any(Function),
+        expect.any(Object),
+      ),
+    );
+  });
+
+  it("reloads a completed continuation from its user ancestor", async () => {
+    const continuationMessages: ChatMessage[] = [
+      {
+        messageId: "user-real-id",
+        role: "user",
+        content: "Explain context",
+      },
+      {
+        messageId: "paused-answer-id",
+        runtimeId: "paused-answer-runtime-id",
+        parentMessageId: "user-real-id",
+        role: "assistant",
+        content: "Partial answer",
+      },
+      {
+        messageId: "continued-answer-id",
+        runtimeId: "continued-answer-runtime-id",
+        parentMessageId: "paused-answer-id",
+        role: "assistant",
+        content: "Finished answer",
+      },
+    ];
+    const { modelApi, regenerateMessage, store } = createRegenerationHarness(
+      continuationMessages,
+      continuationMessages,
+    );
+
+    render(
+      <TaskPage store={store} modelApi={modelApi} notify={vi.fn()} />,
+    );
+
+    const reloadButtons = screen.getAllByRole("button", {
+      name: "重新生成回复",
+    });
+    fireEvent.click(reloadButtons.at(-1)!);
+
+    await waitFor(() =>
+      expect(regenerateMessage).toHaveBeenCalledWith(
+        "task-1",
+        "user-real-id",
+        "Explain context",
         expect.any(Function),
         expect.any(Object),
       ),

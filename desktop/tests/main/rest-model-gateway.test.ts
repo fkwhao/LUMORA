@@ -311,14 +311,82 @@ describe("Java REST model gateway", () => {
     );
   });
 
-  it("notifies Java Core when a model stream is cancelled", async () => {
-    let resolveCancelled!: (path: string) => void;
-    const cancelled = new Promise<string>((resolve) => {
-      resolveCancelled = resolve;
+  it("loads and pauses the active durable run", async () => {
+    const requests: Array<{ method: string; path: string }> = [];
+    const run = {
+      runId: "run-1",
+      taskId: "task-1",
+      status: "RUNNING",
+      triggerType: "MESSAGE",
+      lastEventSequence: 4,
+      replayFromSequence: 0,
+      errorMessage: "",
+      createdAt: "2026-08-15T00:00:00Z",
+      updatedAt: "2026-08-15T00:00:01Z",
+    };
+    const baseUrl = await listen(async (request) => {
+      requests.push({
+        method: request.method ?? "",
+        path: request.url ?? "",
+      });
+      return request.url?.endsWith("/pause")
+        ? { ...run, status: "PAUSED" }
+        : run;
     });
+    const gateway = new RestModelGateway({
+      baseUrl,
+      sessionToken: "test-token",
+    });
+
+    const active = await gateway.getActiveRun("task-1");
+    const paused = await gateway.pauseRun("task-1", "run-1");
+
+    expect(active?.status).toBe("RUNNING");
+    expect(paused.status).toBe("PAUSED");
+    expect(requests).toEqual([
+      { method: "GET", path: "/api/v1/tasks/task-1/runs/active" },
+      { method: "POST", path: "/api/v1/tasks/task-1/runs/run-1/pause" },
+    ]);
+  });
+
+  it("replays durable run events after the requested sequence", async () => {
+    let receivedPath = "";
+    const server = createServer((request, response) => {
+      receivedPath = request.url ?? "";
+      response.writeHead(200, { "Content-Type": "text/event-stream" });
+      response.end(
+        'data: {"runId":"run-1","sequence":5,"event":{"type":"text_delta","delta":"续","model":"demo","errorMessage":""},"occurredAt":"2026-08-15T00:00:05Z"}\n\n' +
+        'data: {"runId":"run-1","sequence":6,"event":{"type":"paused","delta":"","model":"demo","errorMessage":""},"occurredAt":"2026-08-15T00:00:06Z"}\n\n',
+      );
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address() as AddressInfo;
+    const gateway = new RestModelGateway({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      sessionToken: "test-token",
+    });
+    const sequences: number[] = [];
+
+    const subscription = gateway.subscribeRun(
+      "task-1",
+      "run-1",
+      4,
+      (event) => sequences.push(event.sequence),
+    );
+    await subscription.completed;
+
+    expect(receivedPath).toBe(
+      "/api/v1/tasks/task-1/runs/run-1/events?afterSequence=4",
+    );
+    expect(sequences).toEqual([5, 6]);
+  });
+
+  it("detaches a model stream without cancelling the durable Core run", async () => {
+    let cancelRequestCount = 0;
     const server = createServer((request, response) => {
       if (request.method === "DELETE") {
-        resolveCancelled(request.url ?? "");
+        cancelRequestCount += 1;
         response.writeHead(200, { "Content-Type": "application/json" });
         response.end('{"cancelled":true}');
         return;
@@ -338,7 +406,7 @@ describe("Java REST model gateway", () => {
     subscription.cancel();
 
     await expect(subscription.completed).rejects.toMatchObject({ name: "AbortError" });
-    await expect(cancelled).resolves.toBe("/api/v1/tasks/task-1/messages/cancel");
+    expect(cancelRequestCount).toBe(0);
   });
 });
 

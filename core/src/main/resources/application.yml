@@ -24,3 +24,6 @@ lumora:
   agent-url: ${LUMORA_AGENT_URL:http://127.0.0.1:45101}
   agent-startup-token: ${LUMORA_AGENT_STARTUP_TOKEN:${LUMORA_STARTUP_TOKEN:}}
   memory-auto-extraction-enabled: ${LUMORA_MEMORY_AUTO_EXTRACTION_ENABLED:true}
+  runs:
+    # 当前产品只调度一个会话；调度器和运行存储已支持提高该值。
+    max-concurrent: ${LUMORA_MAX_CONCURRENT_RUNS:1}

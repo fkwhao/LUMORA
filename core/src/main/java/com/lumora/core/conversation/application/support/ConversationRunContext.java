@@ -12,9 +12,9 @@ public class ConversationRunContext {
 
     private final String taskId;
     private final String conversationId;
-    private final int assistantSequence;
     private final List<ChatMessage> modelMessages;
     private final String currentUserMessageId;
+    private final String assistantParentMessageId;
     private final String currentUserContent;
     private final String memorySummary;
     private final String memoryExtractionContext;
@@ -26,7 +26,6 @@ public class ConversationRunContext {
     public ConversationRunContext(
             String taskId,
             String conversationId,
-            int assistantSequence,
             List<ChatMessage> modelMessages,
             String currentUserMessageId,
             String currentUserContent,
@@ -35,16 +34,15 @@ public class ConversationRunContext {
             String conversationSummary,
             long startedAtNanos
     ) {
-        this(taskId, conversationId, assistantSequence, modelMessages,
+        this(taskId, conversationId, modelMessages,
                 currentUserMessageId, currentUserContent, memorySummary,
                 memoryExtractionContext, conversationSummary, List.of(), null,
-                startedAtNanos);
+                currentUserMessageId, startedAtNanos);
     }
 
     public ConversationRunContext(
             String taskId,
             String conversationId,
-            int assistantSequence,
             List<ChatMessage> modelMessages,
             String currentUserMessageId,
             String currentUserContent,
@@ -55,11 +53,32 @@ public class ConversationRunContext {
             String projectScopeId,
             long startedAtNanos
     ) {
+        this(taskId, conversationId, modelMessages,
+                currentUserMessageId, currentUserContent, memorySummary,
+                memoryExtractionContext, conversationSummary,
+                memoryCandidates, projectScopeId, currentUserMessageId,
+                startedAtNanos);
+    }
+
+    public ConversationRunContext(
+            String taskId,
+            String conversationId,
+            List<ChatMessage> modelMessages,
+            String currentUserMessageId,
+            String currentUserContent,
+            String memorySummary,
+            String memoryExtractionContext,
+            String conversationSummary,
+            List<MemoryContextItem> memoryCandidates,
+            String projectScopeId,
+            String assistantParentMessageId,
+            long startedAtNanos
+    ) {
         this.taskId = taskId;
         this.conversationId = conversationId;
-        this.assistantSequence = assistantSequence;
         this.modelMessages = List.copyOf(modelMessages);
         this.currentUserMessageId = currentUserMessageId;
+        this.assistantParentMessageId = assistantParentMessageId;
         this.currentUserContent = currentUserContent;
         this.memorySummary = memorySummary;
         this.memoryExtractionContext = memoryExtractionContext;
@@ -72,7 +91,6 @@ public class ConversationRunContext {
     public ConversationRunContext(
             String taskId,
             String conversationId,
-            int assistantSequence,
             List<ChatMessage> modelMessages,
             String currentUserMessageId,
             String currentUserContent,
@@ -80,7 +98,7 @@ public class ConversationRunContext {
             String memoryExtractionContext,
             long startedAtNanos
     ) {
-        this(taskId, conversationId, assistantSequence, modelMessages,
+        this(taskId, conversationId, modelMessages,
                 currentUserMessageId, currentUserContent, memorySummary,
                 memoryExtractionContext, null, startedAtNanos);
     }
@@ -93,10 +111,6 @@ public class ConversationRunContext {
         return conversationId;
     }
 
-    public int getAssistantSequence() {
-        return assistantSequence;
-    }
-
     public List<ChatMessage> getModelMessages() {
         return modelMessages;
     }
@@ -107,6 +121,10 @@ public class ConversationRunContext {
 
     public String getCurrentUserMessageId() {
         return currentUserMessageId;
+    }
+
+    public String getAssistantParentMessageId() {
+        return assistantParentMessageId;
     }
 
     public String getCurrentUserContent() {

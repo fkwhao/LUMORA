@@ -6,6 +6,7 @@ from app.execution.tool_result_processor import ToolResultProcessor
 from app.harness.agent_loop import AgentLoopRunner
 from app.harness.contracts import PromptSupplier
 from app.harness.ports.model_provider import ModelProviderPort
+from app.harness.run_control import RunControl, await_or_pause
 from app.harness.run_event import RunEvent
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.permission.broker import ApprovalBroker
@@ -44,16 +45,30 @@ class AgentHarness:
         permission_config_store: PermissionConfigStore,
         prompt_supplier: PromptSupplier,
         conversation_summary: str | None,
+        run_control: RunControl | None = None,
     ) -> AsyncIterator[RunEvent]:
         if tool_context is None or not prompt.tools:
-            async for event in self._provider.stream(
+            if _pause_requested(run_control):
+                yield _paused_event(settings.model)
+                return
+            stream = self._provider.stream(
                 settings,
                 prompt,
                 messages,
                 reasoning_effort,
-            ):
+            )
+            while True:
+                try:
+                    paused, event = await _next_event_or_pause(
+                        stream, run_control
+                    )
+                except StopAsyncIteration:
+                    return
+                if paused:
+                    yield _paused_event(settings.model)
+                    return
+                assert event is not None
                 yield event
-            return
 
         runner = AgentLoopRunner(
             self._provider.complete_agent_turn,
@@ -75,5 +90,25 @@ class AgentHarness:
             approval_broker,
             permission_config_store,
             conversation_summary,
+            run_control,
         ):
             yield event
+
+
+def _pause_requested(run_control: RunControl | None) -> bool:
+    return run_control is not None and run_control.pause_requested
+
+
+def _paused_event(model: str) -> RunEvent:
+    return RunEvent(
+        type="paused",
+        model=model,
+        metadata={"turnStatus": "aborted", "pauseReason": "user"},
+    )
+
+
+async def _next_event_or_pause(
+    stream: AsyncIterator[RunEvent],
+    run_control: RunControl | None,
+) -> tuple[bool, RunEvent | None]:
+    return await await_or_pause(anext(stream), run_control)

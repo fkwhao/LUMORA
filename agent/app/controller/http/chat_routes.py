@@ -9,6 +9,7 @@ from app.constants.api_paths import (
     CHAT_COMPACTION_ROUTE,
     CHAT_COMPLETIONS_ROUTE,
     CHAT_COMPLETIONS_STREAM_ROUTE,
+    CHAT_RUN_PAUSE_ROUTE,
 )
 from app.constants.error_codes import INVALID_REQUEST, MODEL_PROVIDER_ERROR
 from app.constants.http_contract import (
@@ -49,6 +50,23 @@ class ChatRoutes:
             methods=[HTTPMethod.POST],
             response_model=ContextCompactionResponse,
         )
+        self.router.add_api_route(
+            CHAT_RUN_PAUSE_ROUTE,
+            self.pause_run,
+            methods=[HTTPMethod.POST],
+        )
+
+    async def pause_run(
+        self,
+        run_id: str,
+        authorization: str | None = Header(default=None, alias=AUTHORIZATION_HEADER),
+        protocol_version: str | None = Header(default=None, alias=PROTOCOL_VERSION_HEADER),
+        correlation_id: str | None = Header(default=None, alias=CORRELATION_ID_HEADER),
+    ) -> dict[str, bool]:
+        self._guard.authenticate(
+            authorization, protocol_version, correlation_id
+        )
+        return {"paused": await self._chat_service.pause_run(run_id)}
 
     async def complete_chat(
         self,

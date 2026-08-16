@@ -177,6 +177,7 @@ export type ChatStreamEventType =
   | "text_delta"
   | "text_reset"
   | "reasoning_delta"
+  | "protocol_message"
   | "progress_message"
   | "tool_started"
   | "tool_completed"
@@ -194,6 +195,7 @@ export type ChatStreamEventType =
   | "web_search_completed"
   | "web_search_failed"
   | "usage"
+  | "paused"
   | "completed"
   | "failed";
 
@@ -219,6 +221,37 @@ export interface ChatStreamEvent {
   riskLevel?: string;
   reversible?: boolean;
   decision?: "allow" | "deny" | "";
+}
+
+export type ConversationRunStatus =
+  | "QUEUED"
+  | "RUNNING"
+  | "PAUSING"
+  | "PAUSED"
+  | "WAITING_APPROVAL"
+  | "COMPLETED"
+  | "FAILED"
+  | "CANCELLED";
+
+export interface ConversationRunSnapshot {
+  runId: string;
+  taskId: string;
+  status: ConversationRunStatus;
+  triggerType: "MESSAGE" | "REGENERATE" | "RESUME";
+  lastEventSequence: number;
+  replayFromSequence: number;
+  errorMessage: string;
+  createdAt: string;
+  startedAt?: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
+export interface ConversationRunEvent {
+  runId: string;
+  sequence: number;
+  event: ChatStreamEvent;
+  occurredAt: string;
 }
 
 export interface ContextCompactionResult {
@@ -271,6 +304,16 @@ export interface LumoraModelApi {
     approvalId: string,
     decision: ToolApprovalDecision,
   ): Promise<void>;
+  getActiveRun(taskId: string): Promise<ConversationRunSnapshot | undefined>;
+  pauseRun(taskId: string, runId: string): Promise<ConversationRunSnapshot>;
+  resumeRun(taskId: string, runId: string): Promise<ConversationRunSnapshot>;
+  cancelRun(taskId: string, runId: string): Promise<ConversationRunSnapshot>;
+  subscribeRun(
+    taskId: string,
+    runId: string,
+    afterSequence: number,
+    onEvent: (event: ConversationRunEvent) => void,
+  ): () => void;
   streamMessage(
     taskId: string,
     content: string,

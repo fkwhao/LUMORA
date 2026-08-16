@@ -217,3 +217,12 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 025-conversation-run
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V25__conversation_run.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

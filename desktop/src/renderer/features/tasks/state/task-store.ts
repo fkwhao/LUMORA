@@ -3,6 +3,8 @@ import { createStore } from "zustand/vanilla";
 import type {
   ChatMessage,
   ChatRequestOptions,
+  ConversationRunEvent,
+  ConversationRunSnapshot,
   LumoraModelApi,
   ToolApprovalDecision,
   ToolApprovalRequest,
@@ -14,7 +16,10 @@ import type {
   TaskSnapshot,
   TaskSummary,
 } from "../../../../shared/task-contract";
-import { applyChatEvent } from "./chat-event-handler";
+import {
+  applyChatEvent,
+  cancelSupplementalUsageRefresh,
+} from "./chat-event-handler";
 import { reconcilePersistedMessages } from "./chat-message-reconciliation";
 import {
   createChatEventBatcher,
@@ -34,6 +39,7 @@ import { reduceTaskEvent } from "./task-event-reducer";
 
 export interface TaskState {
   activeTask?: TaskSnapshot;
+  activeRun?: ConversationRunSnapshot;
   recentTasks: TaskSummary[];
   archivedTaskIds: string[];
   deletedTaskIds: string[];
@@ -42,6 +48,7 @@ export interface TaskState {
   isHydratingHistory: boolean;
   historyHydrationProgress: number;
   isChatting: boolean;
+  isPausing: boolean;
   isCompacting: boolean;
   chatWasStopped: boolean;
   chatStartedAt?: number;
@@ -62,7 +69,8 @@ export interface TaskState {
     reasoningEffort: string,
   ): Promise<void>;
   compactContext(model?: string): Promise<void>;
-  stopChat(): void;
+  stopChat(): Promise<void>;
+  resumeChat(): Promise<void>;
   regenerateMessage(
     messageId: string,
     content: string,
@@ -137,6 +145,7 @@ export function createTaskStore(
 
   return createStore<TaskState>((set, get) => ({
     activeTask: undefined,
+    activeRun: undefined,
     recentTasks: [],
     archivedTaskIds: loadArchivedTaskIds(),
     deletedTaskIds: loadDeletedTaskIds(),
@@ -145,6 +154,7 @@ export function createTaskStore(
     isHydratingHistory: false,
     historyHydrationProgress: 1,
     isChatting: false,
+    isPausing: false,
     isCompacting: false,
     chatWasStopped: false,
     chatStartedAt: undefined,
@@ -244,12 +254,14 @@ export function createTaskStore(
       }
       set({
         activeTask: optimisticTask ?? current.activeTask,
+        activeRun: undefined,
         messages: cachedWindow?.messages ?? [],
         taskEvents: [],
         isLoadingHistory: !cached,
         isHydratingHistory: Boolean(cachedWindow?.hasEarlierMessages),
         historyHydrationProgress: cachedWindow?.progress ?? 0,
         isChatting: false,
+        isPausing: false,
         isCompacting: false,
         chatWasStopped: false,
         chatStartedAt: undefined,
@@ -297,9 +309,10 @@ export function createTaskStore(
         }
       };
       try {
-        const [task, messages] = await Promise.all([
+        const [task, messages, activeRun] = await Promise.all([
           api.get(taskId),
           modelApi?.listMessages(taskId) ?? Promise.resolve([]),
+          modelApi?.getActiveRun(taskId) ?? Promise.resolve(undefined),
         ]);
         conversationCache.set(taskId, { task, messages });
         if (requestId !== openTaskRequest) {
@@ -309,26 +322,59 @@ export function createTaskStore(
         unsubscribe = api.subscribe(task.taskId, (event) => {
           applyEvent(event, get, set);
         });
+        const runIsProcessing = Boolean(
+          activeRun &&
+          activeRun.status !== "PAUSED" &&
+          activeRun.status !== "CANCELLED" &&
+          activeRun.status !== "COMPLETED" &&
+          activeRun.status !== "FAILED",
+        );
+        const runMessages = ensureRunAssistant(messages, runIsProcessing);
         const historyWindow = cached
-          ? { messages, startIndex: 0, hasEarlierMessages: false, progress: 1 }
-          : getInitialHistoryWindow(messages);
+          ? { messages: runMessages, startIndex: 0, hasEarlierMessages: false, progress: 1 }
+          : getInitialHistoryWindow(runMessages);
         set({
           activeTask: task,
+          activeRun: activeRun && runIsProcessing
+            ? {
+                ...activeRun,
+                lastEventSequence: activeRun.replayFromSequence,
+              }
+            : activeRun,
           messages: historyWindow.messages,
           taskEvents: [],
           isLoadingHistory: false,
           isHydratingHistory: historyWindow.hasEarlierMessages,
           historyHydrationProgress: historyWindow.progress,
-          isChatting: false,
+          isChatting: runIsProcessing,
+          isPausing: activeRun?.status === "PAUSING",
           isCompacting: false,
-          chatWasStopped: false,
-          chatStartedAt: undefined,
+          chatWasStopped: activeRun?.status === "PAUSED",
+          chatStartedAt: runIsProcessing ? Date.now() : undefined,
           lastChatDurationMs: undefined,
           pendingToolApproval: undefined,
           isDecidingToolApproval: false,
         });
+        if (runIsProcessing && activeRun && modelApi) {
+          clearChatEventBatcher(false);
+          const runBatcher = createChatEventBatcher((event) => {
+            applyChatEvent(event, taskId, modelApi, get, set, () => undefined);
+          });
+          chatEventBatcher = runBatcher;
+          unsubscribeChat = modelApi.subscribeRun(
+            taskId,
+            activeRun.runId,
+            activeRun.replayFromSequence,
+            (runEvent) => {
+              if (get().activeTask?.taskId !== taskId) return;
+              if (applyRunEnvelope(runEvent, get, set)) {
+                runBatcher.push(runEvent.event);
+              }
+            },
+          );
+        }
         if (!cached) {
-          await hydrateHistory(messages, historyWindow.startIndex);
+          await hydrateHistory(runMessages, historyWindow.startIndex);
         }
       } catch (error) {
         if (requestId !== openTaskRequest) {
@@ -359,12 +405,14 @@ export function createTaskStore(
         });
         set({
           activeTask: task,
+          activeRun: undefined,
           isCreating: false,
           messages: [],
           isLoadingHistory: false,
           isHydratingHistory: false,
           historyHydrationProgress: 1,
           taskEvents: [],
+          isPausing: false,
           archivedTaskIds: get().archivedTaskIds.filter(
             (taskId) => taskId !== task.taskId,
           ),
@@ -429,10 +477,13 @@ export function createTaskStore(
           content: "",
         },
       ];
+      cancelSupplementalUsageRefresh(task.taskId);
       set({
+        activeRun: undefined,
         messages,
         taskEvents: [],
         isChatting: true,
+        isPausing: false,
         chatWasStopped: false,
         chatError: undefined,
         chatStartedAt: Date.now(),
@@ -447,18 +498,23 @@ export function createTaskStore(
         });
         return;
       }
+      let ownSubscription: (() => void) | undefined;
+      let ownBatcher: ChatEventBatcher | undefined;
+      let ownResolve: (() => void) | undefined;
       await new Promise<void>((resolve) => {
-        resolveChat = resolve;
+        ownResolve = resolve;
+        resolveChat = ownResolve;
         unsubscribeChat?.();
         clearChatEventBatcher(false);
-        chatEventBatcher = createChatEventBatcher((event) => {
+        ownBatcher = createChatEventBatcher((event) => {
           applyChatEvent(event, task.taskId, modelApi, get, set, resolve);
         });
-        unsubscribeChat = modelApi.streamMessage(
+        chatEventBatcher = ownBatcher;
+        ownSubscription = modelApi.streamMessage(
           task.taskId,
           normalizedContent,
           (event) => {
-            chatEventBatcher?.push(event);
+            ownBatcher?.push(event);
           },
           {
             ...options,
@@ -466,11 +522,23 @@ export function createTaskStore(
               options?.workspacePath ?? get().taskProjectPaths[task.taskId],
           },
         );
+        unsubscribeChat = ownSubscription;
+        void modelApi.getActiveRun(task.taskId).then((run) => {
+          if (run && get().activeTask?.taskId === task.taskId) {
+            set({ activeRun: run });
+          }
+        }).catch(() => undefined);
       });
-      clearChatEventBatcher(true);
-      resolveChat = undefined;
-      unsubscribeChat?.();
-      unsubscribeChat = undefined;
+      if (chatEventBatcher === ownBatcher) {
+        ownBatcher?.flush();
+        ownBatcher?.cancel();
+        chatEventBatcher = undefined;
+      }
+      if (resolveChat === ownResolve) resolveChat = undefined;
+      if (unsubscribeChat === ownSubscription) {
+        ownSubscription?.();
+        unsubscribeChat = undefined;
+      }
       await get().loadRecentTasks();
     },
 
@@ -532,71 +600,164 @@ export function createTaskStore(
       }
     },
 
-    stopChat() {
+    async stopChat() {
       if (!get().isChatting) {
         return;
       }
-      clearChatEventBatcher(true);
-      unsubscribeChat?.();
-      unsubscribeChat = undefined;
       const chatStartedAt = get().chatStartedAt;
       const taskId = get().activeTask?.taskId;
-      const stoppedUserMessage = [...get().messages]
-        .reverse()
-        .find((message) => message.role === "user");
-      set({
-        isChatting: false,
-        chatWasStopped: true,
-        chatStartedAt: undefined,
-        lastChatDurationMs: chatStartedAt
-          ? Date.now() - chatStartedAt
-          : undefined,
-        chatError: undefined,
-      });
-      const resolve = resolveChat;
-      resolveChat = undefined;
-      resolve?.();
-      if (modelApi && taskId) {
-        void modelApi
-          .listMessages(taskId)
-          .then((persistedMessages) => {
-            if (
-              !get().chatWasStopped ||
-              get().activeTask?.taskId !== taskId ||
-              !stoppedUserMessage
-            ) {
-              return;
-            }
-            const persistedUserMessage = [...persistedMessages]
-              .reverse()
-              .find(
-                (message) =>
-                  message.role === "user" &&
-                  message.content === stoppedUserMessage.content &&
-                  Boolean(message.messageId),
-              );
-            if (!persistedUserMessage) {
-              return;
-            }
-            const liveMessages = get().messages;
-            const liveAssistant = liveMessages.at(-1);
-            const persistedWithAssistant =
-              persistedMessages.at(-1)?.role === "assistant"
-                ? persistedMessages
-                : [
-                    ...persistedMessages,
-                    liveAssistant?.role === "assistant"
-                      ? liveAssistant
-                      : { role: "assistant" as const, content: "" },
-                  ];
+      if (!modelApi || !taskId) {
+        throw new Error("当前运行无法暂停");
+      }
+      set({ isPausing: true, chatError: undefined });
+      try {
+        const cachedRun = get().activeRun;
+        const currentRun = cachedRun && isPausableRun(cachedRun)
+          ? cachedRun
+          : await waitForActiveRun(modelApi, taskId);
+        if (!currentRun) {
+          throw new Error("运行状态尚未建立，请稍后重试");
+        }
+        const pausedRun = await modelApi.pauseRun(taskId, currentRun.runId);
+        if (get().activeTask?.taskId === taskId) {
+          set({
+            activeRun: pausedRun,
+            isPausing: pausedRun.status === "PAUSING",
+          });
+        }
+        if (pausedRun.status === "PAUSED") {
+          clearChatEventBatcher(true);
+          unsubscribeChat?.();
+          unsubscribeChat = undefined;
+          if (get().activeTask?.taskId === taskId) {
             set({
-              messages: reconcilePersistedMessages(
-                liveMessages,
-                persistedWithAssistant,
-              ),
+              isChatting: false,
+              isPausing: false,
+              chatWasStopped: true,
+              chatStartedAt: undefined,
+              lastChatDurationMs: chatStartedAt
+                ? Date.now() - chatStartedAt
+                : undefined,
+              pendingToolApproval: undefined,
+              isDecidingToolApproval: false,
             });
-          })
-          .catch(() => undefined);
+          }
+          try {
+            const persistedMessages = await modelApi.listMessages(taskId);
+            if (get().activeTask?.taskId === taskId) {
+              set({
+                messages: reconcilePausedMessages(
+                  get().messages,
+                  persistedMessages,
+                ),
+              });
+            }
+          } catch {
+            // Run 已成功暂停；历史刷新失败不应把状态回滚为运行中。
+          }
+          const resolve = resolveChat;
+          resolveChat = undefined;
+          resolve?.();
+        }
+      } catch (error) {
+        set({ isPausing: false, chatError: toErrorMessage(error) });
+        throw error;
+      }
+    },
+
+    async resumeChat() {
+      const taskId = get().activeTask?.taskId;
+      if (!taskId || !modelApi) {
+        throw new Error("当前运行无法继续");
+      }
+      const pausedRun = get().activeRun
+        ?? await modelApi.getActiveRun(taskId);
+      if (!pausedRun || pausedRun.status !== "PAUSED") {
+        throw new Error("当前没有已暂停的运行");
+      }
+      const previousMessages = get().messages;
+      cancelSupplementalUsageRefresh(taskId);
+      set({
+        messages: appendContinuationAssistant(previousMessages),
+        isChatting: true,
+        isPausing: false,
+        chatWasStopped: false,
+        chatError: undefined,
+        chatStartedAt: Date.now(),
+      });
+      let ownSubscription: (() => void) | undefined;
+      let ownBatcher: ChatEventBatcher | undefined;
+      let ownResolve: (() => void) | undefined;
+      let resumedRun: ConversationRunSnapshot | undefined;
+      try {
+        const acceptedRun = await modelApi.resumeRun(
+          taskId,
+          pausedRun.runId,
+        );
+        resumedRun = acceptedRun;
+        set({
+          activeRun: {
+            ...acceptedRun,
+            lastEventSequence: acceptedRun.replayFromSequence,
+          },
+        });
+        await new Promise<void>((resolve) => {
+          ownResolve = resolve;
+          resolveChat = ownResolve;
+          clearChatEventBatcher(false);
+          ownBatcher = createChatEventBatcher((event) => {
+            applyChatEvent(event, taskId, modelApi, get, set, resolve);
+          });
+          chatEventBatcher = ownBatcher;
+          ownSubscription = modelApi.subscribeRun(
+            taskId,
+            acceptedRun.runId,
+            acceptedRun.replayFromSequence,
+            (runEvent) => {
+              if (get().activeTask?.taskId !== taskId) return;
+              if (applyRunEnvelope(runEvent, get, set)) {
+                ownBatcher?.push(runEvent.event);
+              }
+            },
+          );
+          unsubscribeChat = ownSubscription;
+        });
+        if (chatEventBatcher === ownBatcher) {
+          ownBatcher?.flush();
+          ownBatcher?.cancel();
+          chatEventBatcher = undefined;
+        }
+        if (resolveChat === ownResolve) resolveChat = undefined;
+        if (unsubscribeChat === ownSubscription) {
+          ownSubscription?.();
+          unsubscribeChat = undefined;
+        }
+        await get().loadRecentTasks();
+      } catch (error) {
+        if (chatEventBatcher === ownBatcher) {
+          ownBatcher?.cancel();
+          chatEventBatcher = undefined;
+        }
+        if (resolveChat === ownResolve) resolveChat = undefined;
+        if (unsubscribeChat === ownSubscription) {
+          ownSubscription?.();
+          unsubscribeChat = undefined;
+        }
+        if (resumedRun) {
+          await get().openTask(taskId);
+          return;
+        }
+        if (get().activeTask?.taskId === taskId) {
+          set({
+            activeRun: pausedRun,
+            messages: previousMessages,
+            isChatting: false,
+            chatWasStopped: true,
+            chatStartedAt: undefined,
+            chatError: toErrorMessage(error),
+          });
+        }
+        throw error;
       }
     },
 
@@ -644,29 +805,37 @@ export function createTaskStore(
           content: "",
         },
       ];
+      cancelSupplementalUsageRefresh(task.taskId);
       set({
+        activeRun: undefined,
         messages,
         taskEvents: [],
         isChatting: true,
+        isPausing: false,
         chatWasStopped: false,
         chatError: undefined,
         chatStartedAt: Date.now(),
         lastChatDurationMs: undefined,
       });
 
+      let ownSubscription: (() => void) | undefined;
+      let ownBatcher: ChatEventBatcher | undefined;
+      let ownResolve: (() => void) | undefined;
       await new Promise<void>((resolve) => {
-        resolveChat = resolve;
+        ownResolve = resolve;
+        resolveChat = ownResolve;
         unsubscribeChat?.();
         clearChatEventBatcher(false);
-        chatEventBatcher = createChatEventBatcher((event) => {
+        ownBatcher = createChatEventBatcher((event) => {
           applyChatEvent(event, task.taskId, modelApi, get, set, resolve);
         });
-        unsubscribeChat = modelApi.regenerateMessage(
+        chatEventBatcher = ownBatcher;
+        ownSubscription = modelApi.regenerateMessage(
           task.taskId,
           messageId,
           normalizedContent,
           (event) => {
-            chatEventBatcher?.push(event);
+            ownBatcher?.push(event);
           },
           {
             ...options,
@@ -674,11 +843,23 @@ export function createTaskStore(
               options?.workspacePath ?? get().taskProjectPaths[task.taskId],
           },
         );
+        unsubscribeChat = ownSubscription;
+        void modelApi.getActiveRun(task.taskId).then((run) => {
+          if (run && get().activeTask?.taskId === task.taskId) {
+            set({ activeRun: run });
+          }
+        }).catch(() => undefined);
       });
-      clearChatEventBatcher(true);
-      resolveChat = undefined;
-      unsubscribeChat?.();
-      unsubscribeChat = undefined;
+      if (chatEventBatcher === ownBatcher) {
+        ownBatcher?.flush();
+        ownBatcher?.cancel();
+        chatEventBatcher = undefined;
+      }
+      if (resolveChat === ownResolve) resolveChat = undefined;
+      if (unsubscribeChat === ownSubscription) {
+        ownSubscription?.();
+        unsubscribeChat = undefined;
+      }
       await get().loadRecentTasks();
     },
 
@@ -750,9 +931,11 @@ export function createTaskStore(
         set({
           archivedTaskIds,
           activeTask: undefined,
+          activeRun: undefined,
           messages: [],
           taskEvents: [],
           isChatting: false,
+          isPausing: false,
           isCompacting: false,
           chatWasStopped: false,
           chatStartedAt: undefined,
@@ -835,6 +1018,7 @@ export function createTaskStore(
       resolveChat = undefined;
       set({
         activeTask: undefined,
+        activeRun: undefined,
         error: undefined,
         chatError: undefined,
         messages: [],
@@ -843,6 +1027,7 @@ export function createTaskStore(
         isHydratingHistory: false,
         historyHydrationProgress: 1,
         isChatting: false,
+        isPausing: false,
         isCompacting: false,
         chatWasStopped: false,
         chatStartedAt: undefined,
@@ -886,6 +1071,132 @@ function toErrorMessage(error: unknown): string {
 
 function createOptimisticMessageId(): string {
   return `lumora-live-${crypto.randomUUID()}`;
+}
+
+function ensureRunAssistant(
+  messages: ChatMessage[],
+  runIsProcessing: boolean,
+): ChatMessage[] {
+  if (!runIsProcessing || messages.at(-1)?.role === "assistant") {
+    return messages;
+  }
+  return [
+    ...messages,
+    {
+      runtimeId: createOptimisticMessageId(),
+      role: "assistant",
+      content: "",
+    },
+  ];
+}
+
+function appendContinuationAssistant(
+  messages: ChatMessage[],
+): ChatMessage[] {
+  return [
+    ...messages,
+    {
+      runtimeId: createOptimisticMessageId(),
+      role: "assistant",
+      content: "",
+    },
+  ];
+}
+
+function applyRunEnvelope(
+  runEvent: ConversationRunEvent,
+  get: () => TaskState,
+  set: (partial: Partial<TaskState>) => void,
+): boolean {
+  const currentRun = get().activeRun;
+  if (!currentRun || currentRun.runId !== runEvent.runId) return false;
+  if (runEvent.sequence <= currentRun.lastEventSequence) return false;
+
+  const status = resolveRunStatus(runEvent, currentRun.status);
+  const terminal =
+    status === "COMPLETED" ||
+    status === "FAILED" ||
+    status === "CANCELLED";
+  set({
+    activeRun: {
+      ...currentRun,
+      status,
+      lastEventSequence: Math.max(
+        currentRun.lastEventSequence,
+        runEvent.sequence,
+      ),
+      updatedAt: runEvent.occurredAt,
+    },
+    isPausing: status === "PAUSING",
+    isChatting: terminal || status === "PAUSED" ? false : get().isChatting,
+    chatWasStopped: status === "PAUSED",
+  });
+  return true;
+}
+
+function resolveRunStatus(
+  runEvent: ConversationRunEvent,
+  currentStatus: ConversationRunSnapshot["status"],
+): ConversationRunSnapshot["status"] {
+  const metadataStatus = runEvent.event.metadata?.runStatus;
+  if (isConversationRunStatus(metadataStatus)) return metadataStatus;
+  if (runEvent.event.type === "tool_approval_requested") {
+    return "WAITING_APPROVAL";
+  }
+  if (runEvent.event.type === "tool_approval_resolved") return "RUNNING";
+  if (runEvent.event.type === "completed") return "COMPLETED";
+  if (runEvent.event.type === "failed") return "FAILED";
+  if (runEvent.event.type === "paused") return "PAUSED";
+  return currentStatus;
+}
+
+function isConversationRunStatus(
+  value: unknown,
+): value is ConversationRunSnapshot["status"] {
+  return (
+    value === "QUEUED" ||
+    value === "RUNNING" ||
+    value === "PAUSING" ||
+    value === "PAUSED" ||
+    value === "WAITING_APPROVAL" ||
+    value === "COMPLETED" ||
+    value === "FAILED" ||
+    value === "CANCELLED"
+  );
+}
+
+async function waitForActiveRun(
+  modelApi: LumoraModelApi,
+  taskId: string,
+): Promise<ConversationRunSnapshot | undefined> {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const run = await modelApi.getActiveRun(taskId);
+    if (run && isPausableRun(run)) return run;
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+  }
+  return undefined;
+}
+
+function isPausableRun(run: ConversationRunSnapshot): boolean {
+  return (
+    run.status === "QUEUED" ||
+    run.status === "RUNNING" ||
+    run.status === "WAITING_APPROVAL"
+  );
+}
+
+function reconcilePausedMessages(
+  liveMessages: ChatMessage[],
+  persistedMessages: ChatMessage[],
+): ChatMessage[] {
+  const liveAssistant = liveMessages.at(-1);
+  if (
+    persistedMessages.at(-1)?.role === "assistant" ||
+    liveAssistant?.role !== "assistant"
+  ) {
+    return reconcilePersistedMessages(liveMessages, persistedMessages);
+  }
+  return [...persistedMessages, liveAssistant];
 }
 
 function updateContextWorkLog(

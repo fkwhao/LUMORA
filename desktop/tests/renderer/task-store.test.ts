@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type {
   ChatMessage,
+  ConversationRunSnapshot,
   LumoraModelApi,
 } from "../../src/shared/model-contract";
 import type {
@@ -327,11 +328,24 @@ describe("task store", () => {
     ]);
   });
 
-  it("cancels an active streamed answer and keeps the sent message", async () => {
+  it("pauses an active streamed answer and keeps the sent message", async () => {
     const api = createApi();
     const modelApi = createModelApi();
     const cancel = vi.fn();
     vi.mocked(modelApi.streamMessage).mockReturnValue(cancel);
+    vi.mocked(modelApi.getActiveRun).mockResolvedValue(activeRun("RUNNING"));
+    vi.mocked(modelApi.pauseRun).mockResolvedValue(activeRun("PAUSED"));
+    vi.mocked(modelApi.listMessages)
+      .mockResolvedValueOnce([
+        { role: "user", content: "整理下载目录" },
+        { role: "assistant", content: "可以开始整理。", durationMs: 2_100 },
+      ])
+      .mockResolvedValueOnce([
+        { role: "user", content: "整理下载目录" },
+        { role: "assistant", content: "可以开始整理。", durationMs: 2_100 },
+        { role: "user", content: "继续整理文档" },
+        { role: "assistant", content: "" },
+      ]);
     const store = createTaskStore(api, modelApi);
     await store.getState().openTask(createdTask.taskId);
 
@@ -343,7 +357,7 @@ describe("task store", () => {
       content: "继续整理文档",
     });
 
-    store.getState().stopChat();
+    await store.getState().stopChat();
     await pendingSend;
 
     expect(cancel).toHaveBeenCalledOnce();
@@ -359,9 +373,64 @@ describe("task store", () => {
     expect(store.getState().chatWasStopped).toBe(true);
   });
 
+  it("keeps the stream alive while pausing and seals it on the paused event", async () => {
+    const api = createApi();
+    const modelApi = createModelApi();
+    const cancel = vi.fn();
+    let onEvent: Parameters<LumoraModelApi["streamMessage"]>[2] | undefined;
+    vi.mocked(modelApi.streamMessage).mockImplementation(
+      (_taskId, _content, eventHandler) => {
+        onEvent = eventHandler;
+        return cancel;
+      },
+    );
+    vi.mocked(modelApi.getActiveRun).mockResolvedValue(activeRun("RUNNING"));
+    vi.mocked(modelApi.pauseRun).mockResolvedValue(activeRun("PAUSING"));
+    vi.mocked(modelApi.listMessages)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { messageId: "user-1", role: "user", content: "继续整理" },
+        {
+          messageId: "assistant-1",
+          role: "assistant",
+          content: "已完成第一步",
+        },
+      ]);
+    const store = createTaskStore(api, modelApi);
+    await store.getState().openTask(createdTask.taskId);
+
+    let settled = false;
+    const pendingSend = store.getState().sendMessage("继续整理").then(() => {
+      settled = true;
+    });
+    await store.getState().stopChat();
+
+    expect(store.getState().isPausing).toBe(true);
+    expect(store.getState().isChatting).toBe(true);
+    expect(cancel).not.toHaveBeenCalled();
+    expect(settled).toBe(false);
+
+    onEvent?.({
+      type: "paused",
+      delta: "",
+      model: "test-model",
+      errorMessage: "",
+    });
+    await pendingSend;
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(store.getState().activeRun?.status).toBe("PAUSED");
+    expect(store.getState().isPausing).toBe(false);
+    expect(store.getState().isChatting).toBe(false);
+    expect(store.getState().chatWasStopped).toBe(true);
+    expect(store.getState().messages.at(-1)?.content).toBe("已完成第一步");
+  });
+
   it("keeps the latest usage snapshot while stopped usage persistence catches up", async () => {
     const api = createApi();
     const modelApi = createModelApi();
+    vi.mocked(modelApi.getActiveRun).mockResolvedValue(activeRun("RUNNING"));
+    vi.mocked(modelApi.pauseRun).mockResolvedValue(activeRun("PAUSED"));
     let onEvent: Parameters<LumoraModelApi["streamMessage"]>[2] | undefined;
     vi.mocked(modelApi.streamMessage).mockImplementation(
       (_taskId, _content, eventHandler) => {
@@ -394,11 +463,215 @@ describe("task store", () => {
       },
     });
 
-    store.getState().stopChat();
+    await store.getState().stopChat();
     await pending;
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(store.getState().messages.at(-1)?.usage?.totalTokens).toBe(150);
+  });
+
+  it("resumes the same run without inserting a synthetic user message", async () => {
+    const api = createApi();
+    const modelApi = createModelApi();
+    vi.mocked(modelApi.getActiveRun).mockResolvedValue(activeRun("PAUSED"));
+    vi.mocked(modelApi.resumeRun).mockResolvedValue(activeRun("RUNNING"));
+    vi.mocked(modelApi.listMessages)
+      .mockResolvedValueOnce([
+        { messageId: "user-1", role: "user", content: "整理下载目录" },
+        {
+          messageId: "paused-assistant-1",
+          role: "assistant",
+          content: "已经完成扫描",
+        },
+      ])
+      .mockResolvedValueOnce([
+        { messageId: "user-1", role: "user", content: "整理下载目录" },
+        {
+          messageId: "paused-assistant-1",
+          role: "assistant",
+          content: "已经完成扫描",
+        },
+        { messageId: "assistant-1", role: "assistant", content: "整理完成" },
+      ]);
+    let onRunEvent: Parameters<LumoraModelApi["subscribeRun"]>[3] | undefined;
+    vi.mocked(modelApi.subscribeRun).mockImplementation(
+      (_taskId, runId, _afterSequence, onEvent) => {
+        onRunEvent = onEvent;
+        return () => undefined;
+      },
+    );
+    const store = createTaskStore(api, modelApi);
+    await store.getState().openTask(createdTask.taskId);
+    expect(store.getState().messages).toHaveLength(2);
+
+    const pendingResume = store.getState().resumeChat();
+    await Promise.resolve();
+    expect(store.getState().messages.at(-1)).toMatchObject({
+      role: "assistant",
+      content: "",
+    });
+    onRunEvent?.({
+      runId: "run-1",
+      sequence: 1,
+      occurredAt: "2026-08-15T00:00:01Z",
+      event: {
+        type: "progress_message",
+        delta: "继续执行剩余步骤",
+        itemId: "stage-1",
+        model: "test-model",
+        errorMessage: "",
+        metadata: { replacesAssistantContent: true },
+      },
+    });
+
+    expect(store.getState().messages.at(-1)).toMatchObject({
+      role: "assistant",
+      workLog: [
+        expect.objectContaining({
+          itemId: "stage-1",
+          content: "继续执行剩余步骤",
+        }),
+      ],
+    });
+
+    onRunEvent?.({
+      runId: "run-1",
+      sequence: 2,
+      occurredAt: "2026-08-15T00:00:02Z",
+      event: {
+        type: "completed",
+        delta: "",
+        model: "test-model",
+        errorMessage: "",
+      },
+    });
+    await pendingResume;
+
+    expect(modelApi.resumeRun).toHaveBeenCalledWith(
+      createdTask.taskId,
+      "run-1",
+    );
+    expect(store.getState().messages.filter((message) => message.role === "user"))
+      .toEqual([expect.objectContaining({ content: "整理下载目录" })]);
+  });
+
+  it("does not pause a completed run cached from an earlier answer", async () => {
+    const api = createApi();
+    const modelApi = createModelApi();
+    vi.mocked(modelApi.listMessages).mockResolvedValue([
+      { messageId: "message-1", role: "user", content: "整理下载目录" },
+      { messageId: "message-2", role: "assistant", content: "旧回答" },
+    ]);
+    vi.mocked(modelApi.getActiveRun)
+      .mockResolvedValueOnce(activeRun("COMPLETED", "old-run"))
+      .mockResolvedValueOnce(activeRun("COMPLETED", "old-run"))
+      .mockResolvedValueOnce(activeRun("RUNNING", "new-run"));
+    vi.mocked(modelApi.pauseRun).mockResolvedValue(
+      activeRun("PAUSED", "new-run"),
+    );
+    const store = createTaskStore(api, modelApi);
+    await store.getState().openTask(createdTask.taskId);
+
+    const pendingRegeneration = store
+      .getState()
+      .regenerateMessage("message-1", "重新整理下载目录");
+    await store.getState().stopChat();
+    await pendingRegeneration;
+
+    expect(modelApi.pauseRun).toHaveBeenCalledOnce();
+    expect(modelApi.pauseRun).toHaveBeenCalledWith(
+      createdTask.taskId,
+      "new-run",
+    );
+  });
+
+  it("keeps paused work visible when an earlier usage refresh completes", async () => {
+    vi.useFakeTimers();
+    try {
+      const api = createApi();
+      const modelApi = createModelApi();
+      let onEvent: Parameters<LumoraModelApi["streamMessage"]>[2] | undefined;
+      let resolveStaleRefresh:
+        | ((messages: ChatMessage[]) => void)
+        | undefined;
+      vi.mocked(modelApi.streamMessage).mockImplementation(
+        (_taskId, _content, eventHandler) => {
+          onEvent = eventHandler;
+          return () => undefined;
+        },
+      );
+      vi.mocked(modelApi.getActiveRun).mockResolvedValue(activeRun("RUNNING"));
+      vi.mocked(modelApi.pauseRun).mockResolvedValue(activeRun("PAUSED"));
+      vi.mocked(modelApi.listMessages)
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          { messageId: "user-1", role: "user", content: "第一轮" },
+          { messageId: "assistant-1", role: "assistant", content: "第一轮完成" },
+        ])
+        .mockImplementationOnce(
+          () => new Promise<ChatMessage[]>((resolve) => {
+            resolveStaleRefresh = resolve;
+          }),
+        )
+        .mockResolvedValueOnce([
+          { messageId: "user-1", role: "user", content: "第一轮" },
+          { messageId: "assistant-1", role: "assistant", content: "第一轮完成" },
+          { messageId: "user-2", role: "user", content: "第二轮" },
+        ]);
+      const store = createTaskStore(api, modelApi);
+      await store.getState().openTask(createdTask.taskId);
+
+      const firstAnswer = store.getState().sendMessage("第一轮");
+      onEvent?.({
+        type: "completed",
+        delta: "",
+        model: "test-model",
+        errorMessage: "",
+      });
+      await firstAnswer;
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(modelApi.listMessages).toHaveBeenCalledTimes(3);
+
+      const secondAnswer = store.getState().sendMessage("第二轮");
+      onEvent?.({
+        type: "progress_message",
+        delta: "第二轮正在执行",
+        itemId: "stage-2",
+        model: "test-model",
+        errorMessage: "",
+        metadata: { replacesAssistantContent: true },
+      });
+      await store.getState().stopChat();
+      await secondAnswer;
+      resolveStaleRefresh?.([
+        { messageId: "user-1", role: "user", content: "第一轮" },
+        { messageId: "assistant-1", role: "assistant", content: "第一轮完成" },
+        {
+          messageId: "usage-1",
+          parentMessageId: "user-1",
+          role: "assistant",
+          content: "",
+          usageRecordOnly: true,
+          usage: {
+            promptTokens: 100,
+            completionTokens: 20,
+            totalTokens: 120,
+          },
+        },
+      ]);
+      await Promise.resolve();
+
+      expect(modelApi.listMessages).toHaveBeenCalledTimes(4);
+      expect(store.getState().messages.at(-1)?.workLog).toEqual([
+        expect.objectContaining({
+          itemId: "stage-2",
+          content: "第二轮正在执行",
+        }),
+      ]);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
   });
 
   it("refreshes delayed background usage after a completed answer", async () => {
@@ -670,6 +943,11 @@ function createModelApi(): LumoraModelApi {
       },
     ]),
     decideToolApproval: vi.fn(async () => undefined),
+    getActiveRun: vi.fn(async () => undefined),
+    pauseRun: vi.fn(),
+    resumeRun: vi.fn(),
+    cancelRun: vi.fn(),
+    subscribeRun: vi.fn(() => () => undefined),
     streamMessage: vi.fn(() => () => undefined),
     regenerateMessage: vi.fn(() => () => undefined),
   };
@@ -687,5 +965,22 @@ function event(
     status,
     title,
     userMessage: title,
+  };
+}
+
+function activeRun(
+  status: ConversationRunSnapshot["status"],
+  runId = "run-1",
+): ConversationRunSnapshot {
+  return {
+    runId,
+    taskId: createdTask.taskId,
+    status,
+    triggerType: "MESSAGE" as const,
+    lastEventSequence: 0,
+    replayFromSequence: 0,
+    errorMessage: "",
+    createdAt: "2026-08-15T00:00:00Z",
+    updatedAt: "2026-08-15T00:00:00Z",
   };
 }

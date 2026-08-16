@@ -5,6 +5,7 @@ from app.dto.request.chat_completion_request import ChatMessageRequest
 from app.dto.response.chat_completion_response import TokenUsageResponse
 from app.harness.agent_harness import AgentHarness
 from app.harness.contracts import ProviderTurn, ProviderTurnEvent
+from app.harness.run_control import RunControl, RunControlRegistry
 from app.harness.run_event import RunEvent, RunUsage
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.permission.broker import ApprovalBroker
@@ -117,6 +118,7 @@ async def _collect(
     harness: AgentHarness,
     prompt: PromptAssembly,
     tool_context: ToolContext | None,
+    run_control: RunControl | None = None,
 ) -> list[RunEvent]:
     return [
         event
@@ -133,6 +135,7 @@ async def _collect(
             PermissionConfigStore(),
             lambda _summary: prompt,
             None,
+            run_control,
         )
     ]
 
@@ -143,7 +146,11 @@ def test_harness_uses_native_stream_strategy_without_tools() -> None:
         _collect(AgentHarness(provider), PromptAssembly(()), None)  # type: ignore[arg-type]
     )
 
-    assert [event.type for event in events] == ["text_delta", "usage", "completed"]
+    assert [event.type for event in events] == [
+        "text_delta",
+        "usage",
+        "completed",
+    ]
     assert provider.stream_calls == 1
     assert provider.turn_calls == 0
 
@@ -159,8 +166,48 @@ def test_harness_uses_agent_loop_strategy_with_tools(tmp_path: Path) -> None:
         )
     )
 
-    assert [event.type for event in events] == ["text_delta", "usage", "completed"]
+    assert [event.type for event in events] == [
+        "text_delta",
+        "protocol_message",
+        "usage",
+        "completed",
+    ]
     assert events[0].delta == "工具模式回答"
     assert provider.stream_calls == 0
     assert provider.turn_calls == 0
     assert provider.turn_stream_calls == 1
+
+
+def test_harness_cancels_a_stalled_plain_model_stream_on_pause() -> None:
+    asyncio.run(_assert_plain_stream_is_cancelled())
+
+
+async def _assert_plain_stream_is_cancelled() -> None:
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    class StalledProvider(StrategyRecordingProvider):
+        async def stream(self, *args, **kwargs):
+            del args, kwargs
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+            yield RunEvent(type="completed")
+
+    registry = RunControlRegistry()
+    control = registry.register("plain-run")
+    run_task = asyncio.create_task(_collect(
+        AgentHarness(StalledProvider()),  # type: ignore[arg-type]
+        PromptAssembly(()),
+        None,
+        control,
+    ))
+    await asyncio.wait_for(started.wait(), timeout=1)
+    assert await registry.pause("plain-run") is True
+    events = await asyncio.wait_for(run_task, timeout=1)
+    registry.unregister("plain-run", control)
+
+    assert cancelled.is_set()
+    assert [event.type for event in events] == ["paused"]

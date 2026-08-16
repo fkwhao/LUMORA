@@ -21,6 +21,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.service.annotation.HttpExchange;
 import org.springframework.web.service.annotation.PostExchange;
 
+import java.util.Map;
+
 /**
  * Python Agent Runtime 的声明式 REST 契约。
  *
@@ -96,4 +98,12 @@ public interface AgentRuntimeHttpApi {
             String correlationId,
             @RequestBody AgentChatCompletionRequest request
     );
+
+    @PostExchange(AgentClientConstants.CHAT_RUN_PAUSE_PATH)
+    Map<String, Boolean> pauseRun(
+            @RequestHeader(HttpContractConstants.CORRELATION_ID_HEADER)
+            String correlationId,
+            @PathVariable String runId
+    );
+
 }

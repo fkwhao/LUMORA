@@ -4,11 +4,64 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+class ChatToolCallRequest(BaseModel):
+    id: str = Field(min_length=1, max_length=500)
+    name: str = Field(min_length=1, max_length=500)
+    arguments: str = Field(default="{}", max_length=1_000_000)
+
+
 class ChatMessageRequest(BaseModel):
-    role: Literal["user", "assistant"]
-    content: str = Field(min_length=1, max_length=100_000)
+    model_config = ConfigDict(populate_by_name=True)
+
+    role: Literal["user", "assistant", "tool"]
+    content: str | None = Field(default=None, max_length=1_000_000)
     message_id: str | None = Field(default=None, alias="messageId")
     sequence: int | None = Field(default=None, ge=1)
+    tool_calls: list[ChatToolCallRequest] = Field(
+        default_factory=list,
+        alias="toolCalls",
+        max_length=128,
+    )
+    tool_call_id: str | None = Field(
+        default=None,
+        alias="toolCallId",
+        max_length=500,
+    )
+
+    @model_validator(mode="after")
+    def validate_protocol_message(self) -> "ChatMessageRequest":
+        if self.role == "user" and not (self.content or "").strip():
+            raise ValueError("用户消息内容不能为空")
+        if self.role == "assistant" and not (
+            (self.content or "").strip() or self.tool_calls
+        ):
+            raise ValueError("助手消息必须包含内容或工具调用")
+        if self.role == "tool" and not self.tool_call_id:
+            raise ValueError("工具消息必须关联工具调用 ID")
+        if self.role != "assistant" and self.tool_calls:
+            raise ValueError("只有助手消息可以包含工具调用")
+        return self
+
+    def as_provider_message(self) -> dict[str, object]:
+        message: dict[str, object] = {
+            "role": self.role,
+            "content": self.content,
+        }
+        if self.tool_calls:
+            message["tool_calls"] = [
+                {
+                    "id": call.id,
+                    "type": "function",
+                    "function": {
+                        "name": call.name,
+                        "arguments": call.arguments,
+                    },
+                }
+                for call in self.tool_calls
+            ]
+        if self.tool_call_id:
+            message["tool_call_id"] = self.tool_call_id
+        return message
 
 
 class ModelConnectionRequest(BaseModel):
@@ -168,7 +221,7 @@ class PromptContextRequest(BaseModel):
 class ChatCompletionRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    messages: list[ChatMessageRequest] = Field(min_length=1, max_length=100)
+    messages: list[ChatMessageRequest] = Field(min_length=1, max_length=10_000)
     connection: ModelConnectionRequest
     prompt_context: PromptContextRequest = Field(
         default_factory=PromptContextRequest,

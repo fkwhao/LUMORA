@@ -78,7 +78,7 @@ class ProtocolProviderBase(ABC):
                 "content": "已有的早期对话摘要：\n" + existing_summary,
             })
         source_messages.extend(
-            {"role": message.role, "content": message.content}
+            message.as_provider_message()
             for message in messages
         )
         source_messages.append({
@@ -210,10 +210,7 @@ def _prompt_messages(
     return [
         *prompt.system_messages,
         *prompt.context_messages,
-        *(
-            {"role": message.role, "content": message.content}
-            for message in messages
-        ),
+        *(message.as_provider_message() for message in messages),
     ]
 
 

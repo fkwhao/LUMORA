@@ -131,7 +131,7 @@ web_search_started / web_search_progress
 web_search_completed / web_search_failed
 context_compaction_started / context_compaction_progress
 context_compacted / context_compaction_failed
-usage / completed / failed
+usage / paused / completed / failed
 ```
 
 完整 Run Runtime 后续仍沿用同一抽象扩展 Agent、Plan 和 Artifact 生命周期，并升级为：
@@ -152,8 +152,64 @@ RunEvent
 2～4 个概括阶段，连续工具调用沿用当前阶段，具体发现和测试数字留到最终回答。
 
 高频文本增量实时转发但不逐 token 落库，最终消息、工作记录、用量、工具审批和 Artifact
-索引由 Java 持久化。带全局 `event_id`、`run_id`、耐久等级、单调 `sequence`、Snapshot 和
-Checkpoint 的可重放事件信封仍是目标设计；当前 Python 进程重启后不能恢复执行中的模型调用。
+索引由 Java 持久化。会话执行已经由 Java 的耐久 `ConversationRun` 外壳承载；事件以同一
+`run_id` 内单调递增的 `sequence` 写入 `conversation_run_event`，Electron 可按序重放。
+完整的多 Agent Snapshot/Checkpoint 仍是目标设计，但暂停与进程重启不再依赖保留 Python
+调用栈：Java 会封存当前 Turn 的中间轨迹，并在同一 Run 中创建新的内部续接 Turn。
+
+### Run、Turn 与暂停恢复
+
+`Run` 是一次用户目标的耐久执行外壳，`Turn` 是 Run 内一次实际的模型—工具循环。暂停不会
+在内存中冻结 Python 协程，也不会让模型继续在后台生成；它会在安全边界结束当前 Turn，
+持久化已经产生的文本、工作记录、用量和工具结果，然后释放模型连接、SSE 与运行栈。状态机为：
+
+```text
+QUEUED ──获得槽位──→ RUNNING ──完成/失败/取消──→ 终态
+  │                    │
+  │ 暂停               ├── 等待审批 → WAITING_APPROVAL → RUNNING
+  ↓                    └── 暂停 ───────────────┐
+PAUSED ←──────────── PAUSING ←─────────────────┤
+  │                         WAITING_APPROVAL ──暂停──┘
+  └── 继续 → QUEUED
+```
+
+继续时复用原 `run_id`，推进 `replayFromSequence`，通过内部 `continueMessage` 创建续接 Turn；
+不会向会话表插入一条伪造的“继续上一次任务”用户消息。运行时只在稳定历史前缀之后追加一条
+瞬时续接指令。每个完整模型回合会额外产生不可见的 `protocol_message`，原样保存 Assistant 的
+`tool_calls` 和对应 Tool Result；下一 Turn 直接把这些结构化消息交回 Provider，不再把展示层
+工作日志改写成自然语言让模型重新解释。流式响应若在完整 Assistant 消息形成前被取消，已显示的
+半段正文只保留给 UI，不进入后续模型历史。
+
+暂停采用协作式安全边界：正在等待的模型请求、上下文压缩、自动审批 Reviewer 或人工审批会
+响应暂停并结束；尚未开始的工具不再执行；已经开始的工具不被强行杀死，而是先收敛结果再暂停。
+暂停控制信号即使早于 Python 流注册也会先锁存并立即确认；模型或 Reviewer 取消后的正常资源
+清理只等待一个 200ms 的有界窗口，异常 Provider 不能无限拖住 `PAUSED`。因此正常生成和审批
+可以近即时暂停，只有已经发出 `tool_started` 的实际工具仍可能因安全收敛短暂停留在 `PAUSING`。
+暂停发生在同一 Assistant 已声明多个工具、但部分工具尚未派发时，Harness 会为未派发调用补齐
+`ABORTED_BEFORE_DISPATCH` Tool Result，使历史始终满足 Assistant tool call 与 Tool Result 成对
+约束；已经完成的工具保存真实结果，不会被重新执行。项目尚处开发阶段，不读取旧版文本恢复记录，
+结构化 Assistant/Tool 轨迹是唯一续接来源。暂停/继续本身不会生成摘要；上下文压缩仍只在正常
+Token 阈值触发时执行。
+
+继续入口的会话读取和上下文装配在 Run Worker 内执行，HTTP/IPC 不再同步等待整套准备流程；Run
+会先发布“正在恢复执行现场”，随后进入模型或工具阶段。远程 MCP 连接按任务和完整 Server 配置
+进入带引用计数的有界会话池，同一任务的续接 Turn 直接复用既有 Session 与工具定义；不同 Server
+并行准备，配置变化自动使用新会话，空闲项才允许淘汰，应用退出时统一关闭。因此暂停恢复不会再
+为每个 MCP Server 串行重复 initialize/list_tools，同时仍可安全扩展到多个会话并发。
+
+逻辑 `run_id` 在续接时保持不变，但每个内部 Turn 使用 `run_id + replayFromSequence` 派生独立的
+Runtime Turn ID，用于 Python 暂停控制和中断封存幂等键。重复的 `paused` 或 `completed` 终态只
+处理一次。`conversation_message.sequence` 不在模型请求开始时预留，而是在 Assistant、暂停片段、
+异步用量记录实际写入的事务中读取当前最大值并分配；所有消息写入经过同一持久化边界串行提交，
+避免上一 Turn 的异步记忆用量占用旧预留序号。若显式暂停期间封存仍发生异常，Java 会从该 Turn
+已落库的 RunEvent 尝试重建中间轨迹并保持 Run 为 `PAUSED`，不能把暂停意图降级为 `FAILED`。
+应用启动时还会修复历史版本已经产生的同类失败，但必须同时满足消息序号唯一约束错误和当前
+Turn 存在 `PAUSING` 耐久事件；普通模型或工具失败不会被自动改写为暂停。
+
+应用重启后，Java 将遗留的 `QUEUED`、`RUNNING`、`PAUSING` 和 `WAITING_APPROVAL` Run 恢复为
+`PAUSED`；已经开始的 Turn 会先从事件记录重建并封存中间轨迹，未开始的排队 Run 保留原触发
+输入。当前 `lumora.runs.max-concurrent` 默认为 `1`，但 Run 存储、事件流和调度器按 `run_id`
+隔离，并发上限可在后续多会话执行时提高，而不需要重写暂停协议。
 
 ## 5. System Prompt 与工具注册
 
@@ -280,7 +336,9 @@ POST   /api/v1/model/settings/providers/{providerId}/model-configurations/{model
 并只在当前模型请求中把临时运行配置交给 Python。Python 按请求相关性发现远程 Streamable HTTP
 MCP 的 Tools、Resources、Resource Templates 与 Prompts；工具统一进入当前请求的 Tool Registry，
 继续接受 Schema 校验、权限判断、自动 Reviewer/HITL、事件投影和结果保护。远程内容一律视为
-不可信上下文。当前不支持本地 stdio MCP、OAuth、订阅和能力变更通知，完整边界见
+不可信上下文。任务内的远程 Session 和工具目录会跨模型 Turn 复用，并以引用计数保护并发使用；
+Server 配置改变时使用新的缓存键，应用退出时关闭全部 Session。当前不支持本地 stdio MCP、OAuth、
+订阅和能力变更通知，完整边界见
 [MCP 远程能力接入](mcp-runtime-design.md)。
 
 Hosted Web Search 由模型供应商执行，不经过本地 Shell。Responses 使用原生 `web_search`，Anthropic
@@ -345,6 +403,12 @@ Desktop 的 Zustand Store 负责动作和状态生命周期；聊天流事件处
 重新生成仅允许编辑最后一条用户消息。Java 在事务中更新目标消息并删除它之后的旧
 Assistant 回答，然后使用更新后的上下文重新调用模型。服务端会再次检查任务归属、
 消息角色和消息顺序，前端的“仅最后一条可编辑”不作为安全边界。
+
+续接 Turn 的 Assistant 消息以被暂停的 Assistant 片段为父节点，用消息树保留同一 Run 内的
+执行轨迹，因此一条回答的直接父节点不保证是 User。Desktop 触发重新生成时必须沿活动消息链
+向上回溯最近的 User 祖先，并同时识别持久化 `messageId` 与 Renderer 临时 `runtimeId`；不能把
+Assistant 的直接 `parentMessageId` 当作原始问题。Java 仍以回溯得到的最后一条用户消息作为
+重新生成边界，并在服务端执行归属、角色和顺序校验。
 
 停止生成会同时中断 Electron 到 Java 的流，并调用 Java 取消端点。Java 保存每个任务
 的活动 `FutureTask`，取消后中断其 Python SSE 读取；Python Shell 工具在协程取消时

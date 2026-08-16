@@ -48,6 +48,7 @@ import {
   MoreHorizontal,
   PackageOpen,
   Pencil,
+  Play,
   Plus,
   ShieldAlert,
   Target,
@@ -160,6 +161,8 @@ export const TaskPage = memo(function TaskPage({
     (state) => state.historyHydrationProgress,
   );
   const isChatting = useStore(store, (state) => state.isChatting);
+  const isPausing = useStore(store, (state) => state.isPausing);
+  const activeRun = useStore(store, (state) => state.activeRun);
   const isCompacting = useStore(store, (state) => state.isCompacting);
   const chatWasStopped = useStore(store, (state) => state.chatWasStopped);
   const chatError = useStore(store, (state) => state.chatError);
@@ -746,14 +749,8 @@ export const TaskPage = memo(function TaskPage({
 
   const handleReloadMessage = useCallback(
     async (parentId: string | null) => {
-      const target = parentId
-        ? displayMessages.find(
-            (message, index) =>
-              message.messageId === parentId ||
-              renderMessageId(message, index) === parentId,
-          )
-        : displayMessages.find((message) => message.role === "user");
-      if (!target?.messageId || target.role !== "user") {
+      const target = findOriginatingUserMessage(displayMessages, parentId);
+      if (!target?.messageId) {
         notify("无法定位这条回复对应的问题，请刷新任务后重试", "info");
         return;
       }
@@ -799,7 +796,7 @@ export const TaskPage = memo(function TaskPage({
       }
     },
     isRunning: isChatting || isCompacting,
-    isSendDisabled: isCompacting,
+    isSendDisabled: isCompacting || activeRun?.status === "PAUSED",
     onNew: handleNewMessage,
     onEdit: handleEditMessage,
     onReload: handleReloadMessage,
@@ -2109,6 +2106,32 @@ export const TaskPage = memo(function TaskPage({
                 {chatError && (
                   <div className="task-error-banner">{chatError}</div>
                 )}
+                {activeRun?.status === "PAUSED" && (
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-muted/45 px-3 py-2 text-sm">
+                    <span className="text-muted-foreground">
+                      此任务已暂停，进度和上下文均已保留。
+                    </span>
+                    <Button
+                      className="paused-run-resume-button"
+                      type="button"
+                      size="sm"
+                      disabled={isPausing}
+                      onClick={() => {
+                        void store.getState().resumeChat().catch((error) => {
+                          notify(
+                            error instanceof Error
+                              ? error.message
+                              : "继续任务失败",
+                            "info",
+                          );
+                        });
+                      }}
+                    >
+                      <Play className="size-3.5" />
+                      继续
+                    </Button>
+                  </div>
+                )}
                 {task.approval && <ApprovalDock store={store} />}
               </>
             }
@@ -2601,6 +2624,38 @@ function runtimeMessageId(index: number): string {
 
 function renderMessageId(message: ChatMessage, index: number): string {
   return message.runtimeId ?? message.messageId ?? runtimeMessageId(index);
+}
+
+function findOriginatingUserMessage(
+  messages: ChatMessage[],
+  initialParentId: string | null,
+): ChatMessage | undefined {
+  if (initialParentId === null) {
+    return [...messages].reverse().find((message) => message.role === "user");
+  }
+
+  const messageIndexById = new Map<string, number>();
+  messages.forEach((message, index) => {
+    if (message.messageId) messageIndexById.set(message.messageId, index);
+    if (message.runtimeId) messageIndexById.set(message.runtimeId, index);
+    messageIndexById.set(renderMessageId(message, index), index);
+  });
+
+  const visited = new Set<number>();
+  let currentIndex = messageIndexById.get(initialParentId);
+  while (currentIndex !== undefined && !visited.has(currentIndex)) {
+    visited.add(currentIndex);
+    const current = messages[currentIndex];
+    if (!current) return undefined;
+    if (current.role === "user") return current;
+
+    currentIndex = current.parentMessageId
+      ? messageIndexById.get(current.parentMessageId)
+      : currentIndex > 0
+        ? currentIndex - 1
+        : undefined;
+  }
+  return undefined;
 }
 
 const permissionModeOptions: Array<{

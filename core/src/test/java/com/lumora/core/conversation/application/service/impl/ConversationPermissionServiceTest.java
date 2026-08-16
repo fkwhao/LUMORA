@@ -60,7 +60,6 @@ class ConversationPermissionServiceTest {
         ConversationRunContext context = new ConversationRunContext(
                 "task-1",
                 "conversation-1",
-                2,
                 List.of(new ChatMessage("user", "检查仓库")),
                 "message-1",
                 "检查仓库",

@@ -12,6 +12,7 @@ class ChatStreamEventResponse(BaseModel):
         "text_delta",
         "text_reset",
         "reasoning_delta",
+        "protocol_message",
         "progress_message",
         "tool_started",
         "tool_completed",
@@ -29,6 +30,7 @@ class ChatStreamEventResponse(BaseModel):
         "web_search_completed",
         "web_search_failed",
         "usage",
+        "paused",
         "completed",
         "failed",
     ]

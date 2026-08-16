@@ -10,6 +10,8 @@ Java 21、Spring Boot、MyBatis-Plus 和 SQLite 本地核心。
 - 通过本机 REST API 调用 Python Agent Runtime。
 - 将 Python 返回的任务计划步骤与任务状态写入 SQLite。
 - 持久化会话消息和活动上下文 Token，聚合每日及累计 Token 使用统计，并转发模型流式响应。
+- 将 Agent 生成建模为持久化 Run；SSE 连接只负责观察，支持暂停、继续、断线事件重放和重启后安全恢复。
+- 将模型可见的 Assistant tool call 与 Tool Result 轨迹和 UI 工作日志分开封存，续接时只恢复原生协议消息。
 - 保存远程 MCP Server 配置并向当前 Agent 请求提供经解密的临时运行配置。
 - 使用 Windows DPAPI 加密 API Key，并通过 MyBatis-Plus 将密文与模型配置统一保存到 SQLite。
 
@@ -38,6 +40,19 @@ MyBatis-Plus `BaseMapper` 提供；复杂查询需要手写 SQL 时，再放入
 `src/main/resources/mapper/`。SQLite 的 `TEXT` 时间列统一通过
 `SqliteInstantTypeHandler` 按 ISO-8601 格式读写。Controller 不写业务规则，
 Mapper 不判断状态转换。
+
+## 会话 Run
+
+`ConversationRunCoordinator` 是会话执行的唯一调度入口。当前默认并发数为 `1`，
+可通过 `LUMORA_MAX_CONCURRENT_RUNS` 调整；队列、运行状态和事件序列本身均按多会话并发设计。
+关闭或切换 Electron 页面只会断开 SSE，不会取消 Core 中的 Run。应用进程意外退出后，
+未结束的 Run 会在下次启动时恢复为 `PAUSED`，由用户显式继续。
+
+手动暂停采用 Run/Turn 分层：Core 先将 Run 标记为 `PAUSING`，Python 在当前模型轮或
+已启动工具的安全边界封口 Turn，并返回 `paused` 事件。Core 原子保存部分回答、工作记录和
+工具结果后，将 Run 置为 `PAUSED` 并释放调度名额。继续时沿用同一 `runId` 创建新的内部
+Turn，从持久化轨迹恢复，不创建可见用户消息，也不依赖进程内被冻结的 Worker。该语义在
+正常暂停、断线重放和应用重启后保持一致。
 
 ## IDE 配置
 

@@ -1,5 +1,8 @@
 package com.lumora.core.conversation.domain.model;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 public class TokenUsage {
 
     private final int promptTokens;
@@ -23,15 +26,17 @@ public class TokenUsage {
         );
     }
 
+    @JsonCreator
     public TokenUsage(
-            int promptTokens,
-            int completionTokens,
-            int totalTokens,
-            int inputTokens,
-            int outputTokens,
-            int reasoningTokens,
-            int cacheReadTokens,
-            int cacheWriteTokens,
+            @JsonProperty("promptTokens") int promptTokens,
+            @JsonProperty("completionTokens") int completionTokens,
+            @JsonProperty("totalTokens") int totalTokens,
+            @JsonProperty("inputTokens") int inputTokens,
+            @JsonProperty("outputTokens") int outputTokens,
+            @JsonProperty("reasoningTokens") int reasoningTokens,
+            @JsonProperty("cacheReadTokens") int cacheReadTokens,
+            @JsonProperty("cacheWriteTokens") int cacheWriteTokens,
+            @JsonProperty("cacheMetricsAvailable")
             boolean cacheMetricsAvailable
     ) {
         this.promptTokens = promptTokens;

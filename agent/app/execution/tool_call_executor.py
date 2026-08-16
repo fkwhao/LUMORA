@@ -1,12 +1,14 @@
+import hashlib
 import json
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable
 from dataclasses import replace
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 from app.execution.tool_result_processor import ToolResultProcessor
 from app.harness.contracts import ProviderToolCall
+from app.harness.run_control import RunControl, await_or_pause
 from app.harness.run_event import RunEvent, RunUsage
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.permission.broker import ApprovalBroker
@@ -27,6 +29,8 @@ from app.permission.reviewer import (
 from app.tool.base import ToolContext
 from app.tool.registry import ToolRegistry
 
+_AwaitedValue = TypeVar("_AwaitedValue")
+
 
 class ToolCallExecutor:
     """执行一次工具调用，并保持现有审批与公开事件语义。"""
@@ -40,6 +44,7 @@ class ToolCallExecutor:
         result_processor: ToolResultProcessor,
         approval_reviewer: ApprovalReviewer | None = None,
         blocked_call_signatures: set[str] | None = None,
+        run_control: RunControl | None = None,
     ) -> None:
         self._registry = registry
         self._permission_engine = permission_engine
@@ -52,6 +57,7 @@ class ToolCallExecutor:
             if blocked_call_signatures is not None
             else set()
         )
+        self._run_control = run_control
 
     async def execute(
         self,
@@ -135,6 +141,7 @@ class ToolCallExecutor:
                 "riskLevel": evaluation.risk_level,
                 "reversible": evaluation.reversible,
                 "workspacePath": workspace_metadata,
+                "callSignature": _tool_call_digest(call_signature),
             }
             if evaluation.decision is PermissionDecision.DENY:
                 self._blocked_call_signatures.add(call_signature)
@@ -224,22 +231,71 @@ class ToolCallExecutor:
                         },
                         model=model,
                     ), ""
-                    review = await self._approval_reviewer.review(
-                        settings,
-                        ApprovalReviewRequest(
-                            tool_name=call.name,
-                            tool_category=tool.category.value,
-                            arguments=arguments,
-                            workspace_path=policy_workspace,
-                            user_request=user_request,
-                            assistant_context=assistant_context,
-                            permission_layer=evaluation.layer,
-                            permission_reason=evaluation.reason,
-                            risk_level=evaluation.risk_level,
-                            reversible=evaluation.reversible,
-                            grants_external_path=evaluation.grants_external_path,
+                    paused, review = await self._operation_or_pause(
+                        self._approval_reviewer.review(
+                            settings,
+                            ApprovalReviewRequest(
+                                tool_name=call.name,
+                                tool_category=tool.category.value,
+                                arguments=arguments,
+                                workspace_path=policy_workspace,
+                                user_request=user_request,
+                                assistant_context=assistant_context,
+                                permission_layer=evaluation.layer,
+                                permission_reason=evaluation.reason,
+                                risk_level=evaluation.risk_level,
+                                reversible=evaluation.reversible,
+                                grants_external_path=(
+                                    evaluation.grants_external_path
+                                ),
+                            ),
                         ),
                     )
+                    if paused:
+                        paused_metadata = {
+                            **permission_metadata,
+                            "approvalReviewer": "agent",
+                            "approvalReviewDecision": "paused",
+                            "failureKind": "turn_paused",
+                            "toolExecutionState": "not_started",
+                        }
+                        result_text = json.dumps(
+                            {
+                                "ok": False,
+                                "content": "当前回合已暂停，工具尚未执行",
+                            },
+                            ensure_ascii=False,
+                        )
+                        yield RunEvent(
+                            type="approval_review_completed",
+                            item_id=review_item_id,
+                            tool_call_id=call.call_id,
+                            tool_name=call.name,
+                            title=title,
+                            arguments=arguments,
+                            output="任务已暂停",
+                            permission_layer=evaluation.layer,
+                            reason="任务已暂停",
+                            risk_level=evaluation.risk_level,
+                            reversible=evaluation.reversible,
+                            decision="deny",
+                            metadata=paused_metadata,
+                            model=model,
+                        ), result_text
+                        yield RunEvent(
+                            type="tool_failed",
+                            item_id=item_id,
+                            tool_call_id=call.call_id,
+                            tool_name=call.name,
+                            title=title,
+                            arguments=arguments,
+                            output="当前回合已暂停，工具尚未执行",
+                            error_message="任务已暂停",
+                            metadata=paused_metadata,
+                            model=model,
+                        ), result_text
+                        return
+                    assert review is not None
                     review_duration_ms = max(
                         1,
                         int((time.perf_counter() - review_started_at) * 1_000),
@@ -322,9 +378,51 @@ class ToolCallExecutor:
                         metadata=permission_metadata,
                         model=model,
                     ), ""
-                    approval_decision = await self._approval_broker.wait(
+                    approval_decision = await self._wait_for_approval(
                         approval.approval_id
                     )
+                    if approval_decision is None:
+                        paused_metadata = {
+                            **permission_metadata,
+                            "failureKind": "turn_paused",
+                            "toolExecutionState": "not_started",
+                        }
+                        yield RunEvent(
+                            type="tool_approval_resolved",
+                            item_id=item_id,
+                            tool_call_id=call.call_id,
+                            tool_name=call.name,
+                            title=title,
+                            arguments=arguments,
+                            approval_id=approval.approval_id,
+                            permission_layer=evaluation.layer,
+                            reason="任务已暂停",
+                            risk_level=evaluation.risk_level,
+                            reversible=evaluation.reversible,
+                            decision="deny",
+                            metadata=paused_metadata,
+                            model=model,
+                        ), ""
+                        result_text = json.dumps(
+                            {
+                                "ok": False,
+                                "content": "当前回合已暂停，工具尚未执行",
+                            },
+                            ensure_ascii=False,
+                        )
+                        yield RunEvent(
+                            type="tool_failed",
+                            item_id=item_id,
+                            tool_call_id=call.call_id,
+                            tool_name=call.name,
+                            title=title,
+                            arguments=arguments,
+                            output="当前回合已暂停，工具尚未执行",
+                            error_message="任务已暂停",
+                            metadata=paused_metadata,
+                            model=model,
+                        ), result_text
+                        return
                     allowed = approval_decision is not ApprovalDecision.DENY
                     decision: Literal["allow", "deny"] = (
                         "allow" if allowed else "deny"
@@ -384,6 +482,29 @@ class ToolCallExecutor:
                             tool_context,
                             allow_external_paths=True,
                         )
+
+            if self._pause_requested():
+                paused_message = "当前回合已暂停，工具尚未执行"
+                yield RunEvent(
+                    type="tool_failed",
+                    item_id=item_id,
+                    tool_call_id=call.call_id,
+                    tool_name=call.name,
+                    title=title,
+                    arguments=arguments,
+                    output=paused_message,
+                    error_message="任务已暂停",
+                    metadata={
+                        **permission_metadata,
+                        "failureKind": "turn_paused",
+                        "toolExecutionState": "not_started",
+                    },
+                    model=model,
+                ), json.dumps(
+                    {"ok": False, "content": paused_message},
+                    ensure_ascii=False,
+                )
+                return
 
             yield RunEvent(
                 type="tool_started",
@@ -449,6 +570,28 @@ class ToolCallExecutor:
                 model=model,
             ), result_text
 
+    async def _wait_for_approval(
+        self,
+        approval_id: str,
+    ) -> ApprovalDecision | None:
+        paused, decision = await await_or_pause(
+            self._approval_broker.wait(approval_id),
+            self._run_control,
+        )
+        return None if paused else decision
+
+    async def _operation_or_pause(
+        self,
+        awaitable: Awaitable[_AwaitedValue],
+    ) -> tuple[bool, _AwaitedValue | None]:
+        return await await_or_pause(awaitable, self._run_control)
+
+    def _pause_requested(self) -> bool:
+        return (
+            self._run_control is not None
+            and self._run_control.pause_requested
+        )
+
 
 def _tool_call_signature(tool_name: str, arguments: dict[str, Any]) -> str:
     normalized = json.dumps(
@@ -458,6 +601,10 @@ def _tool_call_signature(tool_name: str, arguments: dict[str, Any]) -> str:
         separators=(",", ":"),
     )
     return f"{tool_name.casefold()}:{normalized}"
+
+
+def _tool_call_digest(signature: str) -> str:
+    return hashlib.sha256(signature.encode("utf-8")).hexdigest()
 
 
 def _review_block_reason(review: ApprovalReviewResult) -> str:

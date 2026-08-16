@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import uvicorn
@@ -20,6 +21,8 @@ from app.provider.routing_provider import RoutingModelProvider
 from app.service.chat_service import ChatService
 from app.service.memory_extraction_service import MemoryExtractionService
 from app.service.planner_service import PlannerService
+
+logger = logging.getLogger(__name__)
 
 
 def default_dev_config_path() -> Path:
@@ -49,6 +52,9 @@ def create_app(
         resolved_memory_extraction_service,
     )
     app.include_router(controller.router)
+    close_chat_service = getattr(resolved_chat_service, "close", None)
+    if callable(close_chat_service):
+        app.router.add_event_handler("shutdown", close_chat_service)
 
     @app.exception_handler(AgentHttpError)
     async def handle_agent_http_error(
@@ -69,15 +75,20 @@ def create_app(
         request: Request,
         error: RequestValidationError,
     ) -> JSONResponse:
-        del error
         correlation_id = request.headers.get(
             CORRELATION_ID_HEADER,
             "",
         ).strip()
+        validation_message = _validation_error_message(error)
+        logger.warning(
+            "Agent request validation failed correlation_id=%s details=%s",
+            correlation_id,
+            validation_message,
+        )
         return _error_response(
             status.HTTP_400_BAD_REQUEST,
             INVALID_REQUEST,
-            "请求参数无效",
+            validation_message,
             False,
             correlation_id,
         )
@@ -121,6 +132,15 @@ def _error_response(
         status_code=status_code,
         content=body.model_dump(by_alias=True),
     )
+
+
+def _validation_error_message(error: RequestValidationError) -> str:
+    details: list[str] = []
+    for item in error.errors()[:3]:
+        location = ".".join(str(part) for part in item.get("loc", ()))
+        message = str(item.get("msg") or "字段无效")
+        details.append(f"{location}: {message}" if location else message)
+    return "请求参数无效" + ("：" + "; ".join(details) if details else "")
 
 
 def main() -> None:

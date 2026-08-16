@@ -77,6 +77,19 @@ public interface ConversationService {
             Consumer<Throwable> errorCallback
     );
 
+    /** Continue a paused logical run without inserting a visible user message. */
+    void continueMessage(
+            String taskId,
+            String model,
+            String reasoningEffort,
+            String workspacePath,
+            String permissionMode,
+            String correlationId,
+            Consumer<ChatStreamEvent> eventConsumer,
+            Runnable completionCallback,
+            Consumer<Throwable> errorCallback
+    );
+
     /**
      * 取消指定任务当前正在进行的模型生成。
      *
@@ -84,6 +97,14 @@ public interface ConversationService {
      * @return 找到并取消活动生成时为 true
      */
     boolean cancelGeneration(String taskId);
+
+    boolean pauseGeneration(String taskId);
+
+    void sealRecoveredTurn(
+            String taskId,
+            String runtimeTurnId,
+            List<ChatStreamEvent> events
+    );
 
     void decideToolApproval(
             String taskId,

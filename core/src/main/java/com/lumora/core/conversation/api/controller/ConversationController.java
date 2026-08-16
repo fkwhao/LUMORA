@@ -1,20 +1,18 @@
 package com.lumora.core.conversation.api.controller;
 
 import com.lumora.core.conversation.api.converter.ConversationMessageResponseConverter;
-import com.lumora.core.conversation.domain.model.ArtifactChunk;
-
-import com.lumora.core.shared.api.constant.ApiPathConstants;
-import com.lumora.core.shared.api.constant.HttpContractConstants;
-import com.lumora.core.conversation.api.converter.ConversationMessageResponseConverter;
-import com.lumora.core.conversation.api.dto.request.SendMessageRequest;
 import com.lumora.core.approval.api.dto.request.ToolApprovalDecisionRequest;
+import com.lumora.core.conversation.api.dto.request.SendMessageRequest;
 import com.lumora.core.conversation.api.dto.response.ConversationMessageResponse;
 import com.lumora.core.conversation.api.dto.response.ContextCompactionResponse;
-import com.lumora.core.conversation.domain.model.ChatStreamEvent;
-import com.lumora.core.conversation.domain.model.ChatStreamEventType;
-import com.lumora.core.conversation.domain.model.ArtifactChunk;
 import com.lumora.core.conversation.application.service.ArtifactService;
+import com.lumora.core.conversation.application.service.ConversationRunCoordinator;
 import com.lumora.core.conversation.application.service.ConversationService;
+import com.lumora.core.conversation.application.support.ConversationRunEventStreamRegistry;
+import com.lumora.core.conversation.domain.entity.ConversationRun;
+import com.lumora.core.conversation.domain.model.ArtifactChunk;
+import com.lumora.core.shared.api.constant.ApiPathConstants;
+import com.lumora.core.shared.api.constant.HttpContractConstants;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -28,7 +26,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
@@ -43,6 +40,8 @@ import java.util.Map;
 public class ConversationController {
 
     private final ConversationService conversationService;
+    private final ConversationRunCoordinator runCoordinator;
+    private final ConversationRunEventStreamRegistry runEventStreams;
     private final ConversationMessageResponseConverter responseConverter;
     private final ArtifactService artifactService;
 
@@ -74,20 +73,16 @@ public class ConversationController {
             @RequestHeader(HttpContractConstants.CORRELATION_ID_HEADER)
             String correlationId
     ) {
-        SseEmitter emitter = new SseEmitter(0L);
-        conversationService.streamMessage(
+        ConversationRun run = runCoordinator.startMessage(
                 taskId,
                 request.getContent(),
                 request.getModel(),
                 request.getReasoningEffort(),
                 request.getWorkspacePath(),
                 request.getPermissionMode(),
-                correlationId,
-                event -> sendEvent(emitter, event),
-                emitter::complete,
-                error -> completeWithStreamError(emitter, error)
+                correlationId
         );
-        return emitter;
+        return runEventStreams.subscribeRaw(run.getRunId(), 0L);
     }
 
     @PostMapping(
@@ -101,8 +96,7 @@ public class ConversationController {
             @RequestHeader(HttpContractConstants.CORRELATION_ID_HEADER)
             String correlationId
     ) {
-        SseEmitter emitter = new SseEmitter(0L);
-        conversationService.regenerateMessage(
+        ConversationRun run = runCoordinator.startRegeneration(
                 taskId,
                 messageId,
                 request.getContent(),
@@ -110,22 +104,16 @@ public class ConversationController {
                 request.getReasoningEffort(),
                 request.getWorkspacePath(),
                 request.getPermissionMode(),
-                correlationId,
-                event -> sendEvent(emitter, event),
-                emitter::complete,
-                error -> completeWithStreamError(emitter, error)
+                correlationId
         );
-        return emitter;
+        return runEventStreams.subscribeRaw(run.getRunId(), 0L);
     }
 
     @DeleteMapping(ApiPathConstants.TASK_MESSAGE_CANCEL)
     public Map<String, Boolean> cancelGeneration(
             @PathVariable String taskId
     ) {
-        return Map.of(
-                "cancelled",
-                conversationService.cancelGeneration(taskId)
-        );
+        return Map.of("cancelled", runCoordinator.cancelActive(taskId) != null);
     }
 
     @PostMapping(ApiPathConstants.TASK_TOOL_APPROVAL)
@@ -167,35 +155,4 @@ public class ConversationController {
         );
     }
 
-    private void completeWithStreamError(
-            SseEmitter emitter,
-            Throwable error
-    ) {
-        sendEvent(
-                emitter,
-                new ChatStreamEvent(
-                        ChatStreamEventType.FAILED,
-                        "",
-                        "",
-                        null,
-                        safeErrorMessage(error)
-                )
-        );
-        emitter.complete();
-    }
-
-    private void sendEvent(SseEmitter emitter, ChatStreamEvent event) {
-        try {
-            emitter.send(SseEmitter.event().data(event));
-        } catch (IOException error) {
-            emitter.completeWithError(error);
-        }
-    }
-
-    private String safeErrorMessage(Throwable error) {
-        String message = error.getMessage();
-        return message == null || message.isBlank()
-                ? "模型流式响应失败"
-                : message;
-    }
 }

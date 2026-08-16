@@ -27,6 +27,25 @@ _JSON_FENCE = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 _LOGGER = logging.getLogger(__name__)
+_DECISION_ALIASES = {
+    "allow_once": "allow_once",
+    "allowonce": "allow_once",
+    "allow": "allow_once",
+    "approve": "allow_once",
+    "approved": "allow_once",
+    "permit": "allow_once",
+    "deny": "deny",
+    "denied": "deny",
+    "reject": "deny",
+    "rejected": "deny",
+    "block": "deny",
+    "blocked": "deny",
+    "require_human": "require_human",
+    "requirehuman": "require_human",
+    "human": "require_human",
+    "ask_human": "require_human",
+    "needs_human": "require_human",
+}
 
 class ApprovalReviewDecision(StrEnum):
     ALLOW_ONCE = "allow_once"
@@ -143,13 +162,29 @@ class ModelApprovalReviewer:
         usage_parts: list[TokenUsageResponse] = []
         for attempt in range(_REVIEW_ATTEMPTS):
             try:
+                attempt_messages = messages
+                if attempt > 0:
+                    attempt_messages = [
+                        *messages,
+                        {
+                            "role": "user",
+                            "content": (
+                                "The previous response did not satisfy the "
+                                "required JSON contract. Return only one JSON "
+                                "object. Use exactly one decision value from "
+                                "allow_once, deny, require_human; one riskLevel "
+                                "from LOW, MEDIUM, HIGH, CRITICAL; and a "
+                                "non-empty reason."
+                            ),
+                        },
+                    ]
                 turn = await asyncio.wait_for(
                     self._complete_turn(
                         replace(
                             settings,
                             max_output_tokens=_REVIEW_MAX_OUTPUT_TOKENS,
                         ),
-                        messages,
+                        attempt_messages,
                         (),
                         None,
                     ),
@@ -158,7 +193,10 @@ class ModelApprovalReviewer:
                 usage_parts.append(turn.usage)
                 if turn.tool_calls:
                     raise ValueError("Approval reviewer attempted a tool call")
-                decision, risk_level, reason = _parse_review(turn.content)
+                decision, risk_level, reason = _parse_review(
+                    turn.content,
+                    request.risk_level,
+                )
                 return ApprovalReviewResult(
                     decision,
                     reason,
@@ -174,7 +212,7 @@ class ModelApprovalReviewer:
         _LOGGER.warning(
             "Approval reviewer failed after %s attempts: %s",
             _REVIEW_ATTEMPTS,
-            type(last_error).__name__ if last_error is not None else "unknown",
+            _review_error_summary(last_error),
         )
         return ApprovalReviewResult(
             ApprovalReviewDecision.REQUIRE_HUMAN,
@@ -187,6 +225,7 @@ class ModelApprovalReviewer:
 
 def _parse_review(
     content: str,
+    fallback_risk_level: str,
 ) -> tuple[ApprovalReviewDecision, str, str]:
     text = content.strip()
     fenced = _JSON_FENCE.fullmatch(text)
@@ -198,11 +237,23 @@ def _parse_review(
         payload = _first_json_object(text)
     if not isinstance(payload, dict):
         raise TypeError("Approval review response must be an object")
-    decision = ApprovalReviewDecision(str(payload.get("decision") or ""))
-    risk_level = str(payload.get("riskLevel") or "").upper()
+    raw_decision = str(payload.get("decision") or "")
+    decision_key = re.sub(
+        r"[\s-]+",
+        "_",
+        raw_decision.strip().casefold(),
+    )
+    normalized_decision = _DECISION_ALIASES.get(decision_key)
+    if normalized_decision is None:
+        raise ValueError("Approval review decision is invalid")
+    decision = ApprovalReviewDecision(normalized_decision)
+    raw_risk_level = payload.get("riskLevel", payload.get("risk_level"))
+    risk_level = str(raw_risk_level or fallback_risk_level).upper()
     if risk_level not in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}:
         raise ValueError("Approval review risk level is invalid")
-    reason = str(payload.get("reason") or "").strip()
+    reason = str(
+        payload.get("reason") or payload.get("explanation") or ""
+    ).strip()
     if not reason or len(reason) > _MAX_REASON_CHARS:
         raise ValueError("Approval review reason is invalid")
     return decision, risk_level, reason
@@ -219,3 +270,13 @@ def _first_json_object(text: str) -> Any:
         except json.JSONDecodeError:
             continue
     raise ValueError("Approval review response did not contain a JSON object")
+
+
+def _review_error_summary(error: Exception | None) -> str:
+    if error is None:
+        return "unknown"
+    error_type = type(error).__name__
+    message = str(error)
+    if message.startswith("Approval review"):
+        return f"{error_type}: {message}"
+    return error_type

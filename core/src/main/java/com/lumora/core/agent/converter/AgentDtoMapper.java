@@ -2,6 +2,7 @@ package com.lumora.core.agent.converter;
 
 import com.lumora.core.agent.dto.request.AgentChatCompletionRequest;
 import com.lumora.core.agent.dto.request.AgentChatMessageRequest;
+import com.lumora.core.agent.dto.request.AgentChatToolCallRequest;
 import com.lumora.core.agent.dto.request.AgentModelConnectionRequest;
 import com.lumora.core.agent.dto.request.AgentMemoryContextRequest;
 import com.lumora.core.agent.dto.request.AgentMcpServerRequest;
@@ -151,7 +152,13 @@ public class AgentDtoMapper {
                         message.getRole(),
                         message.getContent(),
                         message.getMessageId(),
-                        message.getSequence()
+                        message.getSequence(),
+                        message.getToolCalls().stream()
+                                .map(call -> new AgentChatToolCallRequest(
+                                        call.id(), call.name(), call.arguments()
+                                ))
+                                .toList(),
+                        message.getToolCallId()
                 ))
                 .toList();
         return new AgentChatCompletionRequest(
@@ -169,8 +176,12 @@ public class AgentDtoMapper {
                         mcpServers.stream().map(AgentMcpServerRequest::new)
                                 .toList()
                 ),
-                reasoningEffort
+                normalizeOptionalText(reasoningEffort)
         );
+    }
+
+    private String normalizeOptionalText(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     public ContextCompaction toContextCompaction(

@@ -26,6 +26,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -34,6 +35,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -55,7 +57,6 @@ class ConversationFailedUsageServiceTest {
         ConversationRunContext context = new ConversationRunContext(
                 "task-1",
                 "conversation-1",
-                2,
                 List.of(new ChatMessage("user", "hello")),
                 "message-1",
                 "hello",
@@ -107,6 +108,65 @@ class ConversationFailedUsageServiceTest {
     }
 
     @Test
+    void persistsOnlyOnePausedTurnWhenTheRuntimeRepeatsItsTerminalEvent()
+            throws Exception {
+        ConversationPersistenceService persistence = mock(
+                ConversationPersistenceService.class
+        );
+        ConversationRuntimePort runtime = mock(ConversationRuntimePort.class);
+        ConversationRunContext context = new ConversationRunContext(
+                "task-1",
+                "conversation-1",
+                List.of(new ChatMessage("user", "hello")),
+                "message-1",
+                "hello",
+                null,
+                null,
+                System.nanoTime()
+        );
+        when(persistence.prepareNewMessage("task-1", "hello", null))
+                .thenReturn(context);
+        doAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            java.util.function.Consumer<ChatStreamEvent> consumer =
+                    invocation.getArgument(1);
+            ChatStreamEvent paused = new ChatStreamEvent(
+                    ChatStreamEventType.PAUSED, "", "demo", null, ""
+            );
+            consumer.accept(paused);
+            consumer.accept(paused);
+            return null;
+        }).when(runtime).streamChat(any(ConversationRunRequest.class), any());
+        CountDownLatch completed = new CountDownLatch(1);
+        AtomicInteger publishedEvents = new AtomicInteger();
+        ConversationServiceImpl service = new ConversationServiceImpl(
+                persistence,
+                runtime,
+                mock(ContextCompactionPort.class),
+                mock(ToolApprovalPort.class),
+                executor,
+                mock(MemoryExtractionCoordinator.class),
+                mock(ConversationContextSummaryService.class),
+                mock(ArtifactService.class),
+                mock(MemoryService.class)
+        );
+
+        service.streamMessage(
+                "task-1", "hello", null, null, null,
+                "request_approval", "correlation-1",
+                event -> publishedEvents.incrementAndGet(),
+                completed::countDown,
+                error -> { }
+        );
+
+        assertTrue(completed.await(5, TimeUnit.SECONDS));
+        verify(persistence, times(1)).persistPausedTurn(
+                eq(context), any(), eq("correlation-1")
+        );
+        assertThat(publishedEvents.get()).isEqualTo(1);
+    }
+
+    @Test
     void cancellationWaitsUntilVisibleWorkLogIsPersisted() throws Exception {
         ConversationPersistenceService persistence = mock(
                 ConversationPersistenceService.class
@@ -115,7 +175,6 @@ class ConversationFailedUsageServiceTest {
         ConversationRunContext context = new ConversationRunContext(
                 "task-1",
                 "conversation-1",
-                2,
                 List.of(new ChatMessage("user", "hello")),
                 "message-1",
                 "hello",
@@ -207,7 +266,6 @@ class ConversationFailedUsageServiceTest {
         ConversationRunContext context = new ConversationRunContext(
                 "task-1",
                 "conversation-1",
-                2,
                 List.of(new ChatMessage("user", "remember this")),
                 "message-1",
                 "remember this",

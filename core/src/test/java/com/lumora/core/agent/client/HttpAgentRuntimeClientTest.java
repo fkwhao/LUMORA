@@ -32,6 +32,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.springframework.test.web.client.ExpectedCount.once;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
@@ -55,6 +56,15 @@ class HttpAgentRuntimeClientTest {
     private CoreProperties properties;
     private MockRestServiceServer server;
     private HttpAgentRuntimeClient client;
+
+    @Test
+    void normalizesBlankReasoningEffortAtTheAgentBoundary() {
+        assertNull(new AgentDtoMapper().toChatRequest(
+                List.of(new ChatMessage("user", "你好")),
+                CONNECTION,
+                "   "
+        ).getReasoningEffort());
+    }
 
     @BeforeEach
     void setUp() {
