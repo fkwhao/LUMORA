@@ -133,14 +133,14 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "412": { $ref: "#/components/responses/ProtocolMismatch" }
-  /api/v1/chat/runs/{runId}/pause:
+  /api/v1/chat/runs/{run_id}/pause:
     post:
       operationId: pauseChatRun
       description: 请求活动 Agent 在当前模型轮或工具安全边界结束当前 Turn。
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
         - $ref: "#/components/parameters/CorrelationId"
-        - name: runId
+        - name: run_id
           in: path
           required: true
           schema: { type: string, minLength: 1 }
@@ -154,6 +154,67 @@ paths:
                 required: [paused]
                 properties:
                   paused: { type: boolean }
+  /api/v1/chat/runs/{run_id}/steers/{input_id}:
+    parameters:
+      - $ref: "#/components/parameters/ProtocolVersion"
+      - $ref: "#/components/parameters/CorrelationId"
+      - name: run_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+      - name: input_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      operationId: addChatRunSteer
+      description: 将引导加入活动运行；只在下一个安全步骤边界生效，不中断当前模型或工具。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SteerRequest" }
+      responses:
+        "200":
+          description: 引导接收结果
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accepted]
+                properties:
+                  accepted: { type: boolean }
+    put:
+      operationId: replaceChatRunSteer
+      description: 替换尚未被 Agent 认领的引导。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SteerRequest" }
+      responses:
+        "200":
+          description: 替换结果
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [replaced]
+                properties:
+                  replaced: { type: boolean }
+    delete:
+      operationId: removeChatRunSteer
+      description: 撤销尚未被 Agent 认领的引导。
+      responses:
+        "200":
+          description: 撤销结果
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [removed]
+                properties:
+                  removed: { type: boolean }
   /api/v1/artifacts/read:
     post:
       operationId: readArtifact
@@ -555,6 +616,12 @@ components:
         decision:
           type: string
           enum: [allow, allow_once, allow_always, deny]
+    SteerRequest:
+      type: object
+      additionalProperties: false
+      required: [content]
+      properties:
+        content: { type: string, minLength: 1, maxLength: 1000000 }
     ModelConnection:
       type: object
       additionalProperties: false
@@ -676,6 +743,7 @@ components:
             - approval_review_started
             - approval_review_completed
             - usage
+            - steer_claimed
             - paused
             - completed
             - failed

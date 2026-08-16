@@ -226,3 +226,12 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 026-conversation-input
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V26__conversation_input.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

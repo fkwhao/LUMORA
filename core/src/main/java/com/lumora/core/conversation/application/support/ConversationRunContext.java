@@ -14,7 +14,7 @@ public class ConversationRunContext {
     private final String conversationId;
     private final List<ChatMessage> modelMessages;
     private final String currentUserMessageId;
-    private final String assistantParentMessageId;
+    private volatile String assistantParentMessageId;
     private final String currentUserContent;
     private final String memorySummary;
     private final String memoryExtractionContext;
@@ -125,6 +125,13 @@ public class ConversationRunContext {
 
     public String getAssistantParentMessageId() {
         return assistantParentMessageId;
+    }
+
+    public void advanceAssistantParentMessageId(String messageId) {
+        if (messageId == null || messageId.isBlank()) {
+            throw new IllegalArgumentException("助手父消息 ID 不能为空");
+        }
+        assistantParentMessageId = messageId;
     }
 
     public String getCurrentUserContent() {

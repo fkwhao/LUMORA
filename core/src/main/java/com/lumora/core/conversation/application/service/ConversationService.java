@@ -100,6 +100,12 @@ public interface ConversationService {
 
     boolean pauseGeneration(String taskId);
 
+    boolean addSteer(String taskId, String inputId, String content);
+
+    boolean replaceSteer(String taskId, String inputId, String content);
+
+    boolean removeSteer(String taskId, String inputId);
+
     void sealRecoveredTurn(
             String taskId,
             String runtimeTurnId,

@@ -101,6 +101,41 @@ public class AgentConversationRuntimeAdapter implements ConversationRuntimePort,
         );
     }
 
+    @Override
+    public boolean addSteer(
+            String runId, String inputId, String content, String correlationId
+    ) {
+        return agentRuntimeClient.addSteer(
+                requireText(runId, "Run ID"),
+                requireText(inputId, "Input ID"),
+                requireText(content, "Steer content"),
+                requireText(correlationId, "Correlation ID")
+        );
+    }
+
+    @Override
+    public boolean replaceSteer(
+            String runId, String inputId, String content, String correlationId
+    ) {
+        return agentRuntimeClient.replaceSteer(
+                requireText(runId, "Run ID"),
+                requireText(inputId, "Input ID"),
+                requireText(content, "Steer content"),
+                requireText(correlationId, "Correlation ID")
+        );
+    }
+
+    @Override
+    public boolean removeSteer(
+            String runId, String inputId, String correlationId
+    ) {
+        return agentRuntimeClient.removeSteer(
+                requireText(runId, "Run ID"),
+                requireText(inputId, "Input ID"),
+                requireText(correlationId, "Correlation ID")
+        );
+    }
+
     private static String requireText(String value, String label) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(label + " cannot be empty");

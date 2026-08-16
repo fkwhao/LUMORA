@@ -137,6 +137,15 @@ public class ConversationPersistenceService {
         );
     }
 
+    public synchronized void persistSteerMessage(
+            ConversationRunContext context,
+            String content
+    ) {
+        transactionTemplate.executeWithoutResult(
+                status -> insertSteerMessage(context, content)
+        );
+    }
+
     public synchronized void persistFailedUsage(
             ConversationRunContext context,
             ConversationStreamAccumulator accumulator
@@ -481,6 +490,36 @@ public class ConversationPersistenceService {
                 accumulator.getActiveContextTokens()
         );
         messageMapper.insert(assistantMessage);
+        Conversation conversation = conversationMapper.selectById(
+                context.getConversationId()
+        );
+        touchConversation(conversation, context.getTaskId(), now);
+    }
+
+    private void insertSteerMessage(
+            ConversationRunContext context,
+            String content
+    ) {
+        if (content == null || content.isBlank()) {
+            throw new IllegalArgumentException("引导内容不能为空");
+        }
+        ConversationMessage parent = messageMapper.selectById(
+                context.getAssistantParentMessageId()
+        );
+        if (parent == null) {
+            throw new IllegalStateException("引导消息缺少父消息");
+        }
+        Instant now = clock.instant();
+        ConversationMessage message = newUserMessage(
+                context.getConversationId(),
+                nextSequence(context.getConversationId()),
+                parent.getMessageId(),
+                parent.getMessageDepth() + 1,
+                content.trim(),
+                now
+        );
+        messageMapper.insert(message);
+        context.advanceAssistantParentMessageId(message.getMessageId());
         Conversation conversation = conversationMapper.selectById(
                 context.getConversationId()
         );

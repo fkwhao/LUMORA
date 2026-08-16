@@ -1,4 +1,5 @@
 import type {
+  ChatMessage,
   ChatStreamEvent,
   LumoraModelApi,
 } from "../../../../shared/model-contract";
@@ -30,6 +31,21 @@ export function applyChatEvent(
   set: (partial: Partial<TaskState>) => void,
   resolve: () => void,
 ): void {
+  if (event.type === "steer_claimed") {
+    if (event.itemId && event.delta.trim()) {
+      set({
+        pendingInputs: get().pendingInputs.filter(
+          (input) => input.inputId !== event.itemId,
+        ),
+        messages: insertSteerUserMessage(
+          get().messages,
+          event.itemId,
+          event.delta,
+        ),
+      });
+    }
+    return;
+  }
   if (event.type === "tool_approval_requested") {
     if (!event.approvalId || !event.itemId || !event.toolName) return;
     set({
@@ -244,6 +260,41 @@ export function applyChatEvent(
       )
       .finally(resolve);
   }
+}
+
+export function insertSteerUserMessage(
+  messages: ChatMessage[],
+  inputId: string,
+  content: string,
+  beforeTrailingAssistant = true,
+): ChatMessage[] {
+  const normalizedContent = content.trim();
+  if (!normalizedContent) return messages;
+  const runtimeId = `steer-${inputId}`;
+  const existingIndex = messages.findIndex(
+    (message) => message.runtimeId === runtimeId,
+  );
+  if (existingIndex >= 0) {
+    const next = [...messages];
+    next[existingIndex] = {
+      ...next[existingIndex]!,
+      content: normalizedContent,
+    };
+    return next;
+  }
+  const next = [...messages];
+  const runningAssistant = beforeTrailingAssistant
+    && next.at(-1)?.role === "assistant"
+    ? next.pop()
+    : undefined;
+  next.push({
+    runtimeId,
+    role: "user",
+    content: normalizedContent,
+    createdAt: new Date().toISOString(),
+  });
+  if (runningAssistant) next.push(runningAssistant);
+  return next;
 }
 
 /** Refresh delayed, billed background calls such as memory extraction. */

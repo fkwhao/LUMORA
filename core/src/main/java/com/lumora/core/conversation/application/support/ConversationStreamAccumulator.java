@@ -31,6 +31,7 @@ public class ConversationStreamAccumulator {
             content.append(valueOrEmpty(event.getDelta()));
         } else if (event.getType() == ChatStreamEventType.TEXT_RESET) {
             content.setLength(0);
+            discardResetAssistantProtocol();
         } else if (event.getType() == ChatStreamEventType.COMPLETED) {
             completed = true;
         } else if (event.getType() == ChatStreamEventType.PAUSED) {
@@ -142,6 +143,20 @@ public class ConversationStreamAccumulator {
         });
         if (!message.isEmpty()) {
             protocolMessages.add(Collections.unmodifiableMap(message));
+        }
+    }
+
+    private void discardResetAssistantProtocol() {
+        if (protocolMessages.isEmpty()) {
+            return;
+        }
+        Map<String, Object> last = protocolMessages.getLast();
+        Object rawToolCalls = last.get("toolCalls");
+        boolean hasToolCalls = rawToolCalls instanceof List<?> toolCalls
+                && !toolCalls.isEmpty();
+        if ("assistant".equals(last.get("role"))
+                && !hasToolCalls) {
+            protocolMessages.removeLast();
         }
     }
 

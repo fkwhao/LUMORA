@@ -211,6 +211,22 @@ Turn 存在 `PAUSING` 耐久事件；普通模型或工具失败不会被自动�
 输入。当前 `lumora.runs.max-concurrent` 默认为 `1`，但 Run 存储、事件流和调度器按 `run_id`
 隔离，并发上限可在后续多会话执行时提高，而不需要重写暂停协议。
 
+### 问题队列与运行中引导
+
+Desktop 只保留一个发送入口：没有活动 Run 时直接开始 Turn；存在活动或暂停 Run 时默认创建
+耐久 `ConversationInput(NEXT_TURN)`。输入保存在 SQLite 的 `conversation_input`，当前 Run 结束后
+由 `ConversationRunCoordinator` 按位置自动领取并创建新 Run。队列支持编辑、删除和排序，不依赖
+Renderer 或 Python 进程内存。
+
+队列中的问题可通过“调整方向”转换为绑定当前 `run_id` 的 `NEXT_STEP`。Python Runtime 只在
+下一个安全步骤边界认领 Steer，并发出 `steer_claimed`；Java 随后把它保存为正常可见的 User
+消息并推进最终 Assistant 的父消息。暂停、暂停中或尚未获得槽位的 Run 不立即接收 Steer，输入
+保持 `PENDING`，继续 Run 后再投递。该机制不是强制停止当前模型或工具，也不会丢弃已经形成的
+Assistant Tool Call / Tool Result 协议轨迹。
+
+完整状态、接口、失败处理和 Composer 视觉规范见
+[对话问题队列与 Steer 设计](conversation-input-queue-design.md)。
+
 ## 5. System Prompt 与工具注册
 
 LUMORA 采用与现代 Agent Harness 一致的分层装配方式，而不是把一份超长 Prompt

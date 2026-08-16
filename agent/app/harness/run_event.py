@@ -23,6 +23,7 @@ RunEventType: TypeAlias = Literal[
     "context_compacted",
     "context_compaction_failed",
     "usage",
+    "steer_claimed",
     "paused",
     "completed",
     "failed",

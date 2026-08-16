@@ -11,6 +11,7 @@ import com.lumora.core.agent.dto.request.AgentModelConnectionRequest;
 import com.lumora.core.agent.dto.request.AgentModelListRequest;
 import com.lumora.core.agent.dto.request.AgentMcpServerRequest;
 import com.lumora.core.agent.dto.request.AgentToolApprovalDecisionRequest;
+import com.lumora.core.agent.dto.request.AgentSteerRequest;
 import com.lumora.core.agent.dto.response.AgentChatCompletionResponse;
 import com.lumora.core.agent.dto.response.AgentPlanTaskResponse;
 import com.lumora.core.agent.dto.response.AgentModelListResponse;
@@ -234,6 +235,39 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
         return Boolean.TRUE.equals(exceptionMapper.execute(
                 () -> httpApi.pauseRun(correlationId, runId)
         ).get("paused"));
+    }
+
+    @Override
+    public boolean addSteer(
+            String runId, String inputId, String content, String correlationId
+    ) {
+        return Boolean.TRUE.equals(exceptionMapper.execute(
+                () -> httpApi.addSteer(
+                        correlationId, runId, inputId,
+                        new AgentSteerRequest(content)
+                )
+        ).get("accepted"));
+    }
+
+    @Override
+    public boolean replaceSteer(
+            String runId, String inputId, String content, String correlationId
+    ) {
+        return Boolean.TRUE.equals(exceptionMapper.execute(
+                () -> httpApi.replaceSteer(
+                        correlationId, runId, inputId,
+                        new AgentSteerRequest(content)
+                )
+        ).get("replaced"));
+    }
+
+    @Override
+    public boolean removeSteer(
+            String runId, String inputId, String correlationId
+    ) {
+        return Boolean.TRUE.equals(exceptionMapper.execute(
+                () -> httpApi.removeSteer(correlationId, runId, inputId)
+        ).get("removed"));
     }
 
 }

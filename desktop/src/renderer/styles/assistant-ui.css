@@ -98,15 +98,22 @@
   line-height: 1.5;
 }
 
+.aui-official-thread-shell .aui-composer-shell-with-header {
+  margin-top: -1px;
+  border-top-color: transparent !important;
+}
+
 .aui-official-thread-shell .aui-composer-send {
-  color: var(--aui-primary-foreground);
+  color: var(--aui-primary-foreground) !important;
+  background: var(--aui-primary) !important;
 }
 
 .aui-official-thread-shell .aui-composer-send svg {
   display: block;
-  color: currentColor;
-  opacity: 1;
-  stroke: currentColor;
+  color: var(--aui-primary-foreground) !important;
+  fill: none !important;
+  opacity: 1 !important;
+  stroke: var(--aui-primary-foreground) !important;
 }
 
 .aui-official-thread-shell .aui-composer-cancel {

@@ -7,6 +7,9 @@ import type {
   ChatStreamEvent,
   ConversationRunEvent,
   ConversationRunSnapshot,
+  ConversationInput,
+  CreateConversationInput,
+  UpdateConversationInput,
   ContextCompactionResult,
   ArtifactChunk,
   ListModelsInput,
@@ -237,6 +240,40 @@ export class RestModelGateway implements ModelGateway {
     return (await response.json()) as ConversationRunSnapshot;
   }
 
+  listInputs(taskId: string): Promise<ConversationInput[]> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/inputs`,
+    );
+  }
+
+  createInput(
+    taskId: string,
+    input: CreateConversationInput,
+  ): Promise<ConversationInput> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/inputs`,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  }
+
+  updateInput(
+    taskId: string,
+    inputId: string,
+    input: UpdateConversationInput,
+  ): Promise<ConversationInput> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/inputs/${encodeURIComponent(inputId)}`,
+      { method: "PUT", body: JSON.stringify(input) },
+    );
+  }
+
+  async deleteInput(taskId: string, inputId: string): Promise<void> {
+    await this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/inputs/${encodeURIComponent(inputId)}`,
+      { method: "DELETE" },
+    );
+  }
+
   pauseRun(taskId: string, runId: string): Promise<ConversationRunSnapshot> {
     return this.runAction(taskId, runId, "pause");
   }
@@ -342,6 +379,7 @@ export class RestModelGateway implements ModelGateway {
         error.message ?? `Java Core 请求失败: HTTP ${response.status}`,
       );
     }
+    if (response.status === 204) return undefined as T;
     return (await response.json()) as T;
   }
 

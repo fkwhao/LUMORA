@@ -6,6 +6,8 @@ import type {
   ChatRequestOptions,
   ChatStreamEvent,
   ConversationRunEvent,
+  CreateConversationInput,
+  UpdateConversationInput,
   ListModelsInput,
   SaveModelProviderInput,
   SaveProviderModelInput,
@@ -40,6 +42,10 @@ export const modelIpcChannels = {
   pauseRun: "model:pause-run",
   resumeRun: "model:resume-run",
   cancelRun: "model:cancel-run",
+  listInputs: "model:list-inputs",
+  createInput: "model:create-input",
+  updateInput: "model:update-input",
+  deleteInput: "model:delete-input",
   streamStart: "model:stream-start",
   streamCancel: "model:stream-cancel",
   streamEvent: "model:stream-event",
@@ -133,6 +139,36 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
   );
   ipcMain.handle(modelIpcChannels.getActiveRun, (_event, taskId: string) =>
     gateway.getActiveRun(requireText(taskId, "任务 ID")));
+  ipcMain.handle(modelIpcChannels.listInputs, (_event, taskId: string) =>
+    gateway.listInputs(requireText(taskId, "任务 ID")));
+  ipcMain.handle(
+    modelIpcChannels.createInput,
+    (_event, taskId: string, input: CreateConversationInput) =>
+      gateway.createInput(
+        requireText(taskId, "任务 ID"),
+        validateConversationInput(input, true) as CreateConversationInput,
+      ),
+  );
+  ipcMain.handle(
+    modelIpcChannels.updateInput,
+    (
+      _event,
+      taskId: string,
+      inputId: string,
+      input: UpdateConversationInput,
+    ) => gateway.updateInput(
+      requireText(taskId, "任务 ID"),
+      requireText(inputId, "队列内容 ID"),
+      validateConversationInput(input, false),
+    ),
+  );
+  ipcMain.handle(
+    modelIpcChannels.deleteInput,
+    (_event, taskId: string, inputId: string) => gateway.deleteInput(
+      requireText(taskId, "任务 ID"),
+      requireText(inputId, "队列内容 ID"),
+    ),
+  );
   ipcMain.handle(
     modelIpcChannels.pauseRun,
     (_event, taskId: string, runId: string) => gateway.pauseRun(
@@ -270,6 +306,10 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
     ipcMain.removeHandler(modelIpcChannels.compactContext);
     ipcMain.removeHandler(modelIpcChannels.readArtifact);
     ipcMain.removeHandler(modelIpcChannels.getActiveRun);
+    ipcMain.removeHandler(modelIpcChannels.listInputs);
+    ipcMain.removeHandler(modelIpcChannels.createInput);
+    ipcMain.removeHandler(modelIpcChannels.updateInput);
+    ipcMain.removeHandler(modelIpcChannels.deleteInput);
     ipcMain.removeHandler(modelIpcChannels.pauseRun);
     ipcMain.removeHandler(modelIpcChannels.resumeRun);
     ipcMain.removeHandler(modelIpcChannels.cancelRun);
@@ -431,6 +471,39 @@ function validateChatRequestOptions(
     throw new TypeError("权限模式无效");
   }
   return { model, reasoningEffort, workspacePath, permissionMode };
+}
+
+function validateConversationInput(
+  input: CreateConversationInput | UpdateConversationInput,
+  requireCoreFields: boolean,
+): CreateConversationInput | UpdateConversationInput {
+  if (!input || typeof input !== "object") {
+    throw new TypeError("队列内容格式无效");
+  }
+  const content = input.content === undefined
+    ? undefined
+    : requireText(input.content, "消息内容");
+  const target = input.target;
+  if (
+    target !== undefined &&
+    target !== "NEXT_TURN" &&
+    target !== "NEXT_STEP"
+  ) {
+    throw new TypeError("队列目标无效");
+  }
+  if (requireCoreFields && (!content || !target)) {
+    throw new TypeError("消息内容和队列目标不能为空");
+  }
+  const position = input.position;
+  if (position !== undefined && (!Number.isInteger(position) || position < 1)) {
+    throw new TypeError("队列位置无效");
+  }
+  return {
+    ...validateChatRequestOptions(input),
+    content,
+    target,
+    position,
+  } as CreateConversationInput | UpdateConversationInput;
 }
 
 function validateToolApprovalDecision(

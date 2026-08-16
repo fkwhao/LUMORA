@@ -6,6 +6,7 @@ import com.lumora.core.conversation.domain.model.TokenUsage;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -39,6 +40,38 @@ class ConversationStreamAccumulatorTest {
         ));
 
         assertThat(accumulator.getContent()).isEqualTo("最终答案。");
+    }
+
+    @Test
+    void dropsOnlyTheResetDraftFromProtocolReplay() {
+        ConversationStreamAccumulator accumulator =
+                new ConversationStreamAccumulator();
+        accumulator.accept(protocolEvent(Map.of(
+                "role", "tool",
+                "content", "BUILD SUCCESS",
+                "toolCallId", "call-1"
+        )));
+        accumulator.accept(protocolEvent(Map.of(
+                "role", "assistant",
+                "content", "重定向前的草稿",
+                "toolCalls", List.of()
+        )));
+
+        accumulator.accept(new ChatStreamEvent(
+                ChatStreamEventType.TEXT_RESET,
+                "",
+                "model",
+                null,
+                ""
+        ));
+
+        assertThat(accumulator.getProtocolMessages()).containsExactly(
+                Map.of(
+                        "role", "tool",
+                        "content", "BUILD SUCCESS",
+                        "toolCallId", "call-1"
+                )
+        );
     }
 
     @Test
@@ -203,6 +236,14 @@ class ConversationStreamAccumulatorTest {
                 20L,
                 null,
                 metadata
+        );
+    }
+
+    private ChatStreamEvent protocolEvent(Map<String, Object> message) {
+        return new ChatStreamEvent(
+                ChatStreamEventType.PROTOCOL_MESSAGE,
+                "", "model", null, "", "", "", "", "",
+                Map.of(), "", 0L, null, Map.of("message", message)
         );
     }
 }

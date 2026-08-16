@@ -11,6 +11,8 @@ import type {
   ChatRequestOptions,
   ChatStreamEvent,
   ConversationRunEvent,
+  CreateConversationInput,
+  UpdateConversationInput,
   ListModelsInput,
   SaveModelProviderInput,
   SaveProviderModelInput,
@@ -129,6 +131,30 @@ const api: LumoraApi = {
       }),
     getActiveRun: (taskId) =>
       ipcRenderer.invoke("model:get-active-run", validateTaskId(taskId)),
+    listInputs: (taskId) =>
+      ipcRenderer.invoke("model:list-inputs", validateTaskId(taskId)),
+    createInput: (taskId, input: CreateConversationInput) =>
+      ipcRenderer.invoke(
+        "model:create-input",
+        validateTaskId(taskId),
+        input,
+      ),
+    updateInput: (
+      taskId,
+      inputId,
+      input: UpdateConversationInput,
+    ) => ipcRenderer.invoke(
+      "model:update-input",
+      validateTaskId(taskId),
+      validateMessageId(inputId),
+      input,
+    ),
+    deleteInput: (taskId, inputId) =>
+      ipcRenderer.invoke(
+        "model:delete-input",
+        validateTaskId(taskId),
+        validateMessageId(inputId),
+      ),
     pauseRun: (taskId, runId) =>
       ipcRenderer.invoke(
         "model:pause-run",

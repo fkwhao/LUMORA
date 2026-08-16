@@ -2,11 +2,15 @@ package com.lumora.core.conversation.application.service;
 
 import com.lumora.core.conversation.application.support.ConversationRunEventStreamRegistry;
 import com.lumora.core.conversation.application.support.ConversationRunStore;
+import com.lumora.core.conversation.application.support.ConversationInputStore;
+import com.lumora.core.conversation.domain.entity.ConversationInput;
 import com.lumora.core.conversation.domain.entity.ConversationRun;
 import com.lumora.core.conversation.domain.model.ChatStreamEvent;
 import com.lumora.core.conversation.domain.model.ChatStreamEventType;
 import com.lumora.core.conversation.domain.model.ConversationRunStatus;
 import com.lumora.core.conversation.domain.model.ConversationRunTrigger;
+import com.lumora.core.conversation.domain.model.ConversationInputStatus;
+import com.lumora.core.conversation.domain.model.ConversationInputTarget;
 import com.lumora.core.task.application.service.TaskService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +41,7 @@ public class ConversationRunCoordinator {
 
     private final ConversationService conversationService;
     private final ConversationRunStore runStore;
+    private final ConversationInputStore inputStore;
     private final ConversationRunEventStreamRegistry eventStreams;
     private final TaskService taskService;
     private final Clock clock;
@@ -48,6 +53,7 @@ public class ConversationRunCoordinator {
     public ConversationRunCoordinator(
             ConversationService conversationService,
             ConversationRunStore runStore,
+            ConversationInputStore inputStore,
             ConversationRunEventStreamRegistry eventStreams,
             TaskService taskService,
             Clock clock,
@@ -55,6 +61,7 @@ public class ConversationRunCoordinator {
     ) {
         this.conversationService = conversationService;
         this.runStore = runStore;
+        this.inputStore = inputStore;
         this.eventStreams = eventStreams;
         this.taskService = taskService;
         this.clock = clock;
@@ -107,6 +114,153 @@ public class ConversationRunCoordinator {
     public ConversationRun get(String taskId, String runId) {
         taskService.getTask(taskId);
         return runStore.requireForTask(taskId, runId);
+    }
+
+    public synchronized List<ConversationInput> listInputs(String taskId) {
+        taskService.getTask(taskId);
+        return List.copyOf(inputStore.listOpenForTask(taskId));
+    }
+
+    public synchronized ConversationInput enqueueInput(
+            String taskId,
+            String content,
+            ConversationInputTarget target,
+            String model,
+            String reasoningEffort,
+            String workspacePath,
+            String permissionMode,
+            Long position
+    ) {
+        taskService.getTask(taskId);
+        String normalizedContent = requireText(content, "消息内容");
+        if (target == null) {
+            throw new IllegalArgumentException("队列目标不能为空");
+        }
+        ConversationRun active = runStore.findActiveForTask(taskId);
+        if (target == ConversationInputTarget.NEXT_STEP && active == null) {
+            throw new IllegalStateException("当前没有可引导的活动运行");
+        }
+        Instant now = clock.instant();
+        ConversationInput input = new ConversationInput();
+        input.setInputId(UUID.randomUUID().toString());
+        input.setTaskId(taskId);
+        input.setRunId(target == ConversationInputTarget.NEXT_STEP
+                ? active.getRunId() : null);
+        input.setTarget(target);
+        input.setStatus(ConversationInputStatus.PENDING);
+        input.setContent(normalizedContent);
+        input.setModel(valueOrEmpty(model));
+        input.setReasoningEffort(valueOrEmpty(reasoningEffort));
+        input.setWorkspacePath(valueOrEmpty(workspacePath));
+        input.setPermissionMode(valueOrDefault(
+                permissionMode, "request_approval"
+        ));
+        input.setPosition(position == null
+                ? inputStore.nextPosition(taskId) : position);
+        input.setCreatedAt(now);
+        input.setUpdatedAt(now);
+        inputStore.insert(input);
+
+        if (target == ConversationInputTarget.NEXT_STEP) {
+            deliverSteer(input, active);
+        } else if (active == null) {
+            enqueueNextTurn(taskId);
+            drainQueue();
+        }
+        return inputStore.requireForTask(taskId, input.getInputId());
+    }
+
+    public synchronized ConversationInput updateInput(
+            String taskId,
+            String inputId,
+            String content,
+            ConversationInputTarget target,
+            String model,
+            String reasoningEffort,
+            String workspacePath,
+            String permissionMode,
+            Long position
+    ) {
+        taskService.getTask(taskId);
+        ConversationInput input = inputStore.requireForTask(taskId, inputId);
+        if (!input.getStatus().isEditable()) {
+            throw new IllegalStateException("队列内容已被处理，不能再编辑");
+        }
+        ConversationInputTarget nextTarget = target == null
+                ? input.getTarget() : target;
+        ConversationRun active = runStore.findActiveForTask(taskId);
+        if (nextTarget == ConversationInputTarget.NEXT_STEP
+                && active == null) {
+            throw new IllegalStateException("当前没有可引导的活动运行");
+        }
+        String nextContent = content == null
+                ? input.getContent() : requireText(content, "消息内容");
+        boolean wasDelivered = input.getStatus()
+                == ConversationInputStatus.DELIVERED;
+        boolean remainsSameSteer = wasDelivered
+                && input.getTarget() == ConversationInputTarget.NEXT_STEP
+                && nextTarget == ConversationInputTarget.NEXT_STEP
+                && active != null
+                && active.getRunId().equals(input.getRunId());
+
+        if (wasDelivered && !remainsSameSteer
+                && !conversationService.removeSteer(taskId, inputId)) {
+            inputStore.markStatus(input, ConversationInputStatus.CLAIMED);
+            throw new IllegalStateException("引导内容已被 Agent 认领");
+        }
+        if (remainsSameSteer && !nextContent.equals(input.getContent())
+                && !conversationService.replaceSteer(
+                taskId, inputId, nextContent
+        )) {
+            inputStore.markStatus(input, ConversationInputStatus.CLAIMED);
+            throw new IllegalStateException("引导内容已被 Agent 认领");
+        }
+
+        input.setContent(nextContent);
+        input.setTarget(nextTarget);
+        input.setRunId(nextTarget == ConversationInputTarget.NEXT_STEP
+                ? active.getRunId() : null);
+        input.setStatus(remainsSameSteer
+                ? ConversationInputStatus.DELIVERED
+                : ConversationInputStatus.PENDING);
+        if (model != null) input.setModel(valueOrEmpty(model));
+        if (reasoningEffort != null) {
+            input.setReasoningEffort(valueOrEmpty(reasoningEffort));
+        }
+        if (workspacePath != null) {
+            input.setWorkspacePath(valueOrEmpty(workspacePath));
+        }
+        if (permissionMode != null) {
+            input.setPermissionMode(valueOrDefault(
+                    permissionMode, "request_approval"
+            ));
+        }
+        if (position != null) input.setPosition(position);
+        input = inputStore.saveIfOpen(input);
+
+        if (nextTarget == ConversationInputTarget.NEXT_STEP
+                && input.getStatus() == ConversationInputStatus.PENDING) {
+            deliverSteer(input, active);
+        } else if (nextTarget == ConversationInputTarget.NEXT_TURN
+                && active == null) {
+            enqueueNextTurn(taskId);
+            drainQueue();
+        }
+        return inputStore.requireForTask(taskId, inputId);
+    }
+
+    public synchronized void deleteInput(String taskId, String inputId) {
+        taskService.getTask(taskId);
+        ConversationInput input = inputStore.requireForTask(taskId, inputId);
+        if (!input.getStatus().isEditable()) {
+            return;
+        }
+        if (input.getStatus() == ConversationInputStatus.DELIVERED
+                && !conversationService.removeSteer(taskId, inputId)) {
+            inputStore.markStatus(input, ConversationInputStatus.CLAIMED);
+            throw new IllegalStateException("引导内容已被 Agent 认领");
+        }
+        inputStore.markStatus(input, ConversationInputStatus.CANCELLED);
     }
 
     public ConversationRun pauseActive(String taskId) {
@@ -209,6 +363,7 @@ public class ConversationRunCoordinator {
         }
         synchronized (this) {
             pausedTurnRunIds.remove(runId);
+            inputStore.cancelOpenForTask(taskId);
             run = runStore.updateStatus(
                     runId, ConversationRunStatus.CANCELLED, ""
             );
@@ -223,6 +378,7 @@ public class ConversationRunCoordinator {
     @EventListener(ApplicationReadyEvent.class)
     public synchronized void recoverRunsAfterRestart() {
         for (ConversationRun run : runStore.listRecoverable()) {
+            inputStore.resetDeliveredForRun(run.getRunId());
             recoverAsPaused(
                     run,
                     currentTurnEvents(run),
@@ -230,6 +386,7 @@ public class ConversationRunCoordinator {
             );
         }
         for (ConversationRun run : runStore.listRepairablePauseFailures()) {
+            inputStore.resetDeliveredForRun(run.getRunId());
             List<ChatStreamEvent> events = currentTurnEvents(run);
             if (events.stream().noneMatch(this::isPausingLifecycleEvent)) {
                 continue;
@@ -240,6 +397,12 @@ public class ConversationRunCoordinator {
                     "已修复暂停记录并恢复为可继续状态"
             );
         }
+        for (String taskId : inputStore.listTaskIdsWithPendingNextTurns()) {
+            if (runStore.findActiveForTask(taskId) == null) {
+                enqueueNextTurn(taskId);
+            }
+        }
+        drainQueue();
     }
 
     private void recoverAsPaused(
@@ -326,6 +489,85 @@ public class ConversationRunCoordinator {
         }
     }
 
+    private void deliverPendingSteers(ConversationRun run) {
+        for (ConversationInput input : inputStore.listOpenForRun(
+                run.getRunId()
+        )) {
+            if (input.getStatus() == ConversationInputStatus.PENDING) {
+                deliverSteer(input, run);
+            }
+        }
+    }
+
+    private void deliverSteer(
+            ConversationInput input,
+            ConversationRun active
+    ) {
+        if (active == null
+                || !active.getRunId().equals(input.getRunId())) {
+            moveToNextTurn(input);
+            return;
+        }
+        if (active.getStatus() == ConversationRunStatus.PAUSED
+                || active.getStatus() == ConversationRunStatus.PAUSING
+                || active.getStatus() == ConversationRunStatus.QUEUED) {
+            return;
+        }
+        try {
+            if (conversationService.addSteer(
+                    active.getTaskId(), input.getInputId(), input.getContent()
+            )) {
+                inputStore.markDeliveredIfPending(input);
+                return;
+            }
+        } catch (RuntimeException error) {
+            LOGGER.warn(
+                    "Failed to deliver steer {} for run {}",
+                    input.getInputId(), active.getRunId(), error
+            );
+            return;
+        }
+        moveToNextTurn(input);
+    }
+
+    private void moveToNextTurn(ConversationInput input) {
+        input.setRunId(null);
+        input.setTarget(ConversationInputTarget.NEXT_TURN);
+        input.setStatus(ConversationInputStatus.PENDING);
+        inputStore.save(input);
+    }
+
+    private void enqueueNextTurn(String taskId) {
+        if (runStore.findActiveForTask(taskId) != null) {
+            return;
+        }
+        ConversationInput input = inputStore.firstPendingNextTurn(taskId);
+        if (input == null) {
+            return;
+        }
+        Instant now = clock.instant();
+        ConversationRun run = new ConversationRun();
+        run.setRunId(UUID.randomUUID().toString());
+        run.setTaskId(taskId);
+        run.setStatus(ConversationRunStatus.QUEUED);
+        run.setTriggerType(ConversationRunTrigger.MESSAGE);
+        run.setSourceMessageId("");
+        run.setInputContent(input.getContent());
+        run.setModel(input.getModel());
+        run.setReasoningEffort(input.getReasoningEffort());
+        run.setWorkspacePath(input.getWorkspacePath());
+        run.setPermissionMode(input.getPermissionMode());
+        run.setLastEventSequence(0L);
+        run.setReplayFromSequence(0L);
+        run.setErrorMessage("");
+        run.setCreatedAt(now);
+        run.setUpdatedAt(now);
+        runStore.insert(run);
+        input.setRunId(run.getRunId());
+        inputStore.markStatus(input, ConversationInputStatus.CLAIMED);
+        enqueue(run.getRunId());
+    }
+
     private void drainQueue() {
         while (executingRunIds.size() < maxConcurrentRuns
                 && !queuedRunIds.isEmpty()) {
@@ -370,6 +612,7 @@ public class ConversationRunCoordinator {
                     completion,
                     failure
             );
+            deliverPendingSteers(run);
             return;
         }
         if (run.getTriggerType() == ConversationRunTrigger.RESUME) {
@@ -384,6 +627,7 @@ public class ConversationRunCoordinator {
                     completion,
                     failure
             );
+            deliverPendingSteers(run);
             return;
         }
         conversationService.streamMessage(
@@ -398,6 +642,7 @@ public class ConversationRunCoordinator {
                 completion,
                 failure
         );
+        deliverPendingSteers(run);
     }
 
     private synchronized void onEvent(String runId, ChatStreamEvent event) {
@@ -406,7 +651,19 @@ public class ConversationRunCoordinator {
             return;
         }
         eventStreams.publish(runStore.appendEvent(runId, event));
-        if (event.getType() == ChatStreamEventType.PAUSED) {
+        if (event.getType() == ChatStreamEventType.STEER_CLAIMED) {
+            String inputId = event.getItemId();
+            if (inputId != null && !inputId.isBlank()) {
+                ConversationInput input = inputStore.requireForTask(
+                        run.getTaskId(), inputId
+                );
+                if (input.getStatus().isEditable()) {
+                    inputStore.markStatus(
+                            input, ConversationInputStatus.CLAIMED
+                    );
+                }
+            }
+        } else if (event.getType() == ChatStreamEventType.PAUSED) {
             pausedTurnRunIds.add(runId);
         } else if (event.getType() == ChatStreamEventType.TOOL_APPROVAL_REQUESTED
                 && run.getStatus() == ConversationRunStatus.RUNNING) {
@@ -424,18 +681,23 @@ public class ConversationRunCoordinator {
 
     private synchronized void complete(String runId) {
         ConversationRun run = runStore.require(runId);
-        if (pausedTurnRunIds.remove(runId)
-                && !run.getStatus().isTerminal()) {
+        boolean paused = pausedTurnRunIds.remove(runId);
+        if (paused && !run.getStatus().isTerminal()) {
             runStore.updateStatus(runId, ConversationRunStatus.PAUSED, "");
             publishLifecycle(runId, "任务已暂停", "PAUSED");
         } else if (!run.getStatus().isTerminal()
                 && run.getStatus() != ConversationRunStatus.PAUSED) {
+            inputStore.moveOpenSteersToNextTurn(runId);
             runStore.updateStatus(
                     runId, ConversationRunStatus.COMPLETED, ""
             );
         }
         eventStreams.complete(runId);
         releaseExecution(runId);
+        if (!paused && runStore.require(runId).getStatus()
+                == ConversationRunStatus.COMPLETED) {
+            enqueueNextTurn(run.getTaskId());
+        }
         drainQueue();
     }
 
@@ -474,6 +736,7 @@ public class ConversationRunCoordinator {
             return;
         }
         String message = safeMessage(error);
+        inputStore.moveOpenSteersToNextTurn(runId);
         ChatStreamEvent failed = new ChatStreamEvent(
                 ChatStreamEventType.FAILED, "", run.getModel(), null, message
         );
@@ -534,6 +797,10 @@ public class ConversationRunCoordinator {
 
     private String valueOrEmpty(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private String valueOrDefault(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value.trim();
     }
 
     private String emptyToNull(String value) {

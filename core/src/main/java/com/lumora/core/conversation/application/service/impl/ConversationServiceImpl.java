@@ -374,6 +374,37 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     @Override
+    public synchronized boolean addSteer(
+            String taskId, String inputId, String content
+    ) {
+        ActiveRun run = activeRuns.get(taskId);
+        return run != null && conversationRuntimePort.addSteer(
+                run.correlationId, requireText(inputId, "队列内容 ID"),
+                requireText(content, "引导内容"), run.correlationId
+        );
+    }
+
+    @Override
+    public synchronized boolean replaceSteer(
+            String taskId, String inputId, String content
+    ) {
+        ActiveRun run = activeRuns.get(taskId);
+        return run != null && conversationRuntimePort.replaceSteer(
+                run.correlationId, requireText(inputId, "队列内容 ID"),
+                requireText(content, "引导内容"), run.correlationId
+        );
+    }
+
+    @Override
+    public synchronized boolean removeSteer(String taskId, String inputId) {
+        ActiveRun run = activeRuns.get(taskId);
+        return run != null && conversationRuntimePort.removeSteer(
+                run.correlationId, requireText(inputId, "队列内容 ID"),
+                run.correlationId
+        );
+    }
+
+    @Override
     public void sealRecoveredTurn(
             String taskId,
             String runtimeTurnId,
@@ -628,6 +659,11 @@ public class ConversationServiceImpl implements ConversationService {
                 event.getType() == ChatStreamEventType.TOOL_APPROVAL_RESOLVED
         ) {
             pendingToolApprovals.remove(event.getApprovalId());
+        }
+        if (event.getType() == ChatStreamEventType.STEER_CLAIMED) {
+            persistenceService.persistSteerMessage(
+                    context, event.getDelta()
+            );
         }
         accumulator.accept(event);
         if (event.getType() == ChatStreamEventType.COMPLETED) {

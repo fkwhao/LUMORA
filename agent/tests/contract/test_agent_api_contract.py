@@ -81,6 +81,9 @@ def test_http_route_split_preserves_public_paths_and_methods() -> None:
         "/api/v1/chat/completions/stream": {"post"},
             "/api/v1/chat/compact": {"post"},
             "/api/v1/chat/runs/{run_id}/pause": {"post"},
+            "/api/v1/chat/runs/{run_id}/steers/{input_id}": {
+                "post", "put", "delete"
+            },
         "/api/v1/artifacts/read": {"post"},
         "/api/v1/artifacts/search": {"post"},
         "/api/v1/models": {"post"},

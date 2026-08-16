@@ -48,6 +48,8 @@ public final class ApiPathConstants {
     public static final String TASK_RUN_CANCEL = TASK_RUN + "/cancel";
     public static final String TASK_ACTIVE_RUN_PAUSE =
             TASK_ACTIVE_RUN + "/pause";
+    public static final String TASK_INPUTS = TASK_BY_ID + "/inputs";
+    public static final String TASK_INPUT = TASK_INPUTS + "/{inputId}";
 
     private ApiPathConstants() {
     }

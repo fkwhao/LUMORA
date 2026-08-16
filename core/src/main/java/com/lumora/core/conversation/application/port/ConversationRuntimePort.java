@@ -20,4 +20,12 @@ public interface ConversationRuntimePort {
             Consumer<ChatStreamEvent> eventConsumer);
 
     boolean pauseChat(String runId, String correlationId);
+
+    boolean addSteer(String runId, String inputId, String content,
+                     String correlationId);
+
+    boolean replaceSteer(String runId, String inputId, String content,
+                         String correlationId);
+
+    boolean removeSteer(String runId, String inputId, String correlationId);
 }

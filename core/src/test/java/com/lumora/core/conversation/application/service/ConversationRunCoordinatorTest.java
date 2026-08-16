@@ -2,11 +2,15 @@ package com.lumora.core.conversation.application.service;
 
 import com.lumora.core.conversation.application.support.ConversationRunEventStreamRegistry;
 import com.lumora.core.conversation.application.support.ConversationRunStore;
+import com.lumora.core.conversation.application.support.ConversationInputStore;
+import com.lumora.core.conversation.domain.entity.ConversationInput;
 import com.lumora.core.conversation.domain.entity.ConversationRun;
 import com.lumora.core.conversation.domain.model.ChatStreamEvent;
 import com.lumora.core.conversation.domain.model.ChatStreamEventType;
 import com.lumora.core.conversation.domain.model.ConversationRunStatus;
 import com.lumora.core.conversation.domain.model.ConversationRunTrigger;
+import com.lumora.core.conversation.domain.model.ConversationInputStatus;
+import com.lumora.core.conversation.domain.model.ConversationInputTarget;
 import com.lumora.core.task.application.service.TaskService;
 import org.junit.jupiter.api.Test;
 
@@ -25,11 +29,182 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ConversationRunCoordinatorTest {
+
+    @Test
+    void keepsAPausedSteerQueuedUntilTheRunResumes() {
+        ConversationService conversationService = mock(
+                ConversationService.class
+        );
+        ConversationRunStore runStore = mock(ConversationRunStore.class);
+        ConversationInputStore inputStore = mock(ConversationInputStore.class);
+        ConversationRunEventStreamRegistry streams = mock(
+                ConversationRunEventStreamRegistry.class
+        );
+        Map<String, ConversationRun> runs = new LinkedHashMap<>();
+        Map<String, ConversationInput> inputs = new LinkedHashMap<>();
+        stubRunStore(runStore, runs);
+        when(inputStore.nextPosition("task-1")).thenReturn(1L);
+        doAnswer(invocation -> {
+            ConversationInput input = invocation.getArgument(0);
+            inputs.put(input.getInputId(), input);
+            return null;
+        }).when(inputStore).insert(any(ConversationInput.class));
+        when(inputStore.requireForTask(anyString(), anyString()))
+                .thenAnswer(invocation -> inputs.get(invocation.getArgument(1)));
+        when(inputStore.listOpenForRun(anyString())).thenAnswer(invocation -> {
+            String runId = invocation.getArgument(0);
+            return inputs.values().stream()
+                    .filter(input -> runId.equals(input.getRunId()))
+                    .toList();
+        });
+        when(inputStore.markDeliveredIfPending(any(ConversationInput.class)))
+                .thenAnswer(invocation -> {
+                    ConversationInput input = invocation.getArgument(0);
+                    input.setStatus(ConversationInputStatus.DELIVERED);
+                    return input;
+                });
+        when(conversationService.pauseGeneration("task-1")).thenReturn(true);
+        when(conversationService.addSteer(
+                anyString(), anyString(), anyString()
+        )).thenReturn(true);
+        List<Consumer<ChatStreamEvent>> eventConsumers = new ArrayList<>();
+        List<Runnable> completions = new ArrayList<>();
+        doAnswer(invocation -> {
+            eventConsumers.add(invocation.getArgument(7));
+            completions.add(invocation.getArgument(8));
+            return null;
+        }).when(conversationService).streamMessage(
+                anyString(), anyString(), any(), any(), any(), any(),
+                anyString(), any(), any(), any()
+        );
+        ConversationRunCoordinator coordinator = new ConversationRunCoordinator(
+                conversationService, runStore, inputStore, streams,
+                mock(TaskService.class),
+                Clock.fixed(
+                        Instant.parse("2026-08-15T00:00:00Z"),
+                        ZoneOffset.UTC
+                ),
+                1
+        );
+        ConversationRun run = coordinator.startMessage(
+                "task-1", "完成当前工作", null, null,
+                null, null, "correlation-1"
+        );
+        coordinator.pause("task-1", run.getRunId());
+        eventConsumers.getFirst().accept(new ChatStreamEvent(
+                ChatStreamEventType.PAUSED, "", "", null, ""
+        ));
+        completions.getFirst().run();
+
+        ConversationInput input = coordinator.enqueueInput(
+                "task-1", "改为先检查队列", ConversationInputTarget.NEXT_STEP,
+                null, null, null, null, null
+        );
+
+        assertThat(input.getStatus()).isEqualTo(
+                ConversationInputStatus.PENDING
+        );
+        assertThat(input.getRunId()).isEqualTo(run.getRunId());
+        verify(conversationService, never()).addSteer(
+                anyString(), anyString(), anyString()
+        );
+
+        coordinator.resume("task-1", run.getRunId());
+
+        assertThat(input.getStatus()).isEqualTo(
+                ConversationInputStatus.DELIVERED
+        );
+        verify(conversationService).addSteer(
+                "task-1", input.getInputId(), "改为先检查队列"
+        );
+    }
+
+    @Test
+    void deliversAndClaimsASteerAtTheAgentBoundary() {
+        ConversationService conversationService = mock(
+                ConversationService.class
+        );
+        ConversationRunStore runStore = mock(ConversationRunStore.class);
+        ConversationInputStore inputStore = mock(ConversationInputStore.class);
+        ConversationRunEventStreamRegistry streams = mock(
+                ConversationRunEventStreamRegistry.class
+        );
+        Map<String, ConversationRun> runs = new LinkedHashMap<>();
+        Map<String, ConversationInput> inputs = new LinkedHashMap<>();
+        stubRunStore(runStore, runs);
+        when(inputStore.nextPosition("task-1")).thenReturn(1L);
+        doAnswer(invocation -> {
+            ConversationInput input = invocation.getArgument(0);
+            inputs.put(input.getInputId(), input);
+            return null;
+        }).when(inputStore).insert(any(ConversationInput.class));
+        when(inputStore.requireForTask(anyString(), anyString()))
+                .thenAnswer(invocation -> inputs.get(invocation.getArgument(1)));
+        when(inputStore.markDeliveredIfPending(any(ConversationInput.class)))
+                .thenAnswer(invocation -> {
+                    ConversationInput input = invocation.getArgument(0);
+                    input.setStatus(ConversationInputStatus.DELIVERED);
+                    return input;
+                });
+        when(inputStore.markStatus(
+                any(ConversationInput.class), any(ConversationInputStatus.class)
+        )).thenAnswer(invocation -> {
+            ConversationInput input = invocation.getArgument(0);
+            input.setStatus(invocation.getArgument(1));
+            return input;
+        });
+        when(conversationService.addSteer(
+                anyString(), anyString(), anyString()
+        )).thenReturn(true);
+        List<Consumer<ChatStreamEvent>> eventConsumers = new ArrayList<>();
+        doAnswer(invocation -> {
+            eventConsumers.add(invocation.getArgument(7));
+            return null;
+        }).when(conversationService).streamMessage(
+                anyString(), anyString(), any(), any(), any(), any(),
+                anyString(), any(), any(), any()
+        );
+        ConversationRunCoordinator coordinator = new ConversationRunCoordinator(
+                conversationService, runStore, inputStore, streams,
+                mock(TaskService.class),
+                Clock.fixed(
+                        Instant.parse("2026-08-15T00:00:00Z"),
+                        ZoneOffset.UTC
+                ),
+                1
+        );
+        coordinator.startMessage(
+                "task-1", "先完成当前工作", null, null,
+                null, null, "correlation-1"
+        );
+
+        ConversationInput input = coordinator.enqueueInput(
+                "task-1", "补充边界测试", ConversationInputTarget.NEXT_STEP,
+                null, null, null, null, null
+        );
+
+        assertThat(input.getStatus()).isEqualTo(
+                ConversationInputStatus.DELIVERED
+        );
+        verify(conversationService).addSteer(
+                "task-1", input.getInputId(), "补充边界测试"
+        );
+        eventConsumers.getFirst().accept(new ChatStreamEvent(
+                ChatStreamEventType.STEER_CLAIMED,
+                "补充边界测试", "demo", null, "",
+                input.getInputId(), "", "", "", Map.of(), "", 0L,
+                null, Map.of()
+        ));
+        assertThat(input.getStatus()).isEqualTo(
+                ConversationInputStatus.CLAIMED
+        );
+    }
 
     @Test
     void queuesAdditionalTasksUntilTheConcurrencySlotIsReleased() {
@@ -55,6 +230,7 @@ class ConversationRunCoordinatorTest {
         ConversationRunCoordinator coordinator = new ConversationRunCoordinator(
                 conversationService,
                 runStore,
+                mock(ConversationInputStore.class),
                 streams,
                 mock(TaskService.class),
                 Clock.fixed(
@@ -112,6 +288,7 @@ class ConversationRunCoordinatorTest {
         ConversationRunCoordinator coordinator = new ConversationRunCoordinator(
                 conversationService,
                 runStore,
+                mock(ConversationInputStore.class),
                 streams,
                 mock(TaskService.class),
                 Clock.fixed(
@@ -173,6 +350,7 @@ class ConversationRunCoordinatorTest {
         ConversationRunCoordinator coordinator = new ConversationRunCoordinator(
                 conversationService,
                 runStore,
+                mock(ConversationInputStore.class),
                 streams,
                 mock(TaskService.class),
                 Clock.fixed(
@@ -247,6 +425,7 @@ class ConversationRunCoordinatorTest {
         ConversationRunCoordinator coordinator = new ConversationRunCoordinator(
                 conversationService,
                 runStore,
+                mock(ConversationInputStore.class),
                 streams,
                 mock(TaskService.class),
                 Clock.fixed(

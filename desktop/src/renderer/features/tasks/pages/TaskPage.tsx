@@ -51,6 +51,7 @@ import {
   Play,
   Plus,
   ShieldAlert,
+  Square,
   Target,
   ThumbsDown,
   ThumbsUp,
@@ -88,6 +89,7 @@ import { ToolApprovalDialog } from "../components/ToolApprovalDialog";
 import { AgentRunSummary } from "../components/AgentRunSummary";
 import { DiffReviewPane, type FileChange } from "../components/DiffReviewPane";
 import { ConversationUsagePane } from "../components/ConversationUsagePane";
+import { ConversationInputQueue } from "../components/ConversationInputQueue";
 import { PlanTodoList } from "../components/PlanTodoList";
 import {
   loadContextPaneWidth,
@@ -163,6 +165,9 @@ export const TaskPage = memo(function TaskPage({
   const isChatting = useStore(store, (state) => state.isChatting);
   const isPausing = useStore(store, (state) => state.isPausing);
   const activeRun = useStore(store, (state) => state.activeRun);
+  const hasQueuedInputs = useStore(store, (state) =>
+    state.pendingInputs.some((input) => input.target === "NEXT_TURN"),
+  );
   const isCompacting = useStore(store, (state) => state.isCompacting);
   const chatWasStopped = useStore(store, (state) => state.chatWasStopped);
   const chatError = useStore(store, (state) => state.chatError);
@@ -684,13 +689,28 @@ export const TaskPage = memo(function TaskPage({
         await store.getState().compactContext(selectedModel || undefined);
         return;
       }
-      await store.getState().sendMessage(content, {
+      const state = store.getState();
+      const runStatus = state.activeRun?.status;
+      const shouldQueue = state.isChatting || (
+        runStatus === "QUEUED" ||
+        runStatus === "RUNNING" ||
+        runStatus === "WAITING_APPROVAL" ||
+        runStatus === "PAUSING" ||
+        runStatus === "PAUSED"
+      );
+      const options = {
         model: selectedModel || undefined,
         reasoningEffort: reasoningEffort || undefined,
         permissionMode,
-      });
+      };
+      if (shouldQueue) {
+        await state.enqueueInput(content, "NEXT_TURN", options);
+        notify("问题已加入队列", "success");
+        return;
+      }
+      await state.sendMessage(content, options);
     },
-    [permissionMode, reasoningEffort, selectedModel, store],
+    [notify, permissionMode, reasoningEffort, selectedModel, store],
   );
 
   const commandQuery = composerText.trim().toLowerCase();
@@ -796,7 +816,7 @@ export const TaskPage = memo(function TaskPage({
       }
     },
     isRunning: isChatting || isCompacting,
-    isSendDisabled: isCompacting || activeRun?.status === "PAUSED",
+    isSendDisabled: isCompacting,
     onNew: handleNewMessage,
     onEdit: handleEditMessage,
     onReload: handleReloadMessage,
@@ -809,6 +829,32 @@ export const TaskPage = memo(function TaskPage({
     },
     unstable_capabilities: { copy: true },
   });
+
+  const enqueueComposerInput = useCallback(
+    async () => {
+      const content = composerText.trim();
+      if (!content) {
+        followUpInputRef.current?.focus();
+        return;
+      }
+      await store.getState().enqueueInput(content, "NEXT_TURN", {
+        model: selectedModel || undefined,
+        reasoningEffort: reasoningEffort || undefined,
+        permissionMode,
+      });
+      runtime.thread.composer.setText("");
+      setComposerText("");
+      notify("问题已加入队列", "success");
+    }, [
+      composerText,
+      notify,
+      permissionMode,
+      reasoningEffort,
+      runtime,
+      selectedModel,
+      store,
+    ],
+  );
 
   const chooseSlashCommand = useCallback((command: string) => {
     runtime.thread.composer.setText(command);
@@ -2003,6 +2049,49 @@ export const TaskPage = memo(function TaskPage({
               if (value.startsWith("/")) setComposerMenu("command");
               else if (composerMenu === "command") setComposerMenu(null);
             }}
+            onComposerKeyDown={(event) => {
+              if (
+                !isChatting ||
+                event.key !== "Enter" ||
+                event.shiftKey ||
+                event.nativeEvent.isComposing
+              ) return;
+              event.preventDefault();
+              void enqueueComposerInput().catch((error) => notify(
+                error instanceof Error ? error.message : "加入问题队列失败",
+                "info",
+              ));
+            }}
+            composerRunningActions={
+              composerText.trim() ? (
+                <button
+                  className="aui-composer-send inline-flex size-7 items-center justify-center rounded-full transition-transform hover:scale-[1.04] disabled:opacity-35"
+                  type="button"
+                  aria-label="发送到问题队列"
+                  title="发送到问题队列"
+                  onClick={() => void enqueueComposerInput().catch(
+                    (error) => notify(
+                      error instanceof Error ? error.message : "加入问题队列失败",
+                      "info",
+                    ),
+                  )}
+                >
+                  <ArrowUp className="aui-composer-send-icon size-4" />
+                </button>
+              ) : (
+                <ComposerPrimitive.Cancel asChild>
+                  <button
+                    className="aui-composer-cancel inline-flex size-7 items-center justify-center rounded-full transition-transform hover:scale-[1.04] disabled:opacity-40"
+                    type="button"
+                    disabled={isPausing}
+                    aria-label="安全暂停"
+                    title="安全暂停"
+                  >
+                    <Square className="aui-composer-cancel-icon size-2.5" />
+                  </button>
+                </ComposerPrimitive.Cancel>
+              )
+            }
             composerPopup={
               composerMenu === "context" ? (
                 <span
@@ -2106,34 +2195,13 @@ export const TaskPage = memo(function TaskPage({
                 {chatError && (
                   <div className="task-error-banner">{chatError}</div>
                 )}
-                {activeRun?.status === "PAUSED" && (
-                  <div className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-muted/45 px-3 py-2 text-sm">
-                    <span className="text-muted-foreground">
-                      此任务已暂停，进度和上下文均已保留。
-                    </span>
-                    <Button
-                      className="paused-run-resume-button"
-                      type="button"
-                      size="sm"
-                      disabled={isPausing}
-                      onClick={() => {
-                        void store.getState().resumeChat().catch((error) => {
-                          notify(
-                            error instanceof Error
-                              ? error.message
-                              : "继续任务失败",
-                            "info",
-                          );
-                        });
-                      }}
-                    >
-                      <Play className="size-3.5" />
-                      继续
-                    </Button>
-                  </div>
-                )}
                 {task.approval && <ApprovalDock store={store} />}
               </>
+            }
+            composerHeader={
+              hasQueuedInputs || activeRun?.status === "PAUSED" ? (
+                <ConversationInputQueue store={store} notify={notify} />
+              ) : undefined
             }
             composerTools={
               <div className="flex min-w-0 items-center gap-1.5">

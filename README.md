@@ -42,6 +42,7 @@ Electron Renderer
 - 自动或手动压缩较早上下文，并在 Java SQLite 中保存摘要、活动上下文 Token 和输入、输出、推理、缓存等消息用量。
 - 在会话右侧查看上下文总量与本地估算细分，在个人资料页查看本机 Token 汇总、每日热力图和缓存指标。
 - 本地保存、归档和恢复任务会话；仅允许编辑最后一条用户消息并重新生成后续回答。
+- 运行期间的新问题默认进入耐久队列并在当前任务结束后自动执行；队列问题可在安全步骤边界转换为运行中引导，暂停与重启不会丢失。
 - 支持 User、Project、Conversation 三层动态 Memory 和本地个性化开关。
 - Java 使用 MyBatis-Plus 将任务、计划、会话、模型配置、记忆、审批和 Artifact 索引写入 SQLite。
 - 浅色、深色和跟随系统的外观设置。
@@ -80,6 +81,9 @@ context: full
 
 架构边界、数据归属和下一阶段 RunEvent 设计见
 [公开架构说明](docs/architecture.md)。
+
+问题排队、运行中引导和暂停恢复的状态与交互规范见
+[对话问题队列与 Steer 设计](docs/conversation-input-queue-design.md)。
 
 ## 安全说明
 

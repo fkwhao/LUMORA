@@ -7,6 +7,7 @@ import com.lumora.core.agent.dto.request.AgentModelListRequest;
 import com.lumora.core.agent.dto.request.AgentMcpServerRequest;
 import com.lumora.core.agent.dto.request.AgentMemoryExtractionRequest;
 import com.lumora.core.agent.dto.request.AgentToolApprovalDecisionRequest;
+import com.lumora.core.agent.dto.request.AgentSteerRequest;
 import com.lumora.core.agent.dto.response.AgentChatCompletionResponse;
 import com.lumora.core.agent.dto.response.AgentContextCompactionResponse;
 import com.lumora.core.agent.dto.response.AgentPlanTaskResponse;
@@ -19,7 +20,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.service.annotation.HttpExchange;
+import org.springframework.web.service.annotation.DeleteExchange;
 import org.springframework.web.service.annotation.PostExchange;
+import org.springframework.web.service.annotation.PutExchange;
 
 import java.util.Map;
 
@@ -104,6 +107,32 @@ public interface AgentRuntimeHttpApi {
             @RequestHeader(HttpContractConstants.CORRELATION_ID_HEADER)
             String correlationId,
             @PathVariable String runId
+    );
+
+    @PostExchange(AgentClientConstants.CHAT_RUN_STEERS_PATH)
+    Map<String, Boolean> addSteer(
+            @RequestHeader(HttpContractConstants.CORRELATION_ID_HEADER)
+            String correlationId,
+            @PathVariable String runId,
+            @PathVariable String inputId,
+            @RequestBody AgentSteerRequest request
+    );
+
+    @PutExchange(AgentClientConstants.CHAT_RUN_STEERS_PATH)
+    Map<String, Boolean> replaceSteer(
+            @RequestHeader(HttpContractConstants.CORRELATION_ID_HEADER)
+            String correlationId,
+            @PathVariable String runId,
+            @PathVariable String inputId,
+            @RequestBody AgentSteerRequest request
+    );
+
+    @DeleteExchange(AgentClientConstants.CHAT_RUN_STEERS_PATH)
+    Map<String, Boolean> removeSteer(
+            @RequestHeader(HttpContractConstants.CORRELATION_ID_HEADER)
+            String correlationId,
+            @PathVariable String runId,
+            @PathVariable String inputId
     );
 
 }

@@ -182,6 +182,41 @@ def test_harness_cancels_a_stalled_plain_model_stream_on_pause() -> None:
     asyncio.run(_assert_plain_stream_is_cancelled())
 
 
+def test_harness_continues_a_plain_stream_when_a_steer_arrives() -> None:
+    asyncio.run(_assert_plain_stream_continues_with_steer())
+
+
+async def _assert_plain_stream_continues_with_steer() -> None:
+    controls = RunControlRegistry()
+    control = controls.register("plain-steer")
+
+    class SteeringProvider(StrategyRecordingProvider):
+        async def stream(self, *args, **kwargs):
+            async for event in super().stream(*args, **kwargs):
+                if event.type == "completed":
+                    assert await controls.add_steer(
+                        "plain-steer", "input-1", "补充安全检查"
+                    )
+                yield event
+
+    provider = SteeringProvider()
+    events = await _collect(
+        AgentHarness(provider),  # type: ignore[arg-type]
+        PromptAssembly(()),
+        None,
+        control,
+    )
+    controls.unregister("plain-steer", control)
+
+    assert "steer_claimed" in [event.type for event in events]
+    assert "text_reset" in [event.type for event in events]
+    assert provider.stream_calls == 1
+    assert provider.turn_stream_calls == 1
+    usage = [event.usage for event in events if event.usage is not None]
+    assert usage[-1].total_tokens == 14
+    assert events[-1].type == "completed"
+
+
 async def _assert_plain_stream_is_cancelled() -> None:
     started = asyncio.Event()
     cancelled = asyncio.Event()

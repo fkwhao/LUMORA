@@ -60,6 +60,7 @@ import {
   type ComponentProps,
   type ComponentType,
   type FC,
+  type KeyboardEventHandler,
   type PropsWithChildren,
   type ReactNode,
   type Ref,
@@ -91,12 +92,15 @@ export type ThreadComponents = {
 export type ThreadProps = {
   components?: ThreadComponents | undefined;
   beforeComposer?: ReactNode;
+  composerHeader?: ReactNode;
   composerPopup?: ReactNode;
   composerTools?: ReactNode;
+  composerRunningActions?: ReactNode;
   composerPlaceholder?: string;
   composerAriaLabel?: string;
   composerInputRef?: Ref<HTMLTextAreaElement>;
   onComposerTextChange?(value: string): void;
+  onComposerKeyDown?: KeyboardEventHandler<HTMLTextAreaElement>;
   contentRef?: Ref<HTMLDivElement>;
   viewportProps?: Omit<
     ComponentProps<typeof ThreadPrimitive.Viewport>,
@@ -119,12 +123,15 @@ const isNewChatView = (s: AssistantState) =>
 export const Thread: FC<ThreadProps> = ({
   components = EMPTY_COMPONENTS,
   beforeComposer,
+  composerHeader,
   composerPopup,
   composerTools,
+  composerRunningActions,
   composerPlaceholder,
   composerAriaLabel,
   composerInputRef,
   onComposerTextChange,
+  onComposerKeyDown,
   contentRef,
   viewportProps,
   showAttachmentButton,
@@ -136,12 +143,15 @@ export const Thread: FC<ThreadProps> = ({
       <ThreadRoot
         isEmpty={isEmpty}
         beforeComposer={beforeComposer}
+        composerHeader={composerHeader}
         composerPopup={composerPopup}
         composerTools={composerTools}
+        composerRunningActions={composerRunningActions}
         composerPlaceholder={composerPlaceholder}
         composerAriaLabel={composerAriaLabel}
         composerInputRef={composerInputRef}
         onComposerTextChange={onComposerTextChange}
+        onComposerKeyDown={onComposerKeyDown}
         contentRef={contentRef}
         viewportProps={viewportProps}
         showAttachmentButton={showAttachmentButton}
@@ -154,12 +164,15 @@ const ThreadRoot: FC<
   Pick<
     ThreadProps,
     | "beforeComposer"
+    | "composerHeader"
     | "composerPopup"
     | "composerTools"
+    | "composerRunningActions"
     | "composerPlaceholder"
     | "composerAriaLabel"
     | "composerInputRef"
     | "onComposerTextChange"
+    | "onComposerKeyDown"
     | "contentRef"
     | "viewportProps"
     | "showAttachmentButton"
@@ -167,12 +180,15 @@ const ThreadRoot: FC<
 > = ({
   isEmpty,
   beforeComposer,
+  composerHeader,
   composerPopup,
   composerTools,
+  composerRunningActions,
   composerPlaceholder,
   composerAriaLabel,
   composerInputRef,
   onComposerTextChange,
+  onComposerKeyDown,
   contentRef,
   viewportProps,
   showAttachmentButton,
@@ -232,12 +248,15 @@ const ThreadRoot: FC<
             <ThreadFollowupSuggestions />
             {beforeComposer}
             <Composer
+              header={composerHeader}
               popup={composerPopup}
               tools={composerTools}
+              runningActions={composerRunningActions}
               placeholder={composerPlaceholder}
               ariaLabel={composerAriaLabel}
               inputRef={composerInputRef}
               onTextChange={onComposerTextChange}
+              onKeyDown={onComposerKeyDown}
               showAttachmentButton={showAttachmentButton}
             />
             <AuiIf condition={(s) => isNewChatView(s) && s.composer.isEmpty}>
@@ -322,29 +341,39 @@ const ThreadSuggestionItem: FC = () => {
 };
 
 const Composer: FC<{
+  header?: ReactNode;
   popup?: ReactNode;
   tools?: ReactNode;
+  runningActions?: ReactNode;
   placeholder?: string;
   ariaLabel?: string;
   inputRef?: Ref<HTMLTextAreaElement>;
   onTextChange?(value: string): void;
+  onKeyDown?: KeyboardEventHandler<HTMLTextAreaElement>;
   showAttachmentButton?: boolean;
 }> = ({
+  header,
   popup,
   tools,
+  runningActions,
   placeholder,
   ariaLabel,
   inputRef,
   onTextChange,
+  onKeyDown,
   showAttachmentButton,
 }) => {
   return (
     <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
       {popup}
+      {header}
       <ComposerPrimitive.AttachmentDropzone asChild>
         <div
           data-slot="aui_composer-shell"
-          className="border-border/60 data-[dragging=true]:border-ring focus-within:border-border dark:border-muted-foreground/15 dark:focus-within:border-muted-foreground/30 flex w-full flex-col gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) shadow-[0_4px_16px_-8px_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.04)] transition-[border-color,box-shadow] focus-within:shadow-[0_6px_24px_-8px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.05)] data-[dragging=true]:border-dashed data-[dragging=true]:bg-[color-mix(in_oklab,var(--color-accent)_50%,var(--color-background))] dark:shadow-none"
+          className={cn(
+            "border-border/60 data-[dragging=true]:border-ring focus-within:border-border dark:border-muted-foreground/15 dark:focus-within:border-muted-foreground/30 relative z-20 flex w-full flex-col gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) shadow-[0_4px_16px_-8px_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.04)] transition-[border-color,box-shadow] focus-within:shadow-[0_6px_24px_-8px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.05)] data-[dragging=true]:border-dashed data-[dragging=true]:bg-[color-mix(in_oklab,var(--color-accent)_50%,var(--color-background))] dark:shadow-none",
+            header && "aui-composer-shell-with-header shadow-[0_8px_26px_-18px_rgba(20,25,32,0.18),0_1px_2px_rgba(0,0,0,0.04)]",
+          )}
         >
           <ComposerAttachments />
           <ComposerPrimitive.Input
@@ -356,9 +385,11 @@ const Composer: FC<{
             enterKeyHint="send"
             aria-label={ariaLabel ?? "Message input"}
             onChange={(event) => onTextChange?.(event.target.value)}
+            onKeyDown={onKeyDown}
           />
           <ComposerAction
             tools={tools}
+            runningActions={runningActions}
             showAttachmentButton={showAttachmentButton}
           />
         </div>
@@ -369,8 +400,9 @@ const Composer: FC<{
 
 const ComposerAction: FC<{
   tools?: ReactNode;
+  runningActions?: ReactNode;
   showAttachmentButton?: boolean;
-}> = ({ tools, showAttachmentButton = true }) => {
+}> = ({ tools, runningActions, showAttachmentButton = true }) => {
   return (
     <div className="aui-composer-action-wrapper relative flex items-center justify-between">
       <div className="flex min-w-0 items-center gap-1.5">
@@ -426,17 +458,19 @@ const ComposerAction: FC<{
           </ComposerPrimitive.Send>
         </AuiIf>
         <AuiIf condition={(s) => s.thread.isRunning}>
-          <ComposerPrimitive.Cancel asChild>
-            <Button
-              type="button"
-              variant="default"
-              size="icon"
-              className="aui-composer-cancel size-7 rounded-full"
-              aria-label="Stop generating"
-            >
-              <SquareIcon className="aui-composer-cancel-icon size-2.5 fill-current" />
-            </Button>
-          </ComposerPrimitive.Cancel>
+          {runningActions ?? (
+            <ComposerPrimitive.Cancel asChild>
+              <Button
+                type="button"
+                variant="default"
+                size="icon"
+                className="aui-composer-cancel size-7 rounded-full"
+                aria-label="Stop generating"
+              >
+                <SquareIcon className="aui-composer-cancel-icon size-2.5 fill-current" />
+              </Button>
+            </ComposerPrimitive.Cancel>
+          )}
         </AuiIf>
       </div>
     </div>

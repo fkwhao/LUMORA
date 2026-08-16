@@ -98,6 +98,23 @@ class ChatService:
     async def pause_run(self, run_id: str) -> bool:
         return await self._run_controls.pause(run_id)
 
+    async def add_steer(
+        self, run_id: str, input_id: str, content: str
+    ) -> bool:
+        return await self._run_controls.add_steer(
+            run_id, input_id, content.strip()
+        )
+
+    async def replace_steer(
+        self, run_id: str, input_id: str, content: str
+    ) -> bool:
+        return await self._run_controls.replace_steer(
+            run_id, input_id, content.strip()
+        )
+
+    async def remove_steer(self, run_id: str, input_id: str) -> bool:
+        return await self._run_controls.remove_steer(run_id, input_id)
+
     async def close(self) -> None:
         await self._mcp_session_pool.close()
 

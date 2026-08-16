@@ -1,12 +1,19 @@
 import asyncio
 import logging
 from collections.abc import Awaitable
+from dataclasses import dataclass
 from typing import Any, TypeVar
 
 _PAUSE_CANCELLATION_GRACE_SECONDS = 0.2
 _PENDING_REGISTRATION_TTL_SECONDS = 30.0
 _AwaitedValue = TypeVar("_AwaitedValue")
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class PendingSteer:
+    input_id: str
+    content: str
 
 
 class RunControl:
@@ -20,6 +27,8 @@ class RunControl:
         self._registered = asyncio.Event()
         self._pause_requested = asyncio.Event()
         self._finished = False
+        self._accepting_steers = True
+        self._steers: dict[str, PendingSteer] = {}
 
     @property
     def pause_requested(self) -> bool:
@@ -36,6 +45,8 @@ class RunControl:
 
     def mark_finished(self) -> None:
         self._finished = True
+        self._accepting_steers = False
+        self._steers.clear()
         self._pause_requested.set()
 
     def request_pause(self) -> bool:
@@ -46,6 +57,38 @@ class RunControl:
 
     async def wait_until_pause_requested(self) -> None:
         await self._pause_requested.wait()
+
+    def add_steer(self, input_id: str, content: str) -> bool:
+        if (
+            self._finished
+            or not self._accepting_steers
+            or input_id in self._steers
+        ):
+            return False
+        self._steers[input_id] = PendingSteer(input_id, content)
+        return True
+
+    def replace_steer(self, input_id: str, content: str) -> bool:
+        if self._finished or input_id not in self._steers:
+            return False
+        self._steers[input_id] = PendingSteer(input_id, content)
+        return True
+
+    def remove_steer(self, input_id: str) -> bool:
+        return self._steers.pop(input_id, None) is not None
+
+    def claim_steers(self) -> tuple[PendingSteer, ...]:
+        claimed = tuple(self._steers.values())
+        self._steers.clear()
+        return claimed
+
+    def close_and_claim_steers(self) -> tuple[PendingSteer, ...]:
+        self._accepting_steers = False
+        return self.claim_steers()
+
+    def reopen_steers(self) -> None:
+        if not self._finished:
+            self._accepting_steers = True
 
 
 class RunControlRegistry:
@@ -100,6 +143,45 @@ class RunControlRegistry:
                 )
             )
         return accepted
+
+    async def add_steer(
+        self,
+        run_id: str,
+        input_id: str,
+        content: str,
+    ) -> bool:
+        control = self._controls.setdefault(run_id, RunControl())
+        accepted = control.add_steer(input_id, content)
+        if accepted:
+            self._schedule_pending_expiration(run_id, control)
+        return accepted
+
+    async def replace_steer(
+        self,
+        run_id: str,
+        input_id: str,
+        content: str,
+    ) -> bool:
+        control = self._controls.get(run_id)
+        return control is not None and control.replace_steer(input_id, content)
+
+    async def remove_steer(self, run_id: str, input_id: str) -> bool:
+        control = self._controls.get(run_id)
+        return control is not None and control.remove_steer(input_id)
+
+    def _schedule_pending_expiration(
+        self, run_id: str, control: RunControl
+    ) -> None:
+        if control.registered or run_id in self._pending_expirations:
+            return
+        self._pending_expirations[run_id] = (
+            asyncio.get_running_loop().call_later(
+                _PENDING_REGISTRATION_TTL_SECONDS,
+                self._expire_pending,
+                run_id,
+                control,
+            )
+        )
 
     def _expire_pending(self, run_id: str, control: RunControl) -> None:
         self._pending_expirations.pop(run_id, None)

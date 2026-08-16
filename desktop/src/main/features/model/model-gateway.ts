@@ -5,6 +5,9 @@ import type {
   ChatStreamEvent,
   ConversationRunEvent,
   ConversationRunSnapshot,
+  ConversationInput,
+  CreateConversationInput,
+  UpdateConversationInput,
   ContextCompactionResult,
   ArtifactChunk,
   ListModelsInput,
@@ -45,6 +48,10 @@ export interface ModelGateway {
     decision: ToolApprovalDecision,
   ): Promise<void>;
   getActiveRun(taskId: string): Promise<ConversationRunSnapshot | undefined>;
+  listInputs(taskId: string): Promise<ConversationInput[]>;
+  createInput(taskId: string, input: CreateConversationInput): Promise<ConversationInput>;
+  updateInput(taskId: string, inputId: string, input: UpdateConversationInput): Promise<ConversationInput>;
+  deleteInput(taskId: string, inputId: string): Promise<void>;
   pauseRun(taskId: string, runId: string): Promise<ConversationRunSnapshot>;
   resumeRun(taskId: string, runId: string): Promise<ConversationRunSnapshot>;
   cancelRun(taskId: string, runId: string): Promise<ConversationRunSnapshot>;

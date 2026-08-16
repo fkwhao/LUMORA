@@ -30,6 +30,7 @@ class ChatStreamEventResponse(BaseModel):
         "web_search_completed",
         "web_search_failed",
         "usage",
+        "steer_claimed",
         "paused",
         "completed",
         "failed",

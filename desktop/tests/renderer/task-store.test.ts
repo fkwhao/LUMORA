@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type {
   ChatMessage,
+  ConversationInput,
   ConversationRunSnapshot,
   LumoraModelApi,
 } from "../../src/shared/model-contract";
@@ -877,6 +878,121 @@ describe("task store", () => {
     await pendingSend;
   });
 
+  it("persists, edits, reorders, and deletes queued conversation inputs", async () => {
+    const api = createApi();
+    const modelApi = createModelApi();
+    let inputs: ConversationInput[] = [];
+    vi.mocked(modelApi.getActiveRun).mockResolvedValue(activeRun("RUNNING"));
+    vi.mocked(modelApi.listInputs).mockImplementation(async () =>
+      [...inputs].sort((left, right) => left.position - right.position));
+    vi.mocked(modelApi.createInput).mockImplementation(async (_taskId, input) => {
+      const sequence = inputs.length + 1;
+      const created: ConversationInput = {
+        inputId: `input-${sequence}`,
+        taskId: createdTask.taskId,
+        runId: "run-1",
+        target: input.target,
+        status: input.target === "NEXT_STEP" ? "DELIVERED" : "PENDING",
+        content: input.content,
+        model: input.model ?? "demo",
+        reasoningEffort: input.reasoningEffort ?? "",
+        workspacePath: input.workspacePath ?? "",
+        permissionMode: input.permissionMode ?? "request_approval",
+        position: sequence,
+        createdAt: "2026-08-16T00:00:00Z",
+        updatedAt: "2026-08-16T00:00:00Z",
+      };
+      inputs = [...inputs, created];
+      return created;
+    });
+    vi.mocked(modelApi.updateInput).mockImplementation(
+      async (_taskId, inputId, update) => {
+        inputs = inputs.map((input) => input.inputId === inputId
+          ? { ...input, ...update }
+          : input);
+        return inputs.find((input) => input.inputId === inputId)!;
+      },
+    );
+    vi.mocked(modelApi.deleteInput).mockImplementation(async (_taskId, inputId) => {
+      inputs = inputs.filter((input) => input.inputId !== inputId);
+    });
+    const store = createTaskStore(api, modelApi);
+    await store.getState().openTask(createdTask.taskId);
+
+    await store.getState().enqueueInput(
+      "先检查测试配置",
+      "NEXT_STEP",
+      { model: "demo" },
+    );
+    expect(store.getState().pendingInputs).toMatchObject([
+      { inputId: "input-1", target: "NEXT_STEP", status: "DELIVERED" },
+    ]);
+
+    await store.getState().updateInput("input-1", {
+      content: "先检查生产配置",
+      target: "NEXT_TURN",
+    });
+    expect(store.getState().pendingInputs[0]).toMatchObject({
+      content: "先检查生产配置",
+      target: "NEXT_TURN",
+    });
+
+    await store.getState().enqueueInput("然后运行测试", "NEXT_TURN");
+    await store.getState().moveInput("input-2", -1);
+    expect(store.getState().pendingInputs.map((input) => input.inputId)).toEqual([
+      "input-2",
+      "input-1",
+    ]);
+
+    await store.getState().deleteInput("input-1");
+    expect(store.getState().pendingInputs.map((input) => input.inputId)).toEqual([
+      "input-2",
+    ]);
+  });
+
+  it("turns a queued question into a visible steer bubble", async () => {
+    const api = createApi();
+    const modelApi = createModelApi();
+    let inputs: ConversationInput[] = [{
+      inputId: "input-steer",
+      taskId: createdTask.taskId,
+      runId: undefined,
+      target: "NEXT_TURN",
+      status: "PENDING",
+      content: "改为先检查安全边界",
+      model: "demo",
+      reasoningEffort: "",
+      workspacePath: "",
+      permissionMode: "request_approval",
+      position: 1,
+      createdAt: "2026-08-16T00:00:00Z",
+      updatedAt: "2026-08-16T00:00:00Z",
+    }];
+    vi.mocked(modelApi.getActiveRun).mockResolvedValue(activeRun("RUNNING"));
+    vi.mocked(modelApi.listInputs).mockImplementation(async () => inputs);
+    vi.mocked(modelApi.updateInput).mockImplementation(
+      async (_taskId, inputId, update) => {
+        inputs = inputs.map((input) => input.inputId === inputId
+          ? { ...input, ...update, runId: "run-1", status: "DELIVERED" }
+          : input);
+        return inputs[0]!;
+      },
+    );
+    const store = createTaskStore(api, modelApi);
+    await store.getState().openTask(createdTask.taskId);
+
+    await store.getState().updateInput("input-steer", {
+      target: "NEXT_STEP",
+    });
+
+    expect(store.getState().messages.at(-2)).toMatchObject({
+      runtimeId: "steer-input-steer",
+      role: "user",
+      content: "改为先检查安全边界",
+    });
+    expect(store.getState().messages.at(-1)?.role).toBe("assistant");
+  });
+
   it("persists archived tasks locally and allows restoring them", async () => {
     localStorage.clear();
     const api = createApi();
@@ -944,6 +1060,10 @@ function createModelApi(): LumoraModelApi {
     ]),
     decideToolApproval: vi.fn(async () => undefined),
     getActiveRun: vi.fn(async () => undefined),
+    listInputs: vi.fn(async () => []),
+    createInput: vi.fn(),
+    updateInput: vi.fn(),
+    deleteInput: vi.fn(async () => undefined),
     pauseRun: vi.fn(),
     resumeRun: vi.fn(),
     cancelRun: vi.fn(),

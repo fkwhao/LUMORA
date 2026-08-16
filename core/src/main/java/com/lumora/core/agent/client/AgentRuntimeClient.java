@@ -110,4 +110,12 @@ public interface AgentRuntimeClient {
                     Consumer<ChatStreamEvent> eventConsumer);
 
     boolean pauseRun(String runId, String correlationId);
+
+    boolean addSteer(String runId, String inputId, String content,
+                     String correlationId);
+
+    boolean replaceSteer(String runId, String inputId, String content,
+                         String correlationId);
+
+    boolean removeSteer(String runId, String inputId, String correlationId);
 }

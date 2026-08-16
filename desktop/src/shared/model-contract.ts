@@ -195,6 +195,7 @@ export type ChatStreamEventType =
   | "web_search_completed"
   | "web_search_failed"
   | "usage"
+  | "steer_claimed"
   | "paused"
   | "completed"
   | "failed";
@@ -254,6 +255,41 @@ export interface ConversationRunEvent {
   occurredAt: string;
 }
 
+export type ConversationInputTarget = "NEXT_TURN" | "NEXT_STEP";
+export type ConversationInputStatus =
+  | "PENDING"
+  | "DELIVERED"
+  | "CLAIMED"
+  | "CANCELLED";
+
+export interface ConversationInput {
+  inputId: string;
+  taskId: string;
+  runId?: string;
+  target: ConversationInputTarget;
+  status: ConversationInputStatus;
+  content: string;
+  model: string;
+  reasoningEffort: string;
+  workspacePath: string;
+  permissionMode: PermissionMode;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateConversationInput extends ChatRequestOptions {
+  content: string;
+  target: ConversationInputTarget;
+  position?: number;
+}
+
+export interface UpdateConversationInput extends ChatRequestOptions {
+  content?: string;
+  target?: ConversationInputTarget;
+  position?: number;
+}
+
 export interface ContextCompactionResult {
   beforeTokens: number;
   afterTokens: number;
@@ -305,6 +341,17 @@ export interface LumoraModelApi {
     decision: ToolApprovalDecision,
   ): Promise<void>;
   getActiveRun(taskId: string): Promise<ConversationRunSnapshot | undefined>;
+  listInputs(taskId: string): Promise<ConversationInput[]>;
+  createInput(
+    taskId: string,
+    input: CreateConversationInput,
+  ): Promise<ConversationInput>;
+  updateInput(
+    taskId: string,
+    inputId: string,
+    input: UpdateConversationInput,
+  ): Promise<ConversationInput>;
+  deleteInput(taskId: string, inputId: string): Promise<void>;
   pauseRun(taskId: string, runId: string): Promise<ConversationRunSnapshot>;
   resumeRun(taskId: string, runId: string): Promise<ConversationRunSnapshot>;
   cancelRun(taskId: string, runId: string): Promise<ConversationRunSnapshot>;

@@ -120,6 +120,67 @@ def test_agent_loop_preserves_native_protocol_history() -> None:
     asyncio.run(_assert_native_protocol_history_is_preserved())
 
 
+def test_agent_loop_claims_steer_at_the_next_model_boundary() -> None:
+    asyncio.run(_assert_steer_is_claimed_at_model_boundary())
+
+
+async def _assert_steer_is_claimed_at_model_boundary() -> None:
+    controls = RunControlRegistry()
+    control = controls.register("run-steer")
+    captured_messages: list[list[dict[str, object]]] = []
+    call_count = 0
+
+    async def complete_turn(
+        _settings,
+        messages,
+        _tools,
+        _reasoning_effort,
+    ) -> ProviderTurn:
+        nonlocal call_count
+        call_count += 1
+        captured_messages.append(list(messages))
+        if call_count == 1:
+            assert await controls.add_steer(
+                "run-steer", "input-1", "改用更安全的实现"
+            )
+        return ProviderTurn(
+            content="初稿" if call_count == 1 else "已按引导调整",
+            reasoning="",
+            model="test-model",
+            usage=TokenUsageResponse(
+                promptTokens=5,
+                completionTokens=3,
+                totalTokens=8,
+            ),
+            tool_calls=(),
+        )
+
+    events = [
+        event
+        async for event in AgentLoopRunner(complete_turn).stream(
+            _settings(),
+            PromptAssembly(()),
+            [ChatMessageRequest(role="user", content="完成实现")],
+            None,
+            ToolRegistry(),
+            ToolContext(Path(".")),
+            run_control=control,
+        )
+    ]
+    controls.unregister("run-steer", control)
+
+    assert call_count == 2
+    assert captured_messages[1][-2]["role"] == "assistant"
+    assert captured_messages[1][-1] == {
+        "role": "user",
+        "content": "改用更安全的实现",
+    }
+    claimed = next(event for event in events if event.type == "steer_claimed")
+    assert claimed.item_id == "input-1"
+    assert "text_reset" in [event.type for event in events]
+    assert events[-1].type == "completed"
+
+
 def test_agent_loop_balances_undispatched_tool_calls_on_pause() -> None:
     asyncio.run(_assert_undispatched_calls_are_balanced())
 

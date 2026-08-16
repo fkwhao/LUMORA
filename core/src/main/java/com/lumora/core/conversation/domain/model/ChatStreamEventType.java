@@ -25,6 +25,7 @@ public enum ChatStreamEventType {
     WEB_SEARCH_COMPLETED("web_search_completed"),
     WEB_SEARCH_FAILED("web_search_failed"),
     USAGE("usage"),
+    STEER_CLAIMED("steer_claimed"),
     PAUSED("paused"),
     COMPLETED("completed"),
     FAILED("failed");

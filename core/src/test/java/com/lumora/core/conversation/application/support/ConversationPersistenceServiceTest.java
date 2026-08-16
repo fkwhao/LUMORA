@@ -35,6 +35,64 @@ import static org.mockito.Mockito.when;
 class ConversationPersistenceServiceTest {
 
     @Test
+    void persistsSteerAsAVisibleUserMessageAndAdvancesTheReplyParent() {
+        ConversationMapper conversationMapper = mock(ConversationMapper.class);
+        ConversationMessageMapper messageMapper = mock(
+                ConversationMessageMapper.class
+        );
+        TransactionTemplate transactionTemplate = mock(
+                TransactionTemplate.class
+        );
+        doAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            Consumer<TransactionStatus> action = invocation.getArgument(0);
+            action.accept(mock(TransactionStatus.class));
+            return null;
+        }).when(transactionTemplate).executeWithoutResult(any());
+        Instant now = Instant.parse("2026-08-16T08:00:00Z");
+        Conversation conversation = new Conversation(
+                "conversation-1", "task-1", now, now
+        );
+        ConversationMessage parent = message(
+                "user-1", 1, ChatMessageRole.USER, "检查项目", now
+        );
+        parent.setMessageDepth(1);
+        parent.setActivePath(true);
+        when(messageMapper.selectById("user-1")).thenReturn(parent);
+        when(messageMapper.selectList(any())).thenReturn(List.of(parent));
+        when(conversationMapper.selectById("conversation-1"))
+                .thenReturn(conversation);
+        ConversationPersistenceService service =
+                new ConversationPersistenceService(
+                        conversationMapper,
+                        messageMapper,
+                        mock(TaskService.class),
+                        mock(MemoryService.class),
+                        mock(ConversationContextSummaryService.class),
+                        Clock.fixed(now, ZoneOffset.UTC),
+                        transactionTemplate,
+                        new ObjectMapper()
+                );
+        ConversationRunContext context = new ConversationRunContext(
+                "task-1", "conversation-1", List.of(),
+                "user-1", "检查项目", null, null, System.nanoTime()
+        );
+
+        service.persistSteerMessage(context, "改为先检查安全边界");
+
+        ArgumentCaptor<ConversationMessage> captor =
+                ArgumentCaptor.forClass(ConversationMessage.class);
+        verify(messageMapper).insert(captor.capture());
+        ConversationMessage saved = captor.getValue();
+        assertThat(saved.getRole()).isEqualTo(ChatMessageRole.USER);
+        assertThat(saved.getContent()).isEqualTo("改为先检查安全边界");
+        assertThat(saved.getParentMessageId()).isEqualTo("user-1");
+        assertThat(saved.getMessageDepth()).isEqualTo(2);
+        assertThat(context.getAssistantParentMessageId())
+                .isEqualTo(saved.getMessageId());
+    }
+
+    @Test
     void allocatesPausedAssistantSequenceAtPersistenceTime() {
         ConversationMapper conversationMapper = mock(ConversationMapper.class);
         ConversationMessageMapper messageMapper = mock(

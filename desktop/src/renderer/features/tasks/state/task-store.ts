@@ -3,6 +3,9 @@ import { createStore } from "zustand/vanilla";
 import type {
   ChatMessage,
   ChatRequestOptions,
+  ConversationInput,
+  ConversationInputTarget,
+  UpdateConversationInput,
   ConversationRunEvent,
   ConversationRunSnapshot,
   LumoraModelApi,
@@ -19,6 +22,7 @@ import type {
 import {
   applyChatEvent,
   cancelSupplementalUsageRefresh,
+  insertSteerUserMessage,
 } from "./chat-event-handler";
 import { reconcilePersistedMessages } from "./chat-message-reconciliation";
 import {
@@ -40,6 +44,7 @@ import { reduceTaskEvent } from "./task-event-reducer";
 export interface TaskState {
   activeTask?: TaskSnapshot;
   activeRun?: ConversationRunSnapshot;
+  pendingInputs: ConversationInput[];
   recentTasks: TaskSummary[];
   archivedTaskIds: string[];
   deletedTaskIds: string[];
@@ -64,6 +69,17 @@ export interface TaskState {
   openTask(taskId: string): Promise<void>;
   createTask(goal: string, projectPath?: string): Promise<TaskSnapshot>;
   sendMessage(content: string, options?: ChatRequestOptions): Promise<void>;
+  enqueueInput(
+    content: string,
+    target: ConversationInputTarget,
+    options?: ChatRequestOptions,
+  ): Promise<void>;
+  updateInput(
+    inputId: string,
+    input: UpdateConversationInput,
+  ): Promise<void>;
+  deleteInput(inputId: string): Promise<void>;
+  moveInput(inputId: string, direction: -1 | 1): Promise<void>;
   updateComposerPreferences(
     model: string,
     reasoningEffort: string,
@@ -146,6 +162,7 @@ export function createTaskStore(
   return createStore<TaskState>((set, get) => ({
     activeTask: undefined,
     activeRun: undefined,
+    pendingInputs: [],
     recentTasks: [],
     archivedTaskIds: loadArchivedTaskIds(),
     deletedTaskIds: loadDeletedTaskIds(),
@@ -255,6 +272,7 @@ export function createTaskStore(
       set({
         activeTask: optimisticTask ?? current.activeTask,
         activeRun: undefined,
+        pendingInputs: [],
         messages: cachedWindow?.messages ?? [],
         taskEvents: [],
         isLoadingHistory: !cached,
@@ -309,10 +327,11 @@ export function createTaskStore(
         }
       };
       try {
-        const [task, messages, activeRun] = await Promise.all([
+        const [task, messages, activeRun, pendingInputs] = await Promise.all([
           api.get(taskId),
           modelApi?.listMessages(taskId) ?? Promise.resolve([]),
           modelApi?.getActiveRun(taskId) ?? Promise.resolve(undefined),
+          modelApi?.listInputs(taskId) ?? Promise.resolve([]),
         ]);
         conversationCache.set(taskId, { task, messages });
         if (requestId !== openTaskRequest) {
@@ -341,6 +360,7 @@ export function createTaskStore(
                 lastEventSequence: activeRun.replayFromSequence,
               }
             : activeRun,
+          pendingInputs,
           messages: historyWindow.messages,
           taskEvents: [],
           isLoadingHistory: false,
@@ -369,6 +389,14 @@ export function createTaskStore(
               if (get().activeTask?.taskId !== taskId) return;
               if (applyRunEnvelope(runEvent, get, set)) {
                 runBatcher.push(runEvent.event);
+              }
+              if (
+                runEvent.event.type === "completed" ||
+                runEvent.event.type === "failed"
+              ) {
+                void followNextRun(
+                  modelApi, taskId, get, set, activeRun.runId,
+                );
               }
             },
           );
@@ -406,6 +434,7 @@ export function createTaskStore(
         set({
           activeTask: task,
           activeRun: undefined,
+          pendingInputs: [],
           isCreating: false,
           messages: [],
           isLoadingHistory: false,
@@ -540,6 +569,120 @@ export function createTaskStore(
         unsubscribeChat = undefined;
       }
       await get().loadRecentTasks();
+      if (modelApi && get().activeTask?.taskId === task.taskId) {
+        const pendingInputs = await modelApi.listInputs(task.taskId)
+          .catch(() => get().pendingInputs);
+        set({ pendingInputs });
+        void followNextRun(modelApi, task.taskId, get, set);
+      }
+    },
+
+    async enqueueInput(content, target, options) {
+      const normalizedContent = content.trim();
+      const taskId = get().activeTask?.taskId;
+      if (!taskId || !modelApi) {
+        throw new Error("当前任务无法加入问题队列");
+      }
+      if (!normalizedContent) {
+        throw new Error("消息内容不能为空");
+      }
+      if (target === "NEXT_STEP") {
+        const activeRun = get().activeRun
+          ?? await waitForActiveRun(modelApi, taskId);
+        if (!activeRun || !isPausableRun(activeRun)) {
+          throw new Error("当前没有可引导的活动运行");
+        }
+      }
+      const created = await modelApi.createInput(taskId, {
+        content: normalizedContent,
+        target,
+        ...options,
+        workspacePath:
+          options?.workspacePath ?? get().taskProjectPaths[taskId],
+      });
+      const pendingInputs = await modelApi.listInputs(taskId);
+      if (get().activeTask?.taskId === taskId) set({ pendingInputs });
+      if (created.status === "CLAIMED") {
+        void followNextRun(
+          modelApi,
+          taskId,
+          get,
+          set,
+          get().activeRun?.runId,
+        );
+      }
+    },
+
+    async updateInput(inputId, input) {
+      const taskId = get().activeTask?.taskId;
+      if (!taskId || !modelApi) {
+        throw new Error("当前任务无法编辑问题队列");
+      }
+      const previous = get().pendingInputs.find(
+        (item) => item.inputId === inputId,
+      );
+      const wasPaused = get().activeRun?.status === "PAUSED";
+      const updated = await modelApi.updateInput(taskId, inputId, input);
+      if (
+        previous?.target === "NEXT_TURN" &&
+        updated.target === "NEXT_STEP"
+      ) {
+        set({
+          messages: insertSteerUserMessage(
+            get().messages,
+            updated.inputId,
+            updated.content,
+            !wasPaused,
+          ),
+        });
+      }
+      const pendingInputs = await modelApi.listInputs(taskId);
+      if (get().activeTask?.taskId === taskId) set({ pendingInputs });
+      if (updated.status === "CLAIMED") {
+        void followNextRun(
+          modelApi,
+          taskId,
+          get,
+          set,
+          get().activeRun?.runId,
+        );
+      }
+    },
+
+    async deleteInput(inputId) {
+      const taskId = get().activeTask?.taskId;
+      if (!taskId || !modelApi) {
+        throw new Error("当前任务无法删除问题队列内容");
+      }
+      await modelApi.deleteInput(taskId, inputId);
+      const pendingInputs = await modelApi.listInputs(taskId);
+      if (get().activeTask?.taskId === taskId) set({ pendingInputs });
+    },
+
+    async moveInput(inputId, direction) {
+      const taskId = get().activeTask?.taskId;
+      if (!taskId || !modelApi) return;
+      const allItems = [...get().pendingInputs].sort(
+        (left, right) => left.position - right.position,
+      );
+      const selected = allItems.find((item) => item.inputId === inputId);
+      if (!selected) return;
+      const items = allItems.filter(
+        (item) => item.target === selected.target,
+      );
+      const index = items.findIndex((item) => item.inputId === inputId);
+      const swapIndex = index + direction;
+      if (index < 0 || swapIndex < 0 || swapIndex >= items.length) return;
+      const current = items[index]!;
+      const swap = items[swapIndex]!;
+      await modelApi.updateInput(taskId, current.inputId, {
+        position: swap.position,
+      });
+      await modelApi.updateInput(taskId, swap.inputId, {
+        position: current.position,
+      });
+      const pendingInputs = await modelApi.listInputs(taskId);
+      if (get().activeTask?.taskId === taskId) set({ pendingInputs });
     },
 
     async compactContext(model) {
@@ -932,6 +1075,7 @@ export function createTaskStore(
           archivedTaskIds,
           activeTask: undefined,
           activeRun: undefined,
+          pendingInputs: [],
           messages: [],
           taskEvents: [],
           isChatting: false,
@@ -1019,6 +1163,7 @@ export function createTaskStore(
       set({
         activeTask: undefined,
         activeRun: undefined,
+        pendingInputs: [],
         error: undefined,
         chatError: undefined,
         messages: [],
@@ -1175,6 +1320,36 @@ async function waitForActiveRun(
     await new Promise<void>((resolve) => setTimeout(resolve, 50));
   }
   return undefined;
+}
+
+async function followNextRun(
+  modelApi: LumoraModelApi,
+  taskId: string,
+  get: () => TaskState,
+  set: (partial: Partial<TaskState>) => void,
+  finishedRunId?: string,
+): Promise<void> {
+  const delays = [40, 80, 140, 240, 360];
+  for (const delay of delays) {
+    await new Promise<void>((resolve) => setTimeout(resolve, delay));
+    if (get().activeTask?.taskId !== taskId) return;
+    const [activeRun, pendingInputs] = await Promise.all([
+      modelApi.getActiveRun(taskId),
+      modelApi.listInputs(taskId),
+    ]);
+    if (get().activeTask?.taskId !== taskId) return;
+    set({ pendingInputs });
+    if (
+      activeRun &&
+      isPausableRun(activeRun) &&
+      activeRun.runId !== finishedRunId &&
+      activeRun.runId !== get().activeRun?.runId
+    ) {
+      await get().openTask(taskId);
+      return;
+    }
+    if (!activeRun && pendingInputs.length === 0) return;
+  }
 }
 
 function isPausableRun(run: ConversationRunSnapshot): boolean {

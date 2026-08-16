@@ -129,6 +129,19 @@ class AgentLoopRunner:
             if _pause_requested(run_control):
                 yield _paused_event(resolved_model)
                 return
+            if run_control is not None:
+                for steer in run_control.claim_steers():
+                    steer_message = {
+                        "role": "user",
+                        "content": steer.content,
+                    }
+                    request_messages.append(steer_message)
+                    yield RunEvent(
+                        type="steer_claimed",
+                        item_id=steer.input_id,
+                        delta=steer.content,
+                        model=resolved_model,
+                    )
             retry_usage = empty_token_usage()
             provisional_usage = empty_token_usage()
             content_was_streamed = False
@@ -400,6 +413,29 @@ class AgentLoopRunner:
                     usage=_to_run_usage(cumulative_usage),
                     active_context_tokens=active_context_tokens,
                 )
+                pending_steers = (
+                    run_control.close_and_claim_steers()
+                    if run_control is not None
+                    else ()
+                )
+                if pending_steers:
+                    assert run_control is not None
+                    request_messages.append(assistant_message)
+                    for steer in pending_steers:
+                        steer_message = {
+                            "role": "user",
+                            "content": steer.content,
+                        }
+                        request_messages.append(steer_message)
+                        yield RunEvent(
+                            type="steer_claimed",
+                            item_id=steer.input_id,
+                            delta=steer.content,
+                            model=resolved_model,
+                        )
+                    yield RunEvent(type="text_reset", model=resolved_model)
+                    run_control.reopen_steers()
+                    continue
                 yield RunEvent(type="completed", model=resolved_model)
                 return
 
