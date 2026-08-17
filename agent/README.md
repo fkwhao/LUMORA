@@ -102,6 +102,9 @@ python -m app.main
 三种适配器统一输出内部 `ProviderTurn` / `ProviderTurnEvent`，Agent Harness、上下文压缩和
 审批 Reviewer 不感知外部协议差异。新增协议时只需注册新的 Provider 适配器，不再修改业务
 编排代码。`apiFormat` 缺省为 `chat-completions`，以兼容已有供应商记录。
+每个协议适配器懒创建一个可并发复用的 `httpx.AsyncClient`，空闲连接保留 120 秒，
+工具循环内的后续模型回合不再每次重新建立 TCP/TLS。应用关闭时由 `RoutingModelProvider`
+统一释放连接池；请求超时、流式取消和错误重试语义保持不变。
 
 ## 自动审批 Reviewer
 

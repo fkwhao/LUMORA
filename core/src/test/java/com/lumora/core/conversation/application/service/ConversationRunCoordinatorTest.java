@@ -1,6 +1,7 @@
 package com.lumora.core.conversation.application.service;
 
 import com.lumora.core.conversation.application.support.ConversationRunEventStreamRegistry;
+import com.lumora.core.conversation.application.support.ConversationRunEventJournal;
 import com.lumora.core.conversation.application.support.ConversationRunStore;
 import com.lumora.core.conversation.application.support.ConversationInputStore;
 import com.lumora.core.conversation.domain.entity.ConversationInput;
@@ -85,6 +86,7 @@ class ConversationRunCoordinatorTest {
         );
         ConversationRunCoordinator coordinator = new ConversationRunCoordinator(
                 conversationService, runStore, inputStore, streams,
+                mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
@@ -172,6 +174,7 @@ class ConversationRunCoordinatorTest {
         );
         ConversationRunCoordinator coordinator = new ConversationRunCoordinator(
                 conversationService, runStore, inputStore, streams,
+                mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
@@ -232,6 +235,7 @@ class ConversationRunCoordinatorTest {
                 runStore,
                 mock(ConversationInputStore.class),
                 streams,
+                mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
@@ -285,6 +289,7 @@ class ConversationRunCoordinatorTest {
                 runStore,
                 mock(ConversationInputStore.class),
                 mock(ConversationRunEventStreamRegistry.class),
+                mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
@@ -346,6 +351,7 @@ class ConversationRunCoordinatorTest {
                 runStore,
                 mock(ConversationInputStore.class),
                 streams,
+                mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
@@ -408,6 +414,7 @@ class ConversationRunCoordinatorTest {
                 runStore,
                 mock(ConversationInputStore.class),
                 streams,
+                mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
@@ -483,6 +490,7 @@ class ConversationRunCoordinatorTest {
                 runStore,
                 mock(ConversationInputStore.class),
                 streams,
+                mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),

@@ -475,7 +475,7 @@ async def _assert_new_workspace_file_uses_low_risk_fast_path(
     )
 
 
-def test_auto_approve_reviews_existing_workspace_file_as_bounded_risk(
+def test_auto_approve_skips_reviewer_for_reversible_workspace_patch(
     tmp_path: Path,
 ) -> None:
     target = tmp_path / "settings.py"
@@ -494,13 +494,26 @@ def test_auto_approve_reviews_existing_workspace_file_as_bounded_risk(
         {"path": str(target), "oldText": "OLD", "newText": "NEW"},
         PermissionPolicy(PermissionMode.AUTO_APPROVE),
     )
+    large_patch = PermissionEngine().evaluate(
+        tools["apply_patch"],
+        ToolContext(tmp_path.resolve()),
+        {
+            "path": str(target),
+            "oldText": "x" * 8_001,
+            "newText": "y" * 8_001,
+        },
+        PermissionPolicy(PermissionMode.AUTO_APPROVE),
+    )
 
     assert overwrite.decision is PermissionDecision.ASK
     assert overwrite.risk_level == "MEDIUM"
     assert overwrite.reversible is False
-    assert patch.decision is PermissionDecision.ASK
+    assert patch.decision is PermissionDecision.ALLOW
+    assert patch.layer == "mode"
     assert patch.risk_level == "MEDIUM"
     assert patch.reversible is True
+    assert large_patch.decision is PermissionDecision.ASK
+    assert large_patch.risk_level == "MEDIUM"
 
 
 def test_later_rule_can_override_deny_inside_same_layer(

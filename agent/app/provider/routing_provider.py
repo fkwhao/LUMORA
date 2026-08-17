@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from inspect import isawaitable
 from typing import Any
 
 from app.dto.request.chat_completion_request import ChatMessageRequest
@@ -32,6 +33,27 @@ class RoutingModelProvider:
             return self._adapters[api_format]
         except KeyError as error:
             raise ValueError(f"不支持的模型 API 格式: {api_format}") from error
+
+    async def close(self) -> None:
+        first_error: Exception | None = None
+        closed: set[int] = set()
+        for adapter in self._adapters.values():
+            identity = id(adapter)
+            if identity in closed:
+                continue
+            closed.add(identity)
+            close = getattr(adapter, "close", None)
+            if not callable(close):
+                continue
+            try:
+                result = close()
+                if isawaitable(result):
+                    await result
+            except Exception as error:  # noqa: BLE001  # pragma: no cover
+                if first_error is None:
+                    first_error = error
+        if first_error is not None:
+            raise first_error
 
     async def list_models(self, settings: ModelConnectionSettings) -> list[str]:
         return await self._adapter(settings).list_models(settings)

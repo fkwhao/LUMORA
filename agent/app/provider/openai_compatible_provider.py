@@ -21,6 +21,7 @@ from app.harness.run_event import RunEvent, RunUsage
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.prompt.prompt_assembly import PromptAssembly
 from app.prompt.prompt_loader import PromptLoader
+from app.provider.http_client import create_model_http_client
 from app.provider.token_usage import estimate_stream_usage, parse_chat_usage
 
 
@@ -29,23 +30,42 @@ class OpenAICompatibleProvider:
 
     _PARTIAL_USAGE_EMIT_INTERVAL = 32
 
-    def __init__(self, prompt_loader: PromptLoader | None = None) -> None:
+    def __init__(
+        self,
+        prompt_loader: PromptLoader | None = None,
+        http_client: httpx.AsyncClient | None = None,
+    ) -> None:
         self._prompt_loader = prompt_loader or PromptLoader()
+        self._http_client = http_client
+        self._owns_http_client = http_client is None
+
+    def _client(self) -> httpx.AsyncClient:
+        if self._http_client is None:
+            self._http_client = create_model_http_client(httpx.AsyncClient)
+        return self._http_client
+
+    async def close(self) -> None:
+        if not self._owns_http_client:
+            return
+        client = self._http_client
+        self._http_client = None
+        if client is not None:
+            await client.aclose()
 
     async def list_models(
         self,
         settings: ModelConnectionSettings,
     ) -> list[str]:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(
-                f"{settings.base_url}/models",
-                headers={
-                    "Authorization": f"Bearer {settings.api_key}",
-                    "Content-Type": "application/json",
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
+        response = await self._client().get(
+            f"{settings.base_url}/models",
+            headers={
+                "Authorization": f"Bearer {settings.api_key}",
+                "Content-Type": "application/json",
+            },
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        payload = response.json()
         data = payload.get("data") if isinstance(payload, dict) else None
         if not isinstance(data, list):
             raise TypeError("模型列表响应格式无效")
@@ -73,17 +93,17 @@ class OpenAICompatibleProvider:
             stream=False,
             reasoning_effort=reasoning_effort,
         )
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                f"{settings.base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {settings.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=request_body,
-            )
-            response.raise_for_status()
-            payload = response.json()
+        response = await self._client().post(
+            f"{settings.base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {settings.api_key}",
+                "Content-Type": "application/json",
+            },
+            json=request_body,
+            timeout=60.0,
+        )
+        response.raise_for_status()
+        payload = response.json()
         return self._parse_response(payload, settings.model)
 
     async def compact_context(
@@ -122,17 +142,17 @@ class OpenAICompatibleProvider:
             "stream": False,
             "max_tokens": summary_output_tokens(settings),
         }
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(
-                f"{settings.base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {settings.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=request_body,
-            )
-            response.raise_for_status()
-            payload = response.json()
+        response = await self._client().post(
+            f"{settings.base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {settings.api_key}",
+                "Content-Type": "application/json",
+            },
+            json=request_body,
+            timeout=120.0,
+        )
+        response.raise_for_status()
+        payload = response.json()
         return self._parse_response(payload, settings.model)
 
     async def compact_agent_history(
@@ -164,17 +184,17 @@ class OpenAICompatibleProvider:
             "stream": False,
             "max_tokens": summary_output_tokens(settings),
         }
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(
-                f"{settings.base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {settings.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=request_body,
-            )
-            response.raise_for_status()
-            payload = response.json()
+        response = await self._client().post(
+            f"{settings.base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {settings.api_key}",
+                "Content-Type": "application/json",
+            },
+            json=request_body,
+            timeout=120.0,
+        )
+        response.raise_for_status()
+        payload = response.json()
         return self._parse_response(payload, settings.model)
 
     async def stream(
@@ -198,7 +218,7 @@ class OpenAICompatibleProvider:
             + estimator.estimate_tools(tuple(request_body.get("tools", [])))
         )
         usage_received = False
-        async with httpx.AsyncClient(timeout=60.0) as client, client.stream(
+        async with self._client().stream(
             "POST",
             f"{settings.base_url}/chat/completions",
             headers={
@@ -206,6 +226,7 @@ class OpenAICompatibleProvider:
                 "Content-Type": "application/json",
             },
             json=request_body,
+            timeout=60.0,
         ) as response:
             response.raise_for_status()
             async for line in response.aiter_lines():
@@ -294,17 +315,17 @@ class OpenAICompatibleProvider:
             request_body["max_tokens"] = settings.max_output_tokens
         if reasoning_effort:
             request_body["reasoning"] = {"effort": reasoning_effort}
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(
-                f"{settings.base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {settings.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=request_body,
-            )
-            response.raise_for_status()
-            payload = response.json()
+        response = await self._client().post(
+            f"{settings.base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {settings.api_key}",
+                "Content-Type": "application/json",
+            },
+            json=request_body,
+            timeout=120.0,
+        )
+        response.raise_for_status()
+        payload = response.json()
         try:
             message = payload["choices"][0]["message"]
         except (KeyError, IndexError, TypeError) as error:
@@ -404,7 +425,7 @@ class OpenAICompatibleProvider:
                 usage_estimated=True,
             )
 
-        async with httpx.AsyncClient(timeout=120.0) as client, client.stream(
+        async with self._client().stream(
             "POST",
             f"{settings.base_url}/chat/completions",
             headers={
@@ -412,6 +433,7 @@ class OpenAICompatibleProvider:
                 "Content-Type": "application/json",
             },
             json=request_body,
+            timeout=120.0,
         ) as response:
             response.raise_for_status()
             stream_started = True

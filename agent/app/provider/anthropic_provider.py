@@ -8,11 +8,13 @@ import httpx
 from app.dto.response.chat_completion_response import TokenUsageResponse
 from app.harness.contracts import ProviderToolCall, ProviderTurn, ProviderTurnEvent
 from app.model.model_connection_settings import ModelConnectionSettings
+from app.prompt.prompt_loader import PromptLoader
 from app.provider.hosted_web_search import (
     ProviderWebSearch,
     anthropic_web_sources,
     web_search_query,
 )
+from app.provider.http_client import create_model_http_client
 from app.provider.protocol_provider import ProtocolProviderBase
 from app.provider.token_usage import add_token_usage, parse_anthropic_usage
 
@@ -23,14 +25,36 @@ class AnthropicProvider(ProtocolProviderBase):
     _MAX_SERVER_TOOL_CONTINUATIONS = 5
     _PARTIAL_USAGE_EMIT_INTERVAL = 32
 
+    def __init__(
+        self,
+        prompt_loader: PromptLoader | None = None,
+        http_client: httpx.AsyncClient | None = None,
+    ) -> None:
+        super().__init__(prompt_loader)
+        self._http_client = http_client
+        self._owns_http_client = http_client is None
+
+    def _client(self) -> httpx.AsyncClient:
+        if self._http_client is None:
+            self._http_client = create_model_http_client(httpx.AsyncClient)
+        return self._http_client
+
+    async def close(self) -> None:
+        if not self._owns_http_client:
+            return
+        client = self._http_client
+        self._http_client = None
+        if client is not None:
+            await client.aclose()
+
     async def list_models(self, settings: ModelConnectionSettings) -> list[str]:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(
-                f"{settings.base_url}/models",
-                headers=_headers(settings),
-            )
-            response.raise_for_status()
-            payload = response.json()
+        response = await self._client().get(
+            f"{settings.base_url}/models",
+            headers=_headers(settings),
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        payload = response.json()
         return _parse_model_list(payload)
 
     async def complete_agent_turn(
@@ -49,31 +73,32 @@ class AnthropicProvider(ProtocolProviderBase):
         )
         base_messages = list(request_body["messages"])
         usage_parts: list[TokenUsageResponse] = []
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            for continuation in range(self._MAX_SERVER_TOOL_CONTINUATIONS + 1):
-                response = await client.post(
-                    f"{settings.base_url}/messages",
-                    headers=_headers(settings),
-                    json=request_body,
+        client = self._client()
+        for continuation in range(self._MAX_SERVER_TOOL_CONTINUATIONS + 1):
+            response = await client.post(
+                f"{settings.base_url}/messages",
+                headers=_headers(settings),
+                json=request_body,
+                timeout=120.0,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            usage_parts.append(
+                parse_anthropic_usage(payload.get("usage") or {})
+            )
+            if payload.get("stop_reason") != "pause_turn":
+                turn = _parse_turn(payload, settings.model)
+                return _turn_with_usage(
+                    turn,
+                    usage=add_token_usage(usage_parts),
                 )
-                response.raise_for_status()
-                payload = response.json()
-                usage_parts.append(
-                    parse_anthropic_usage(payload.get("usage") or {})
-                )
-                if payload.get("stop_reason") != "pause_turn":
-                    turn = _parse_turn(payload, settings.model)
-                    return _turn_with_usage(
-                        turn,
-                        usage=add_token_usage(usage_parts),
-                    )
-                if continuation >= self._MAX_SERVER_TOOL_CONTINUATIONS:
-                    break
-                request_body = _anthropic_continuation_body(
-                    request_body,
-                    base_messages,
-                    payload.get("content"),
-                )
+            if continuation >= self._MAX_SERVER_TOOL_CONTINUATIONS:
+                break
+            request_body = _anthropic_continuation_body(
+                request_body,
+                base_messages,
+                payload.get("content"),
+            )
         raise ValueError("Anthropic 服务端工具续跑次数超过限制")
 
     async def stream_agent_turn(
@@ -96,8 +121,8 @@ class AnthropicProvider(ProtocolProviderBase):
         )
         base_messages = list(request_body["messages"])
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            for continuation in range(self._MAX_SERVER_TOOL_CONTINUATIONS + 1):
+        client = self._client()
+        for continuation in range(self._MAX_SERVER_TOOL_CONTINUATIONS + 1):
                 text_blocks: dict[int, list[str]] = {}
                 calls: dict[int, dict[str, str]] = {}
                 search_indices: dict[int, str] = {}
@@ -151,6 +176,7 @@ class AnthropicProvider(ProtocolProviderBase):
                     f"{settings.base_url}/messages",
                     headers=_headers(settings),
                     json=request_body,
+                    timeout=120.0,
                 ) as response:
                     response.raise_for_status()
                     async for line in response.aiter_lines():
@@ -404,8 +430,8 @@ class AnthropicProvider(ProtocolProviderBase):
                     base_messages,
                     paused_content,
                 )
-            else:
-                raise ValueError("Anthropic 服务端工具续跑次数超过限制")
+        else:
+            raise ValueError("Anthropic 服务端工具续跑次数超过限制")
 
         content = _final_anthropic_text(text_blocks, search_block_indices)
         if (

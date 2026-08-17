@@ -56,6 +56,9 @@ def create_app(
     close_chat_service = getattr(resolved_chat_service, "close", None)
     if callable(close_chat_service):
         app.router.add_event_handler("shutdown", close_chat_service)
+    close_provider = getattr(provider, "close", None)
+    if callable(close_provider):
+        app.router.add_event_handler("shutdown", close_provider)
 
     @app.exception_handler(AgentHttpError)
     async def handle_agent_http_error(

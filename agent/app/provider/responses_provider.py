@@ -9,10 +9,12 @@ from app.context.estimator import TokenEstimator
 from app.dto.response.chat_completion_response import TokenUsageResponse
 from app.harness.contracts import ProviderToolCall, ProviderTurn, ProviderTurnEvent
 from app.model.model_connection_settings import ModelConnectionSettings
+from app.prompt.prompt_loader import PromptLoader
 from app.provider.hosted_web_search import (
     ProviderWebSearch,
     responses_web_searches,
 )
+from app.provider.http_client import create_model_http_client
 from app.provider.protocol_provider import ProtocolProviderBase
 from app.provider.token_usage import estimate_stream_usage, parse_responses_usage
 
@@ -22,14 +24,36 @@ class ResponsesProvider(ProtocolProviderBase):
 
     _PARTIAL_USAGE_EMIT_INTERVAL = 32
 
+    def __init__(
+        self,
+        prompt_loader: PromptLoader | None = None,
+        http_client: httpx.AsyncClient | None = None,
+    ) -> None:
+        super().__init__(prompt_loader)
+        self._http_client = http_client
+        self._owns_http_client = http_client is None
+
+    def _client(self) -> httpx.AsyncClient:
+        if self._http_client is None:
+            self._http_client = create_model_http_client(httpx.AsyncClient)
+        return self._http_client
+
+    async def close(self) -> None:
+        if not self._owns_http_client:
+            return
+        client = self._http_client
+        self._http_client = None
+        if client is not None:
+            await client.aclose()
+
     async def list_models(self, settings: ModelConnectionSettings) -> list[str]:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(
-                f"{settings.base_url}/models",
-                headers=_headers(settings),
-            )
-            response.raise_for_status()
-            payload = response.json()
+        response = await self._client().get(
+            f"{settings.base_url}/models",
+            headers=_headers(settings),
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        payload = response.json()
         return _parse_model_list(payload)
 
     async def complete_agent_turn(
@@ -39,20 +63,20 @@ class ResponsesProvider(ProtocolProviderBase):
         tools: tuple[dict[str, Any], ...],
         reasoning_effort: str | None,
     ) -> ProviderTurn:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(
-                f"{settings.base_url}/responses",
-                headers=_headers(settings),
-                json=_request_body(
-                    settings,
-                    messages,
-                    tools,
-                    reasoning_effort,
-                    stream=False,
-                ),
-            )
-            response.raise_for_status()
-            payload = response.json()
+        response = await self._client().post(
+            f"{settings.base_url}/responses",
+            headers=_headers(settings),
+            json=_request_body(
+                settings,
+                messages,
+                tools,
+                reasoning_effort,
+                stream=False,
+            ),
+            timeout=120.0,
+        )
+        response.raise_for_status()
+        payload = response.json()
         return _parse_turn(payload, settings.model)
 
     async def stream_agent_turn(
@@ -126,23 +150,23 @@ class ResponsesProvider(ProtocolProviderBase):
                 usage_estimated=True,
             )
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            lines = _response_sse_lines(
-                client,
-                f"{settings.base_url}/responses",
-                _headers(settings),
-                request_body,
-            )
-            while True:
-                try:
-                    line = await anext(lines)
-                except StopAsyncIteration:
-                    break
-                except Exception:
-                    interrupted_usage = provisional_usage_event(force=True)
-                    if interrupted_usage is not None:
-                        yield interrupted_usage
-                    raise
+        lines = _response_sse_lines(
+            self._client(),
+            f"{settings.base_url}/responses",
+            _headers(settings),
+            request_body,
+        )
+        while True:
+            try:
+                line = await anext(lines)
+            except StopAsyncIteration:
+                break
+            except Exception:
+                interrupted_usage = provisional_usage_event(force=True)
+                if interrupted_usage is not None:
+                    yield interrupted_usage
+                raise
+            else:
                 if not line.startswith("data:"):
                     continue
                 data = line[5:].strip()
@@ -516,6 +540,7 @@ async def _response_sse_lines(
             url,
             headers=headers,
             json=body,
+            timeout=120.0,
         ) as response:
             if response.is_error:
                 error_body = (await response.aread()).decode(

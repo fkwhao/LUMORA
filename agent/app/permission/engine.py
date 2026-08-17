@@ -13,6 +13,8 @@ from app.tool.base import Tool, ToolCategory, ToolContext, ToolInput
 
 _SHELL_ALIASES = frozenset({"bash", "shell", "shell_command"})
 _SOURCE_PRIORITY = {"session": 0, "user": 100, "project": 200, "local": 300}
+_SIMPLE_PATCH_MAX_TOTAL_CHARS = 16_000
+_SIMPLE_PATCH_MAX_LINES = 200
 
 
 class PermissionEngine:
@@ -94,6 +96,24 @@ class PermissionEngine:
                 "Shell 命令未命中确定性安全规则，需要智能审批模型判断",
                 risk_level=risk_level,
                 reversible=reversible,
+            )
+
+        if (
+            policy.mode is PermissionMode.AUTO_APPROVE
+            and _is_simple_reversible_workspace_edit(
+                tool,
+                input_data,
+                destructive=destructive,
+                reversible=reversible,
+            )
+            and risk_level != "HIGH"
+        ):
+            return PermissionEvaluation(
+                PermissionDecision.ALLOW,
+                "mode",
+                "替我审批模式允许工作区内可逆的局部修改",
+                risk_level=risk_level,
+                reversible=True,
             )
 
         if policy.mode is PermissionMode.AUTO_APPROVE and not destructive:
@@ -228,3 +248,28 @@ def _risk_level(tool: Tool, destructive: bool) -> str:
     if tool.category is ToolCategory.SHELL:
         return "MEDIUM"
     return "LOW"
+
+
+def _is_simple_reversible_workspace_edit(
+    tool: Tool,
+    input_data: ToolInput,
+    *,
+    destructive: bool,
+    reversible: bool,
+) -> bool:
+    if (
+        tool.category is not ToolCategory.FILESYSTEM
+        or tool.name != "apply_patch"
+        or not destructive
+        or not reversible
+    ):
+        return False
+    old_text = input_data.get("oldText")
+    new_text = input_data.get("newText")
+    if not isinstance(old_text, str) or not isinstance(new_text, str):
+        return False
+    return (
+        len(old_text) + len(new_text) <= _SIMPLE_PATCH_MAX_TOTAL_CHARS
+        and old_text.count("\n") + new_text.count("\n")
+        <= _SIMPLE_PATCH_MAX_LINES
+    )

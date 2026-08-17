@@ -93,6 +93,12 @@ transport/http
 `RunEvent`；只有 HTTP Controller 的 `ChatStreamEventMapper` 可以将其映射为公开
 `ChatStreamEventResponse`，因此核心运行层不再依赖 SSE DTO。
 
+三种远程模型适配器都在首次请求时懒创建进程级 `httpx.AsyncClient`，同一 Agent
+进程内的模型发现、正常回合、工具续跑、上下文压缩和智能审批可复用 DNS、TCP/TLS 与
+HTTP keep-alive 连接。池最多保留 20 条空闲连接，空闲 120 秒后淘汰，总并发连接上限为
+100；每类请求仍保留原有 30/60/120 秒超时。连接池不缓存模型响应，也不增加自动重试；
+`RoutingModelProvider` 在 FastAPI 退出时统一关闭各适配器的连接池。
+
 所有流式聊天请求都从 `ChatService` 进入 `AgentHarness`，不再由 Service 在 Provider 原生流和
 Agent Loop 之间分支。Harness 保留两种内部策略：没有可用工具时透传 Provider 原生增量流；
 存在工具且已建立工作区 ToolContext 时进入 `AgentLoopRunner`，由 Runner 实时转发最终正文
@@ -154,6 +160,10 @@ RunEvent
 高频文本增量实时转发但不逐 token 落库，最终消息、工作记录、用量、工具审批和 Artifact
 索引由 Java 持久化。会话执行已经由 Java 的耐久 `ConversationRun` 外壳承载；事件以同一
 `run_id` 内单调递增的 `sequence` 写入 `conversation_run_event`，Electron 可按序重放。
+运行中事件先进入 Core 的单写入日志，默认以 20ms 短窗口按 Run 合并；批次仍逐条
+保留公开事件和序号，但只查询一次 Run、开启一次事务并更新一次最终序号。
+事件在事务提交后才向 SSE 发布；完成、失败、暂停、取消和运行状态边界会强制刷盘，
+因此断线重放和重启恢复不依赖计时器。不同 Run 的 SSE 订阅只在各自锁域内回放和推送。
 完整的多 Agent Snapshot/Checkpoint 仍是目标设计，但暂停与进程重启不再依赖保留 Python
 调用栈：Java 会封存当前 Turn 的中间轨迹，并在同一 Run 中创建新的内部续接 Turn。
 
@@ -229,6 +239,19 @@ Assistant Tool Call / Tool Result 协议轨迹。
 
 完整状态、接口、失败处理和 Composer 视觉规范见
 [对话问题队列与 Steer 设计](conversation-input-queue-design.md)。
+
+### 常驻任务 Runtime 的阶段决策
+
+当前不把每个任务的 `AgentLoopRunner` 或 Python 协程长期驻留在内存中。Agent 进程、
+`ChatService`、`AgentHarness`、模型 Provider 和连接池已经常驻；单次 Turn 结束后释放 Runner，
+任务队列、Steer、暂停意图、协议轨迹和恢复位置由 Java Core 的耐久 Run 数据维护。现有暂停、继续
+和问题队列因此不依赖常驻 Python 调用栈，Runtime 崩溃或应用重启后仍可以按持久化状态恢复。
+
+常驻的任务级 Runtime 暂缓到多 Agent 阶段一并实现。届时它不作为单纯的启动耗时优化，而作为
+每任务 `SessionActor`/长期 Driver：持有任务 Inbox、Supervisor/Worker 生命周期、运行中 Steer
+路由、租约和内存态快照，并通过 Run Snapshot 与 Agent Checkpoint 和 Core 的耐久状态对齐。
+开始该阶段前必须同时设计空闲 TTL、内存预算、任务隔离、进程重启恢复以及 Runtime 与数据库的
+单一事实来源，避免当前已稳定的暂停和队列机制出现第二套状态机。
 
 ## 5. System Prompt 与工具注册
 
@@ -509,6 +532,10 @@ Worker 数量、模型并发、Token 预算和工具并发，单个 Worker 失�
 
 多 Agent 稳定版依赖 ContextPlanner、Artifact 引用、Run Snapshot 和 Agent Checkpoint，避免
 进程重启后丢失 DAG、租约或已完成结果。
+
+多 Agent 开始实现时，再引入上述任务级常驻 `SessionActor`/Driver。它负责同一任务内的长期
+Inbox 和 Worker 协作，但耐久状态仍以 Core 的 Run、事件日志和 Checkpoint 为准；常驻对象只是
+可重建的执行加速层，不能成为暂停、队列或任务完成状态的唯一来源。
 
 ### 8.5 Windows OS 权限隔离
 

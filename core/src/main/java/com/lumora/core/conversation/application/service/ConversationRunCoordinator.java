@@ -1,6 +1,7 @@
 package com.lumora.core.conversation.application.service;
 
 import com.lumora.core.conversation.application.support.ConversationRunEventStreamRegistry;
+import com.lumora.core.conversation.application.support.ConversationRunEventJournal;
 import com.lumora.core.conversation.application.support.ConversationRunStore;
 import com.lumora.core.conversation.application.support.ConversationInputStore;
 import com.lumora.core.conversation.domain.entity.ConversationInput;
@@ -43,6 +44,7 @@ public class ConversationRunCoordinator {
     private final ConversationRunStore runStore;
     private final ConversationInputStore inputStore;
     private final ConversationRunEventStreamRegistry eventStreams;
+    private final ConversationRunEventJournal eventJournal;
     private final TaskService taskService;
     private final Clock clock;
     private final int maxConcurrentRuns;
@@ -55,6 +57,7 @@ public class ConversationRunCoordinator {
             ConversationRunStore runStore,
             ConversationInputStore inputStore,
             ConversationRunEventStreamRegistry eventStreams,
+            ConversationRunEventJournal eventJournal,
             TaskService taskService,
             Clock clock,
             @Value("${lumora.runs.max-concurrent:3}") int maxConcurrentRuns
@@ -63,6 +66,7 @@ public class ConversationRunCoordinator {
         this.runStore = runStore;
         this.inputStore = inputStore;
         this.eventStreams = eventStreams;
+        this.eventJournal = eventJournal;
         this.taskService = taskService;
         this.clock = clock;
         if (maxConcurrentRuns < 1) {
@@ -363,6 +367,7 @@ public class ConversationRunCoordinator {
         }
         synchronized (this) {
             pausedTurnRunIds.remove(runId);
+            eventJournal.flush(runId);
             inputStore.cancelOpenForTask(taskId);
             run = runStore.updateStatus(
                     runId, ConversationRunStatus.CANCELLED, ""
@@ -646,12 +651,12 @@ public class ConversationRunCoordinator {
     }
 
     private synchronized void onEvent(String runId, ChatStreamEvent event) {
-        ConversationRun run = runStore.require(runId);
-        if (run.getStatus() == ConversationRunStatus.CANCELLED) {
+        if (!executingRunIds.contains(runId)) {
             return;
         }
-        eventStreams.publish(runStore.appendEvent(runId, event));
+        eventJournal.append(runId, event);
         if (event.getType() == ChatStreamEventType.STEER_CLAIMED) {
+            ConversationRun run = runStore.require(runId);
             String inputId = event.getItemId();
             if (inputId != null && !inputId.isBlank()) {
                 ConversationInput input = inputStore.requireForTask(
@@ -665,21 +670,28 @@ public class ConversationRunCoordinator {
             }
         } else if (event.getType() == ChatStreamEventType.PAUSED) {
             pausedTurnRunIds.add(runId);
-        } else if (event.getType() == ChatStreamEventType.TOOL_APPROVAL_REQUESTED
-                && run.getStatus() == ConversationRunStatus.RUNNING) {
-            runStore.updateStatus(
-                    runId, ConversationRunStatus.WAITING_APPROVAL, ""
-            );
         } else if (event.getType()
-                == ChatStreamEventType.TOOL_APPROVAL_RESOLVED
-                && run.getStatus() == ConversationRunStatus.WAITING_APPROVAL) {
-            runStore.updateStatus(
-                    runId, ConversationRunStatus.RUNNING, ""
-            );
+                == ChatStreamEventType.TOOL_APPROVAL_REQUESTED) {
+            ConversationRun run = runStore.require(runId);
+            if (run.getStatus() == ConversationRunStatus.RUNNING) {
+                runStore.updateStatus(
+                        runId, ConversationRunStatus.WAITING_APPROVAL, ""
+                );
+            }
+        } else if (event.getType()
+                == ChatStreamEventType.TOOL_APPROVAL_RESOLVED) {
+            ConversationRun run = runStore.require(runId);
+            if (run.getStatus()
+                    == ConversationRunStatus.WAITING_APPROVAL) {
+                runStore.updateStatus(
+                        runId, ConversationRunStatus.RUNNING, ""
+                );
+            }
         }
     }
 
     private synchronized void complete(String runId) {
+        eventJournal.flush(runId);
         ConversationRun run = runStore.require(runId);
         boolean paused = pausedTurnRunIds.remove(runId);
         if (paused && !run.getStatus().isTerminal()) {
@@ -702,6 +714,7 @@ public class ConversationRunCoordinator {
     }
 
     private synchronized void fail(String runId, Throwable error) {
+        eventJournal.flush(runId);
         ConversationRun run = runStore.require(runId);
         boolean pauseRequested = pausedTurnRunIds.remove(runId)
                 || run.getStatus() == ConversationRunStatus.PAUSING;
@@ -740,7 +753,7 @@ public class ConversationRunCoordinator {
         ChatStreamEvent failed = new ChatStreamEvent(
                 ChatStreamEventType.FAILED, "", run.getModel(), null, message
         );
-        eventStreams.publish(runStore.appendEvent(runId, failed));
+        eventJournal.appendImmediately(runId, failed);
         runStore.updateStatus(
                 runId, ConversationRunStatus.FAILED, message
         );
@@ -753,6 +766,7 @@ public class ConversationRunCoordinator {
             String message,
             String status
     ) {
+        eventJournal.flush(runId);
         ConversationRun run = runStore.require(runId);
         ChatStreamEvent event = new ChatStreamEvent(
                 ChatStreamEventType.PROGRESS_MESSAGE,
@@ -770,7 +784,7 @@ public class ConversationRunCoordinator {
                 null,
                 Map.of("runStatus", status)
         );
-        eventStreams.publish(runStore.appendEvent(runId, event));
+        eventJournal.appendImmediately(runId, event);
     }
 
     private void releaseExecution(String runId) {

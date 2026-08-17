@@ -17,6 +17,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
@@ -156,35 +157,60 @@ public class ConversationRunStore {
             String runId,
             ChatStreamEvent event
     ) {
-        ConversationRunEventEnvelope envelope = transactionTemplate.execute(
-                status -> appendEventInTransaction(runId, event)
-        );
-        if (envelope == null) {
-            throw new IllegalStateException("无法保存运行事件");
-        }
-        return envelope;
+        return appendEvents(runId, List.of(event)).getFirst();
     }
 
-    private ConversationRunEventEnvelope appendEventInTransaction(
+    /**
+     * Persists an ordered event batch using one run lookup, one transaction,
+     * and one run sequence update.
+     */
+    public synchronized List<ConversationRunEventEnvelope> appendEvents(
             String runId,
-            ChatStreamEvent event
+            List<ChatStreamEvent> events
+    ) {
+        if (events == null || events.isEmpty()) {
+            return List.of();
+        }
+        List<ChatStreamEvent> batch = List.copyOf(events);
+        List<ConversationRunEventEnvelope> envelopes =
+                transactionTemplate.execute(
+                        status -> appendEventsInTransaction(runId, batch)
+                );
+        if (envelopes == null) {
+            throw new IllegalStateException("无法保存运行事件");
+        }
+        return envelopes;
+    }
+
+    private List<ConversationRunEventEnvelope> appendEventsInTransaction(
+            String runId,
+            List<ChatStreamEvent> events
     ) {
         ConversationRun run = require(runId);
         long sequence = run.getLastEventSequence() + 1L;
-        Instant now = clock.instant();
-        ConversationRunEvent stored = new ConversationRunEvent();
-        stored.setEventId(runId + ":" + sequence);
-        stored.setRunId(runId);
-        stored.setSequence(sequence);
-        stored.setEventJson(writeEvent(event));
-        stored.setOccurredAt(now);
-        eventMapper.insert(stored);
-        run.setLastEventSequence(sequence);
-        run.setUpdatedAt(now);
-        runMapper.updateById(run);
-        return new ConversationRunEventEnvelope(
-                runId, sequence, event, now
+        Instant lastOccurredAt = null;
+        List<ConversationRunEventEnvelope> envelopes = new ArrayList<>(
+                events.size()
         );
+        for (ChatStreamEvent event : events) {
+            Instant occurredAt = clock.instant();
+            ConversationRunEvent stored = new ConversationRunEvent();
+            stored.setEventId(runId + ":" + sequence);
+            stored.setRunId(runId);
+            stored.setSequence(sequence);
+            stored.setEventJson(writeEvent(event));
+            stored.setOccurredAt(occurredAt);
+            eventMapper.insert(stored);
+            envelopes.add(new ConversationRunEventEnvelope(
+                    runId, sequence, event, occurredAt
+            ));
+            lastOccurredAt = occurredAt;
+            sequence += 1L;
+        }
+        run.setLastEventSequence(sequence - 1L);
+        run.setUpdatedAt(lastOccurredAt);
+        runMapper.updateById(run);
+        return List.copyOf(envelopes);
     }
 
     public List<ConversationRunEvent> listEventsAfter(

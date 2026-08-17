@@ -34,3 +34,5 @@ lumora:
   runs:
     # 不同任务可并发；同一任务仍由其持久问题队列严格串行。
     max-concurrent: ${LUMORA_MAX_CONCURRENT_RUNS:3}
+    # 高频 Run 事件保留独立序号，但在很短窗口内合并 SQLite 事务。
+    event-flush-interval-ms: ${LUMORA_RUN_EVENT_FLUSH_INTERVAL_MS:20}
