@@ -124,4 +124,53 @@ describe("project conversation sidebar", () => {
       screen.getByText("回复问候").closest(".sidebar-section-list"),
     ).toHaveAttribute("aria-hidden", "true");
   });
+
+  it("shows an independent circular indicator for each processing conversation", () => {
+    const { container } = render(
+      <AppSidebar
+        activeView="task"
+        activeTaskId="project-running"
+        processingTaskIds={new Set(["project-running", "recent-running"])}
+        recentTasks={[
+          {
+            taskId: "project-running",
+            goal: "分析项目文件",
+            status: "RUNNING",
+          },
+          {
+            taskId: "recent-running",
+            goal: "生成产品文档",
+            status: "RUNNING",
+          },
+          {
+            taskId: "recent-idle",
+            goal: "已完成的会话",
+            status: "COMPLETED",
+          },
+        ]}
+        taskProjectPaths={{ "project-running": "F:\\project\\LUMORA" }}
+        projectNames={{ "F:\\project\\LUMORA": "LUMORA" }}
+        archivedTaskIds={[]}
+        isLoadingHistory={false}
+        onNewTask={vi.fn()}
+        onNewProject={vi.fn()}
+        onNewProjectConversation={vi.fn()}
+        onNavigate={vi.fn()}
+        onOpenTask={vi.fn()}
+        onArchiveTask={vi.fn()}
+        onSettings={vi.fn()}
+        notify={vi.fn()}
+      />,
+    );
+
+    const indicators = screen.getAllByRole("status", { name: "正在处理" });
+    expect(indicators).toHaveLength(2);
+    expect(indicators.every((indicator) =>
+      indicator.classList.contains("history-processing-indicator"),
+    )).toBe(true);
+    expect(container.querySelector(".history-processing-pixels")).toBeNull();
+    expect(
+      screen.getByText("已完成的会话").closest(".history-row"),
+    ).not.toHaveClass("processing");
+  });
 });

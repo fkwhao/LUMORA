@@ -43,8 +43,12 @@ Mapper 不判断状态转换。
 
 ## 会话 Run
 
-`ConversationRunCoordinator` 是会话执行的唯一调度入口。当前默认并发数为 `1`，
-可通过 `LUMORA_MAX_CONCURRENT_RUNS` 调整；队列、运行状态和事件序列本身均按多会话并发设计。
+`ConversationRunCoordinator` 是会话执行的唯一调度入口。当前默认允许 `3` 个不同任务并发，
+可通过 `LUMORA_MAX_CONCURRENT_RUNS` 调整；同一任务仍只有一个活动 Run，问题队列严格串行。
+队列、运行状态和事件序列均按 `run_id` 隔离。
+SQLite 的 JDBC 连接池固定为单连接：Agent Run 和模型请求继续并发，只有消息、Run 事件等
+短数据库事务按顺序提交。连接同时设置 `busy_timeout=10000`，用于容忍防病毒扫描、备份等
+进程外短暂占锁；这不会把任务执行重新退化为单任务串行。
 关闭或切换 Electron 页面只会断开 SSE，不会取消 Core 中的 Run。应用进程意外退出后，
 未结束的 Run 会在下次启动时恢复为 `PAUSED`，由用户显式继续。
 

@@ -75,6 +75,7 @@ class ChatService:
         skill_catalog: SkillCatalog | None = None,
         run_controls: RunControlRegistry | None = None,
         mcp_session_pool: McpSessionPool | None = None,
+        max_parallel_tool_calls: int = 10,
     ) -> None:
         self._provider = provider
         self._prompt_builder = prompt_builder
@@ -94,6 +95,7 @@ class ChatService:
         self._skill_catalog = skill_catalog or SkillCatalog()
         self._run_controls = run_controls or RunControlRegistry()
         self._mcp_session_pool = mcp_session_pool or McpSessionPool()
+        self._max_parallel_tool_calls = max_parallel_tool_calls
 
     async def pause_run(self, run_id: str) -> bool:
         return await self._run_controls.pause(run_id)
@@ -385,6 +387,7 @@ class ChatService:
             self._agent_harness = AgentHarness(
                 self._provider,
                 self._context_planner,
+                max_parallel_tool_calls=self._max_parallel_tool_calls,
             )
         return self._agent_harness
 
@@ -529,8 +532,8 @@ class ChatService:
             registry = self._tool_registry.copy()
         else:
             user_skills = self._skill_catalog.discover()
-            registry = ToolRegistry(
-                self._tool_registry.get(name)
+            registry = self._tool_registry.select(
+                name
                 for name in ("load_skill", "read_skill_resource")
                 if user_skills and name in self._tool_registry.names()
             )

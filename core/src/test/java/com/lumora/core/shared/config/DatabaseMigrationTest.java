@@ -1,5 +1,6 @@
 package com.lumora.core.shared.config;
 
+import com.zaxxer.hikari.HikariDataSource;
 import liquibase.integration.spring.SpringLiquibase;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -7,9 +8,17 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.nio.file.Path;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+
+import javax.sql.DataSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -26,6 +35,12 @@ class DatabaseMigrationTest {
 
     @Autowired
     private SpringLiquibase liquibase;
+
+    @Autowired
+    private DataSource dataSource;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
 
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
@@ -97,6 +112,63 @@ class DatabaseMigrationTest {
         assertThat(applicationChangeSetCount()).isEqualTo(23);
     }
 
+    @Test
+    void serializesSqliteWritesAndWaitsForTransientExternalLocks() {
+        assertThat(dataSource).isInstanceOf(HikariDataSource.class);
+        HikariDataSource hikari = (HikariDataSource) dataSource;
+        Integer busyTimeout = jdbcTemplate.queryForObject(
+                "PRAGMA busy_timeout",
+                Integer.class
+        );
+        String journalMode = jdbcTemplate.queryForObject(
+                "PRAGMA journal_mode",
+                String.class
+        );
+
+        assertThat(hikari.getMaximumPoolSize()).isEqualTo(1);
+        assertThat(hikari.getMinimumIdle()).isEqualTo(1);
+        assertThat(busyTimeout).isGreaterThanOrEqualTo(10_000);
+        assertThat(journalMode).isEqualToIgnoringCase("wal");
+    }
+
+    @Test
+    void queuesConcurrentTransactionsInsteadOfExposingSqliteBusy() throws Exception {
+        CountDownLatch firstWriteStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirstWrite = new CountDownLatch(1);
+        ExecutorService writers = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> first = writers.submit(() ->
+                    transactionTemplate.executeWithoutResult(status -> {
+                        insertTestSetting("concurrency.writer.first");
+                        firstWriteStarted.countDown();
+                        await(releaseFirstWrite);
+                    })
+            );
+            assertThat(firstWriteStarted.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Future<Integer> second = writers.submit(() ->
+                    insertTestSetting("concurrency.writer.second")
+            );
+            Thread.sleep(150);
+            assertThat(second.isDone()).isFalse();
+
+            releaseFirstWrite.countDown();
+            first.get(5, TimeUnit.SECONDS);
+            assertThat(second.get(5, TimeUnit.SECONDS)).isEqualTo(1);
+            assertThat(jdbcTemplate.queryForObject(
+                    """
+                    SELECT COUNT(*)
+                    FROM application_setting
+                    WHERE setting_key LIKE 'concurrency.writer.%'
+                    """,
+                    Integer.class
+            )).isEqualTo(2);
+        } finally {
+            releaseFirstWrite.countDown();
+            writers.shutdownNow();
+        }
+    }
+
     private Integer applicationChangeSetCount() {
         return jdbcTemplate.queryForObject(
                 """
@@ -131,6 +203,26 @@ class DatabaseMigrationTest {
                 """,
                 Integer.class
         );
+    }
+
+    private int insertTestSetting(String key) {
+        return jdbcTemplate.update(
+                """
+                INSERT INTO application_setting (
+                    setting_key, setting_value, created_at, updated_at
+                ) VALUES (?, 'true', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """,
+                key
+        );
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("并发写入测试被中断", error);
+        }
     }
 
     private java.util.List<String> agentTaskColumns() {

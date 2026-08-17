@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import time
@@ -59,6 +60,18 @@ class ToolCallExecutor:
         )
         self._run_control = run_control
 
+    def is_concurrency_safe(self, call: ProviderToolCall) -> bool:
+        """Classify one model call without performing I/O or mutation."""
+        try:
+            arguments = json.loads(call.arguments_json or "{}")
+            if not isinstance(arguments, dict):
+                return False
+            tool, normalized = self._registry.validate(call.name, arguments)
+            return tool.is_concurrency_safe(normalized) is True
+        except Exception:  # noqa: BLE001 - scheduler classification fails closed
+            # Classification is a scheduling hint and must fail closed.
+            return False
+
     async def execute(
         self,
         call: ProviderToolCall,
@@ -69,6 +82,8 @@ class ToolCallExecutor:
         inline_result_chars: int,
         user_request: str = "",
         assistant_context: str = "",
+        *,
+        defer_result_processing: bool = False,
     ) -> AsyncIterator[tuple[RunEvent, str]]:
         item_id = str(uuid.uuid4())
         title = call.name
@@ -521,13 +536,14 @@ class ToolCallExecutor:
                 execution_context,
                 arguments,
             )
-            result = self._result_processor.process(
-                call.name,
-                call.call_id,
-                result,
-                execution_context,
-                inline_result_chars,
-            )
+            if not defer_result_processing:
+                result = self._result_processor.process(
+                    call.name,
+                    call.call_id,
+                    result,
+                    execution_context,
+                    inline_result_chars,
+                )
             event_type: Literal["tool_failed", "tool_completed"] = (
                 "tool_failed" if result.is_error else "tool_completed"
             )
@@ -556,6 +572,31 @@ class ToolCallExecutor:
                 model=model,
             ), result_text
 
+        except asyncio.CancelledError:
+            if not self._pause_requested():
+                raise
+            result_text = json.dumps(
+                {
+                    "ok": False,
+                    "content": "当前回合已暂停，工具未继续执行",
+                },
+                ensure_ascii=False,
+            )
+            yield RunEvent(
+                type="tool_failed",
+                item_id=item_id,
+                tool_call_id=call.call_id,
+                tool_name=call.name,
+                title=title,
+                arguments=arguments,
+                output="当前回合已暂停，工具未继续执行",
+                error_message="任务已暂停",
+                metadata={
+                    "failureKind": "turn_paused",
+                    "toolExecutionState": "cancelled_before_body",
+                },
+                model=model,
+            ), result_text
         except (OSError, TimeoutError, TypeError, UnicodeError, ValueError) as error:
             result_text = f"工具执行失败：{error}"
             yield RunEvent(

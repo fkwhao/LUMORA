@@ -109,6 +109,68 @@ const HISTORY_INITIAL_MESSAGE_COUNT = 18;
 const HISTORY_MIN_CHUNK_SIZE = 32;
 const HISTORY_MAX_RENDER_PASSES = 12;
 
+interface ConversationCacheEntry {
+  task: TaskSnapshot;
+  messages: ChatMessage[];
+  activeRun?: ConversationRunSnapshot;
+  pendingInputs: ConversationInput[];
+  taskEvents: TaskEvent[];
+  isChatting: boolean;
+  isPausing: boolean;
+  chatWasStopped: boolean;
+  chatStartedAt?: number;
+  lastChatDurationMs?: number;
+  pendingToolApproval?: ToolApprovalRequest;
+}
+
+function conversationCacheEntry(
+  state: TaskState,
+  previous?: ConversationCacheEntry,
+): ConversationCacheEntry {
+  if (!state.activeTask) {
+    throw new Error("缓存会话前必须存在活动任务");
+  }
+  return {
+    task: state.activeTask,
+    messages: state.isHydratingHistory
+      ? (previous?.messages ?? state.messages)
+      : state.messages,
+    activeRun: state.activeRun,
+    pendingInputs: state.pendingInputs,
+    taskEvents: state.taskEvents,
+    isChatting: state.isChatting,
+    isPausing: state.isPausing,
+    chatWasStopped: state.chatWasStopped,
+    chatStartedAt: state.isChatting
+      ? runStartedAt(state.activeRun, state.chatStartedAt)
+      : state.chatStartedAt,
+    lastChatDurationMs: state.lastChatDurationMs,
+    pendingToolApproval: state.pendingToolApproval,
+  };
+}
+
+function isRunProcessing(run?: ConversationRunSnapshot): boolean {
+  return Boolean(
+    run &&
+    run.status !== "PAUSED" &&
+    run.status !== "CANCELLED" &&
+    run.status !== "COMPLETED" &&
+    run.status !== "FAILED",
+  );
+}
+
+function runStartedAt(
+  run: ConversationRunSnapshot | undefined,
+  fallback?: number,
+): number {
+  for (const value of [run?.startedAt, run?.createdAt]) {
+    if (!value) continue;
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback ?? Date.now();
+}
+
 function findHistoryChunkStart(messages: ChatMessage[], candidate: number) {
   let startIndex = candidate;
   while (startIndex > 0 && messages[startIndex]?.role !== "user") {
@@ -149,10 +211,7 @@ export function createTaskStore(
   let preferenceUpdateQueue = Promise.resolve<TaskSnapshot | undefined>(
     undefined,
   );
-  const conversationCache = new Map<
-    string,
-    { task: TaskSnapshot; messages: ChatMessage[] }
-  >();
+  const conversationCache = new Map<string, ConversationCacheEntry>();
   const clearChatEventBatcher = (flush: boolean) => {
     if (flush) chatEventBatcher?.flush();
     chatEventBatcher?.cancel();
@@ -236,12 +295,10 @@ export function createTaskStore(
       const current = get();
       if (current.activeTask) {
         const currentCached = conversationCache.get(current.activeTask.taskId);
-        conversationCache.set(current.activeTask.taskId, {
-          task: current.activeTask,
-          messages: current.isHydratingHistory
-            ? (currentCached?.messages ?? current.messages)
-            : current.messages,
-        });
+        conversationCache.set(
+          current.activeTask.taskId,
+          conversationCacheEntry(current, currentCached),
+        );
       }
       unsubscribeChat?.();
       unsubscribeChat = undefined;
@@ -271,21 +328,21 @@ export function createTaskStore(
       }
       set({
         activeTask: optimisticTask ?? current.activeTask,
-        activeRun: undefined,
-        pendingInputs: [],
+        activeRun: cached?.activeRun,
+        pendingInputs: cached?.pendingInputs ?? [],
         messages: cachedWindow?.messages ?? [],
-        taskEvents: [],
+        taskEvents: cached?.taskEvents ?? [],
         isLoadingHistory: !cached,
         isHydratingHistory: Boolean(cachedWindow?.hasEarlierMessages),
         historyHydrationProgress: cachedWindow?.progress ?? 0,
-        isChatting: false,
-        isPausing: false,
+        isChatting: cached?.isChatting ?? false,
+        isPausing: cached?.isPausing ?? false,
         isCompacting: false,
-        chatWasStopped: false,
-        chatStartedAt: undefined,
-        lastChatDurationMs: undefined,
+        chatWasStopped: cached?.chatWasStopped ?? false,
+        chatStartedAt: cached?.chatStartedAt,
+        lastChatDurationMs: cached?.lastChatDurationMs,
         chatError: undefined,
-        pendingToolApproval: undefined,
+        pendingToolApproval: cached?.pendingToolApproval,
         isDecidingToolApproval: false,
       });
       const hydrateHistory = async (
@@ -333,7 +390,76 @@ export function createTaskStore(
           modelApi?.getActiveRun(taskId) ?? Promise.resolve(undefined),
           modelApi?.listInputs(taskId) ?? Promise.resolve([]),
         ]);
-        conversationCache.set(taskId, { task, messages });
+        const restoredCache = conversationCache.get(taskId) ?? cached;
+        const runIsProcessing = isRunProcessing(activeRun);
+        const sameCachedRun = Boolean(
+          restoredCache?.activeRun &&
+          activeRun &&
+          restoredCache.activeRun.runId === activeRun.runId,
+        );
+        const resumeCachedRun = Boolean(
+          sameCachedRun && runIsProcessing && restoredCache?.isChatting,
+        );
+        const resumeFromSequence =
+          resumeCachedRun && restoredCache?.activeRun
+            ? Math.max(
+                activeRun?.replayFromSequence ?? 0,
+                restoredCache.activeRun.lastEventSequence,
+              )
+            : activeRun?.replayFromSequence ?? 0;
+        const persistedRunMessages = ensureRunAssistant(
+          messages,
+          runIsProcessing,
+        );
+        const runMessages = resumeCachedRun && restoredCache
+          ? ensureRunAssistant(restoredCache.messages, runIsProcessing)
+          : restoredCache
+            ? reconcilePersistedMessages(
+                restoredCache.messages,
+                persistedRunMessages,
+              )
+            : persistedRunMessages;
+        const restoredStartedAt = runIsProcessing
+          ? runStartedAt(
+              activeRun,
+              resumeCachedRun ? restoredCache?.chatStartedAt : undefined,
+            )
+          : undefined;
+        const restoredTaskEvents = resumeCachedRun
+          ? (restoredCache?.taskEvents ?? [])
+          : [];
+        const restoredApproval = resumeCachedRun
+          ? restoredCache?.pendingToolApproval
+          : undefined;
+        const restoredRun = activeRun && runIsProcessing
+          ? {
+              ...activeRun,
+              lastEventSequence: resumeFromSequence,
+            }
+          : activeRun;
+        const historyWindow = restoredCache
+          ? {
+              messages: runMessages,
+              startIndex: 0,
+              hasEarlierMessages: false,
+              progress: 1,
+            }
+          : getInitialHistoryWindow(runMessages);
+        conversationCache.set(taskId, {
+          task,
+          messages: runMessages,
+          activeRun: restoredRun,
+          pendingInputs,
+          taskEvents: restoredTaskEvents,
+          isChatting: runIsProcessing,
+          isPausing: activeRun?.status === "PAUSING",
+          chatWasStopped: activeRun?.status === "PAUSED",
+          chatStartedAt: restoredStartedAt,
+          lastChatDurationMs: runIsProcessing
+            ? undefined
+            : restoredCache?.lastChatDurationMs,
+          pendingToolApproval: restoredApproval,
+        });
         if (requestId !== openTaskRequest) {
           return;
         }
@@ -341,28 +467,12 @@ export function createTaskStore(
         unsubscribe = api.subscribe(task.taskId, (event) => {
           applyEvent(event, get, set);
         });
-        const runIsProcessing = Boolean(
-          activeRun &&
-          activeRun.status !== "PAUSED" &&
-          activeRun.status !== "CANCELLED" &&
-          activeRun.status !== "COMPLETED" &&
-          activeRun.status !== "FAILED",
-        );
-        const runMessages = ensureRunAssistant(messages, runIsProcessing);
-        const historyWindow = cached
-          ? { messages: runMessages, startIndex: 0, hasEarlierMessages: false, progress: 1 }
-          : getInitialHistoryWindow(runMessages);
         set({
           activeTask: task,
-          activeRun: activeRun && runIsProcessing
-            ? {
-                ...activeRun,
-                lastEventSequence: activeRun.replayFromSequence,
-              }
-            : activeRun,
+          activeRun: restoredRun,
           pendingInputs,
           messages: historyWindow.messages,
-          taskEvents: [],
+          taskEvents: restoredTaskEvents,
           isLoadingHistory: false,
           isHydratingHistory: historyWindow.hasEarlierMessages,
           historyHydrationProgress: historyWindow.progress,
@@ -370,9 +480,11 @@ export function createTaskStore(
           isPausing: activeRun?.status === "PAUSING",
           isCompacting: false,
           chatWasStopped: activeRun?.status === "PAUSED",
-          chatStartedAt: runIsProcessing ? Date.now() : undefined,
-          lastChatDurationMs: undefined,
-          pendingToolApproval: undefined,
+          chatStartedAt: restoredStartedAt,
+          lastChatDurationMs: runIsProcessing
+            ? undefined
+            : restoredCache?.lastChatDurationMs,
+          pendingToolApproval: restoredApproval,
           isDecidingToolApproval: false,
         });
         if (runIsProcessing && activeRun && modelApi) {
@@ -384,7 +496,7 @@ export function createTaskStore(
           unsubscribeChat = modelApi.subscribeRun(
             taskId,
             activeRun.runId,
-            activeRun.replayFromSequence,
+            resumeFromSequence,
             (runEvent) => {
               if (get().activeTask?.taskId !== taskId) return;
               if (applyRunEnvelope(runEvent, get, set)) {

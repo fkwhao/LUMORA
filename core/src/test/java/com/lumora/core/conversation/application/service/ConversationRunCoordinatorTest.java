@@ -263,6 +263,62 @@ class ConversationRunCoordinatorTest {
     }
 
     @Test
+    void runsDifferentTasksConcurrentlyUpToTheConfiguredLimit() {
+        ConversationService conversationService = mock(
+                ConversationService.class
+        );
+        ConversationRunStore runStore = mock(ConversationRunStore.class);
+        Map<String, ConversationRun> runs = new LinkedHashMap<>();
+        stubRunStore(runStore, runs);
+        List<String> startedTaskIds = new ArrayList<>();
+        List<Runnable> completions = new ArrayList<>();
+        doAnswer(invocation -> {
+            startedTaskIds.add(invocation.getArgument(0));
+            completions.add(invocation.getArgument(8));
+            return null;
+        }).when(conversationService).streamMessage(
+                anyString(), anyString(), any(), any(), any(), any(),
+                anyString(), any(), any(), any()
+        );
+        ConversationRunCoordinator coordinator = new ConversationRunCoordinator(
+                conversationService,
+                runStore,
+                mock(ConversationInputStore.class),
+                mock(ConversationRunEventStreamRegistry.class),
+                mock(TaskService.class),
+                Clock.fixed(
+                        Instant.parse("2026-08-15T00:00:00Z"),
+                        ZoneOffset.UTC
+                ),
+                2
+        );
+
+        ConversationRun first = coordinator.startMessage(
+                "task-1", "first", null, null, null, null, "correlation-1"
+        );
+        ConversationRun second = coordinator.startMessage(
+                "task-2", "second", null, null, null, null, "correlation-2"
+        );
+        ConversationRun third = coordinator.startMessage(
+                "task-3", "third", null, null, null, null, "correlation-3"
+        );
+
+        assertThat(first.getStatus()).isEqualTo(ConversationRunStatus.RUNNING);
+        assertThat(second.getStatus()).isEqualTo(ConversationRunStatus.RUNNING);
+        assertThat(third.getStatus()).isEqualTo(ConversationRunStatus.QUEUED);
+        assertThat(startedTaskIds).containsExactly("task-1", "task-2");
+
+        completions.getFirst().run();
+
+        assertThat(first.getStatus()).isEqualTo(ConversationRunStatus.COMPLETED);
+        assertThat(second.getStatus()).isEqualTo(ConversationRunStatus.RUNNING);
+        assertThat(third.getStatus()).isEqualTo(ConversationRunStatus.RUNNING);
+        assertThat(startedTaskIds).containsExactly(
+                "task-1", "task-2", "task-3"
+        );
+    }
+
+    @Test
     void resumesAsANewTurnWithoutStartingTheOriginalMessageAgain() {
         ConversationService conversationService = mock(
                 ConversationService.class

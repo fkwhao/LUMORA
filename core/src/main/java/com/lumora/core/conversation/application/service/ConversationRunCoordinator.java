@@ -30,7 +30,7 @@ import java.util.UUID;
 
 /**
  * Owns logical Agent runs independently of HTTP, IPC, and renderer lifetimes.
- * The configured concurrency is one today; the scheduler itself is N-run safe.
+ * Different tasks share a bounded run pool; each task keeps one active run.
  */
 @Service
 public class ConversationRunCoordinator {
@@ -57,7 +57,7 @@ public class ConversationRunCoordinator {
             ConversationRunEventStreamRegistry eventStreams,
             TaskService taskService,
             Clock clock,
-            @Value("${lumora.runs.max-concurrent:1}") int maxConcurrentRuns
+            @Value("${lumora.runs.max-concurrent:3}") int maxConcurrentRuns
     ) {
         this.conversationService = conversationService;
         this.runStore = runStore;

@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
@@ -5,9 +6,15 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Protocol
 
+from app.tool.resource_locks import ResourceAccess, ResourceObservationStore
+
 ToolInput = Mapping[str, Any]
 ToolExecutor = Callable[["ToolContext", ToolInput], "ToolResult | Awaitable[ToolResult]"]
 InputPredicate = bool | Callable[[ToolInput], bool]
+ResourceAccessFactory = Callable[
+    ["ToolContext", ToolInput],
+    tuple[ResourceAccess, ...],
+]
 
 
 class ToolCategory(StrEnum):
@@ -24,6 +31,10 @@ class ToolContext:
     correlation_id: str = ""
     task_id: str = ""
     artifact_store: Any | None = field(default=None, repr=False)
+    resource_observations: ResourceObservationStore | None = field(
+        default=None,
+        repr=False,
+    )
     allow_external_paths: bool = False
     cancelled: Callable[[], bool] = field(default=lambda: False, repr=False)
 
@@ -60,6 +71,12 @@ class Tool(Protocol):
         input_data: ToolInput,
     ) -> str | None: ...
 
+    def resource_accesses(
+        self,
+        context: ToolContext,
+        input_data: ToolInput,
+    ) -> tuple[ResourceAccess, ...]: ...
+
     def validate_input(self, input_data: ToolInput) -> str | None: ...
 
     def display_title(self, input_data: ToolInput) -> str: ...
@@ -86,6 +103,10 @@ class FunctionTool:
     concurrency_key_factory: (
         Callable[[ToolContext, ToolInput], str | None] | None
     ) = field(default=None, repr=False)
+    resource_access_factory: ResourceAccessFactory | None = field(
+        default=None,
+        repr=False,
+    )
     validator: Callable[[ToolInput], str | None] | None = field(
         default=None,
         repr=False,
@@ -113,6 +134,15 @@ class FunctionTool:
             return None
         return self.concurrency_key_factory(context, input_data)
 
+    def resource_accesses(
+        self,
+        context: ToolContext,
+        input_data: ToolInput,
+    ) -> tuple[ResourceAccess, ...]:
+        if self.resource_access_factory is None:
+            return ()
+        return self.resource_access_factory(context, input_data)
+
     def validate_input(self, input_data: ToolInput) -> str | None:
         return self.validator(input_data) if self.validator else None
 
@@ -124,7 +154,16 @@ class FunctionTool:
         context: ToolContext,
         input_data: ToolInput,
     ) -> ToolResult:
-        result = self.executor(context, input_data)
+        result: ToolResult | Awaitable[ToolResult]
+        if inspect.iscoroutinefunction(self.executor):
+            result = self.executor(context, input_data)
+        else:
+            result = await asyncio.to_thread(
+                _call_tool_executor,
+                self.executor,
+                context,
+                input_data,
+            )
         if inspect.isawaitable(result):
             result = await result
         if not isinstance(result, ToolResult):
@@ -155,6 +194,7 @@ def function_tool(
     concurrency_key: (
         Callable[[ToolContext, ToolInput], str | None] | None
     ) = None,
+    resource_accesses: ResourceAccessFactory | None = None,
     validate: Callable[[ToolInput], str | None] | None = None,
     title: Callable[[ToolInput], str] | None = None,
 ) -> FunctionTool:
@@ -168,6 +208,7 @@ def function_tool(
         destructive=destructive,
         concurrency_safe=concurrency_safe,
         concurrency_key_factory=concurrency_key,
+        resource_access_factory=resource_accesses,
         validator=validate,
         title_factory=title,
     )
@@ -175,3 +216,11 @@ def function_tool(
 
 def _resolve_predicate(predicate: InputPredicate, input_data: ToolInput) -> bool:
     return predicate(input_data) if callable(predicate) else predicate
+
+
+def _call_tool_executor(
+    executor: ToolExecutor,
+    context: ToolContext,
+    input_data: ToolInput,
+) -> ToolResult | Awaitable[ToolResult]:
+    return executor(context, input_data)

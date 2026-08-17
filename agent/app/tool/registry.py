@@ -5,6 +5,12 @@ from dataclasses import replace
 from typing import Any
 
 from app.tool.base import Tool, ToolContext, ToolInput, ToolResult
+from app.tool.resource_locks import (
+    ResourceAccess,
+    ResourceAccessMode,
+    ResourceLockManager,
+    ResourceObservationStore,
+)
 
 
 class ToolInputError(ValueError):
@@ -14,9 +20,18 @@ class ToolInputError(ValueError):
 class ToolRegistry:
     """工具定义、校验、并发策略与执行的唯一入口。"""
 
-    def __init__(self, tools: Iterable[Tool] = ()) -> None:
+    def __init__(
+        self,
+        tools: Iterable[Tool] = (),
+        *,
+        resource_locks: ResourceLockManager | None = None,
+        resource_observations: ResourceObservationStore | None = None,
+    ) -> None:
         self._tools: dict[str, Tool] = {}
-        self._locks: dict[str, asyncio.Lock] = {}
+        self._resource_locks = resource_locks or ResourceLockManager()
+        self._resource_observations = (
+            resource_observations or ResourceObservationStore()
+        )
         for tool in tools:
             self.register(tool)
 
@@ -40,8 +55,25 @@ class ToolRegistry:
         return tuple(self._tools)
 
     def copy(self) -> "ToolRegistry":
-        """Create a request-scoped registry while preserving tool order."""
-        return ToolRegistry(self._tools.values())
+        """Create a request registry that shares cross-run resource locks."""
+        return ToolRegistry(
+            self._tools.values(),
+            resource_locks=self._resource_locks,
+            resource_observations=self._resource_observations,
+        )
+
+    def select(self, names: Iterable[str]) -> "ToolRegistry":
+        """Select tools while retaining the same cross-run lock domain."""
+        selected = set(names)
+        return ToolRegistry(
+            (
+                tool
+                for name, tool in self._tools.items()
+                if name in selected
+            ),
+            resource_locks=self._resource_locks,
+            resource_observations=self._resource_observations,
+        )
 
     def model_definitions(
         self,
@@ -82,14 +114,42 @@ class ToolRegistry:
             raise asyncio.CancelledError
 
         started = time.perf_counter()
-        if tool.is_concurrency_safe(normalized_input):
-            result = await tool.execute(context, normalized_input)
+        runtime_context = replace(
+            context,
+            resource_observations=self._resource_observations,
+        )
+        accesses = tool.resource_accesses(runtime_context, normalized_input)
+        try:
+            concurrency_safe = (
+                tool.is_concurrency_safe(normalized_input) is True
+            )
+        except Exception:  # noqa: BLE001 - tool scheduling must fail closed
+            concurrency_safe = False
+        if not accesses and not concurrency_safe:
+            key = tool.concurrency_key(runtime_context, normalized_input)
+            accesses = (
+                ResourceAccess(
+                    key or f"tool:{name}",
+                    ResourceAccessMode.WRITE,
+                ),
+            )
+
+        wait_started = time.perf_counter()
+        if not accesses:
+            resource_wait_ms = 0
+            resource_contended = False
+            resource_contended_keys: tuple[str, ...] = ()
+            result = await tool.execute(runtime_context, normalized_input)
         else:
-            key = tool.concurrency_key(context, normalized_input)
-            lock_key = key or f"tool:{name}"
-            lock = self._locks.setdefault(lock_key, asyncio.Lock())
-            async with lock:
-                result = await tool.execute(context, normalized_input)
+            async with self._resource_locks.hold(accesses) as lock_report:
+                resource_wait_ms = round(
+                    (time.perf_counter() - wait_started) * 1000
+                )
+                resource_contended = lock_report.contended
+                resource_contended_keys = lock_report.contended_keys
+                if runtime_context.cancelled():
+                    raise asyncio.CancelledError
+                result = await tool.execute(runtime_context, normalized_input)
         duration_ms = max(1, round((time.perf_counter() - started) * 1000))
         metadata = {
             **dict(result.metadata),
@@ -98,6 +158,13 @@ class ToolRegistry:
             "readOnly": tool.is_read_only(normalized_input),
             "destructive": tool.is_destructive(normalized_input),
             "title": tool.display_title(normalized_input),
+            "resourceWaitMs": resource_wait_ms,
+            "resourceContended": resource_contended,
+            "resourceContendedKeys": resource_contended_keys,
+            "resourceAccess": tuple(
+                {"key": access.key, "mode": access.mode.value}
+                for access in accesses
+            ),
         }
         return replace(result, metadata=metadata)
 

@@ -28,10 +28,12 @@ class AgentHarness:
         provider: ModelProviderPort,
         context_planner: ContextPlanner | None = None,
         result_processor: ToolResultProcessor | None = None,
+        max_parallel_tool_calls: int = 10,
     ) -> None:
         self._provider = provider
         self._context_planner = context_planner
         self._result_processor = result_processor
+        self._max_parallel_tool_calls = max_parallel_tool_calls
 
     async def stream(
         self,
@@ -131,6 +133,11 @@ class AgentHarness:
             self._context_planner,
             self._result_processor,
             stream_turn=getattr(self._provider, "stream_agent_turn", None),
+            max_parallel_tool_calls=self._max_parallel_tool_calls,
+        )
+        runtime_tool_context = replace(
+            tool_context or ToolContext(workspace_path=Path.cwd()),
+            cancelled=lambda: _pause_requested(run_control),
         )
         async for event in runner.stream(
             settings,
@@ -138,7 +145,7 @@ class AgentHarness:
             messages,
             reasoning_effort,
             registry,
-            tool_context or ToolContext(workspace_path=Path.cwd()),
+            runtime_tool_context,
             permission_policy,
             permission_engine,
             approval_broker,

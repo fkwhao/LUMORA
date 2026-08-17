@@ -17,6 +17,11 @@ from app.tool.base import (
     ToolResult,
     function_tool,
 )
+from app.tool.resource_locks import (
+    ResourceAccess,
+    ResourceAccessMode,
+    workspace_resource_key,
+)
 
 MAX_OUTPUT_CHARS = 80_000
 BACKGROUND_LOG_CHARS = 40_000
@@ -65,9 +70,7 @@ def shell_tools() -> tuple[FunctionTool, ...]:
             read_only=False,
             destructive=_shell_is_destructive,
             concurrency_safe=False,
-            concurrency_key=lambda context, _data: (
-                f"workspace:{context.workspace_path}"
-            ),
+            resource_accesses=_workspace_write_access,
             execute=_shell_command,
             validate=_validate_shell,
             title=lambda data: str(data.get("command") or "运行命令"),
@@ -91,9 +94,7 @@ def shell_tools() -> tuple[FunctionTool, ...]:
             read_only=lambda data: data.get("action") == "status",
             destructive=lambda data: data.get("action") == "stop",
             concurrency_safe=False,
-            concurrency_key=lambda context, _data: (
-                f"workspace:{context.workspace_path}"
-            ),
+            resource_accesses=_shell_process_access,
             execute=_shell_process,
             validate=_validate_shell_process,
             title=lambda data: (
@@ -102,6 +103,32 @@ def shell_tools() -> tuple[FunctionTool, ...]:
                 else "查看后台进程"
             ),
         ),
+    )
+
+
+def _workspace_write_access(
+    context: ToolContext,
+    _data: ToolInput,
+) -> tuple[ResourceAccess, ...]:
+    return (
+        ResourceAccess(
+            workspace_resource_key(context.workspace_path),
+            ResourceAccessMode.WRITE,
+        ),
+    )
+
+
+def _shell_process_access(
+    context: ToolContext,
+    data: ToolInput,
+) -> tuple[ResourceAccess, ...]:
+    mode = (
+        ResourceAccessMode.READ
+        if data.get("action") == "status"
+        else ResourceAccessMode.WRITE
+    )
+    return (
+        ResourceAccess(workspace_resource_key(context.workspace_path), mode),
     )
 
 

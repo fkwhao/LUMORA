@@ -13,6 +13,7 @@ class AgentSettings(BaseModel):
     port: int = Field(ge=1, le=65535)
     startup_token: str = Field(min_length=32)
     protocol_version: str = "1"
+    max_parallel_tool_calls: int = Field(default=10, ge=1)
 
     @field_validator("host")
     @classmethod
@@ -40,6 +41,12 @@ class AgentSettings(BaseModel):
                 lumora,
                 "protocol-version",
                 "1",
+                path,
+            ),
+            max_parallel_tool_calls=cls._optional_int(
+                lumora,
+                "max-parallel-tool-calls",
+                10,
                 path,
             ),
         )
@@ -85,6 +92,18 @@ class AgentSettings(BaseModel):
         path: Path,
     ) -> int:
         value = data.get(key)
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise TypeError(f"本地配置项 {key} 必须是整数：{path}")
+        return value
+
+    @staticmethod
+    def _optional_int(
+        data: Mapping[str, object],
+        key: str,
+        default: int,
+        path: Path,
+    ) -> int:
+        value = data.get(key, default)
         if not isinstance(value, int) or isinstance(value, bool):
             raise TypeError(f"本地配置项 {key} 必须是整数：{path}")
         return value

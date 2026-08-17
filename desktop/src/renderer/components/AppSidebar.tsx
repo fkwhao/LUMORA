@@ -66,7 +66,7 @@ const HISTORY_PROCESSING_PIXELS = Array.from(
 interface AppSidebarProps {
   activeView: "home" | "task" | "settings" | PrototypeView;
   activeTaskId?: string;
-  processingTaskId?: string;
+  processingTaskIds?: ReadonlySet<string>;
   recentTasks: TaskSummary[];
   taskProjectPaths: Record<string, string>;
   projectNames: Record<string, string>;
@@ -85,7 +85,7 @@ interface AppSidebarProps {
 export function AppSidebar({
   activeView,
   activeTaskId,
-  processingTaskId,
+  processingTaskIds,
   recentTasks,
   taskProjectPaths,
   projectNames,
@@ -285,7 +285,7 @@ export function AppSidebar({
                         key={task.taskId}
                         task={task}
                         activeTaskId={activeTaskId}
-                        processingTaskId={processingTaskId}
+                        processing={Boolean(processingTaskIds?.has(task.taskId))}
                         onOpenTask={onOpenTask}
                         onArchiveTask={onArchiveTask}
                         notify={notify}
@@ -335,7 +335,7 @@ export function AppSidebar({
                     key={task.taskId}
                     task={task}
                     activeTaskId={activeTaskId}
-                    processingTaskId={processingTaskId}
+                    processing={Boolean(processingTaskIds?.has(task.taskId))}
                     onOpenTask={onOpenTask}
                     onArchiveTask={onArchiveTask}
                     notify={notify}
@@ -456,7 +456,7 @@ function CreateProjectDialog({
 interface HistoryRowProps {
   task: TaskSummary;
   activeTaskId?: string;
-  processingTaskId?: string;
+  processing: boolean;
   onOpenTask(taskId: string): void;
   onArchiveTask(taskId: string): void;
   notify(message: string, tone?: "info" | "success"): void;
@@ -465,7 +465,7 @@ interface HistoryRowProps {
 function HistoryRow({
   task,
   activeTaskId,
-  processingTaskId,
+  processing,
   onOpenTask,
   onArchiveTask,
   notify,
@@ -493,30 +493,10 @@ function HistoryRow({
     <div
       className={`history-row${
         task.taskId === activeTaskId ? " current" : ""
-      }${task.taskId === processingTaskId ? " processing" : ""}`}
+      }${processing ? " processing" : ""}`}
       onFocusCapture={prepareTitleMarquee}
       onPointerEnter={prepareTitleMarquee}
     >
-      {task.taskId === processingTaskId && (
-        <span
-          className="history-processing-pixels"
-          role="status"
-          aria-label="正在处理"
-        >
-          {HISTORY_PROCESSING_PIXELS.map((pixel, index) => (
-            <i
-              className={`density-${pixel.density}`}
-              key={index}
-              style={{
-                background: pixel.color,
-                boxShadow: pixel.glow,
-                animationDelay: pixel.delay,
-                animationDuration: pixel.duration,
-              }}
-            />
-          ))}
-        </span>
-      )}
       <button
         className="history-item"
         type="button"
@@ -527,6 +507,13 @@ function HistoryRow({
           <span className="history-title-text">{task.goal}</span>
         </span>
       </button>
+      {processing && (
+        <span
+          className="history-processing-indicator"
+          role="status"
+          aria-label="正在处理"
+        />
+      )}
       <button
         className="history-archive-action"
         type="button"
@@ -540,6 +527,29 @@ function HistoryRow({
         <Archive size={13} />
       </button>
     </div>
+  );
+}
+
+/**
+ * Reserved square-particle treatment for a future activity visualization.
+ * The sidebar currently uses the lighter circular indicator instead.
+ */
+export function HistoryProcessingPixels() {
+  return (
+    <span className="history-processing-pixels" aria-hidden="true">
+      {HISTORY_PROCESSING_PIXELS.map((pixel, index) => (
+        <i
+          className={`density-${pixel.density}`}
+          key={index}
+          style={{
+            background: pixel.color,
+            boxShadow: pixel.glow,
+            animationDelay: pixel.delay,
+            animationDuration: pixel.duration,
+          }}
+        />
+      ))}
+    </span>
   );
 }
 

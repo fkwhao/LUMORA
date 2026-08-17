@@ -117,7 +117,7 @@ globalStyle(
 );
 
 globalStyle(
-  ".home-hero,\n.home-composer-stack,\n.history-search,\n.task-more-menu,\n.review-pane,\n.window-navigation button svg",
+  ".home-hero,\n.home-composer-stack,\n.history-search,\n.history-processing-indicator,\n.history-processing-pixels i,\n.task-more-menu,\n.review-pane,\n.window-navigation button svg",
   {
     "@media": {
       "(prefers-reduced-motion: reduce)": {

@@ -1,4 +1,7 @@
 import json
+import os
+import stat
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +12,12 @@ from app.tool.base import (
     ToolInput,
     ToolResult,
     function_tool,
+)
+from app.tool.resource_locks import (
+    ResourceAccess,
+    ResourceAccessMode,
+    file_resource_key,
+    workspace_resource_key,
 )
 
 MAX_FULL_WRITE_CHARS = 1_000_000
@@ -41,6 +50,7 @@ def filesystem_tools() -> tuple[FunctionTool, ...]:
             category=ToolCategory.FILESYSTEM,
             read_only=True,
             concurrency_safe=True,
+            resource_accesses=_workspace_read_access,
             execute=_list_files,
             validate=_validate_pattern,
             title=lambda data: str(data.get("pattern") or "列出文件"),
@@ -69,6 +79,7 @@ def filesystem_tools() -> tuple[FunctionTool, ...]:
             category=ToolCategory.FILESYSTEM,
             read_only=True,
             concurrency_safe=True,
+            resource_accesses=_file_read_access,
             execute=_search_in_file,
             validate=_validate_search,
             title=lambda data: str(data.get("query") or "搜索文件内容"),
@@ -92,6 +103,7 @@ def filesystem_tools() -> tuple[FunctionTool, ...]:
             category=ToolCategory.FILESYSTEM,
             read_only=True,
             concurrency_safe=True,
+            resource_accesses=_file_read_access,
             execute=_read_file,
             validate=_validate_line_range,
             title=lambda data: str(data.get("path") or "读取文件"),
@@ -116,7 +128,7 @@ def filesystem_tools() -> tuple[FunctionTool, ...]:
             category=ToolCategory.FILESYSTEM,
             read_only=False,
             destructive=True,
-            concurrency_key=_file_concurrency_key,
+            resource_accesses=_file_write_access,
             execute=_apply_patch,
             validate=_validate_patch,
             title=lambda data: str(data.get("path") or "编辑文件"),
@@ -139,7 +151,7 @@ def filesystem_tools() -> tuple[FunctionTool, ...]:
             category=ToolCategory.FILESYSTEM,
             read_only=False,
             destructive=lambda data: bool(data.get("path")),
-            concurrency_key=_file_concurrency_key,
+            resource_accesses=_file_write_access,
             execute=_write_file,
             title=lambda data: str(data.get("path") or "写入文件"),
         ),
@@ -182,8 +194,45 @@ def _validate_patch(data: ToolInput) -> str | None:
     return None
 
 
-def _file_concurrency_key(context: ToolContext, data: ToolInput) -> str:
-    return f"file:{_resolve_path(context, data.get('path'))}"
+def _workspace_read_access(
+    context: ToolContext,
+    _data: ToolInput,
+) -> tuple[ResourceAccess, ...]:
+    return (
+        ResourceAccess(
+            workspace_resource_key(context.workspace_path),
+            ResourceAccessMode.READ,
+        ),
+    )
+
+
+def _file_access(
+    context: ToolContext,
+    data: ToolInput,
+    mode: ResourceAccessMode,
+) -> tuple[ResourceAccess, ...]:
+    path = _resolve_path(context, data.get("path"))
+    return (
+        ResourceAccess(
+            workspace_resource_key(context.workspace_path),
+            ResourceAccessMode.READ,
+        ),
+        ResourceAccess(file_resource_key(path), mode),
+    )
+
+
+def _file_read_access(
+    context: ToolContext,
+    data: ToolInput,
+) -> tuple[ResourceAccess, ...]:
+    return _file_access(context, data, ResourceAccessMode.READ)
+
+
+def _file_write_access(
+    context: ToolContext,
+    data: ToolInput,
+) -> tuple[ResourceAccess, ...]:
+    return _file_access(context, data, ResourceAccessMode.WRITE)
 
 
 def _list_files(context: ToolContext, data: ToolInput) -> ToolResult:
@@ -208,7 +257,8 @@ def _list_files(context: ToolContext, data: ToolInput) -> ToolResult:
 
 def _read_file(context: ToolContext, data: ToolInput) -> ToolResult:
     path = _resolve_path(context, data.get("path"))
-    content = _read_text_file(path)
+    content, version = _read_text_file(path)
+    _observe_file(context, path, version)
     lines = content.splitlines()
     if not lines:
         return ToolResult(
@@ -271,7 +321,8 @@ def _read_file(context: ToolContext, data: ToolInput) -> ToolResult:
 
 def _search_in_file(context: ToolContext, data: ToolInput) -> ToolResult:
     path = _resolve_path(context, data.get("path"))
-    content = _read_text_file(path)
+    content, version = _read_text_file(path)
+    _observe_file(context, path, version)
     query = str(data["query"])
     case_sensitive = bool(data.get("caseSensitive", False))
     max_results = min(
@@ -315,7 +366,7 @@ def _search_in_file(context: ToolContext, data: ToolInput) -> ToolResult:
 
 def _apply_patch(context: ToolContext, data: ToolInput) -> ToolResult:
     path = _resolve_path(context, data.get("path"))
-    content = _read_text_file(path)
+    content, version = _read_text_file(path)
     old_text = _use_file_newlines(str(data["oldText"]), content)
     new_text = _use_file_newlines(str(data["newText"]), content)
     occurrences = content.count(old_text)
@@ -328,7 +379,8 @@ def _apply_patch(context: ToolContext, data: ToolInput) -> ToolResult:
         )
     updated = content.replace(old_text, new_text, -1 if replace_all else 1)
     replacements = occurrences if replace_all else 1
-    _atomic_write_text(path, updated)
+    _atomic_write_text(path, updated, expected_version=version)
+    _observe_file(context, path, _file_version(path))
     metadata = {
         "path": _display_path(context, path),
         "replacements": replacements,
@@ -346,8 +398,18 @@ def _write_file(context: ToolContext, data: ToolInput) -> ToolResult:
     if len(content) > MAX_FULL_WRITE_CHARS:
         raise ValueError("写入内容过大")
     existed = path.exists()
-    previous = path.read_text(encoding="utf-8") if existed else ""
-    _atomic_write_text(path, content)
+    if existed:
+        current_version = _file_version(path)
+        _require_current_observation(context, path, current_version)
+        previous, verified_version = _read_text_file(path)
+        if verified_version != current_version:
+            raise ValueError("文件在写入前发生变化，请重新读取后再试")
+        expected_version: str | None = verified_version
+    else:
+        previous = ""
+        expected_version = None
+    _atomic_write_text(path, content, expected_version=expected_version)
+    _observe_file(context, path, _file_version(path))
     metadata = {
         "path": _display_path(context, path),
         "previousLines": len(previous.splitlines()),
@@ -357,22 +419,121 @@ def _write_file(context: ToolContext, data: ToolInput) -> ToolResult:
     return ToolResult(content=json.dumps(metadata, ensure_ascii=False), metadata=metadata)
 
 
-def _read_text_file(path: Path) -> str:
+def _read_text_file(path: Path) -> tuple[str, str]:
     if not path.is_file():
         raise ValueError("目标文件不存在")
+    before = _file_version(path)
     with path.open("r", encoding="utf-8", newline="") as file:
         content = file.read()
+    after = _file_version(path)
+    if before != after:
+        raise ValueError("文件在读取期间发生变化，请重新读取")
     if len(content) > MAX_TEXT_FILE_CHARS:
         raise ValueError("文件超过 2000 万字符的安全处理上限")
-    return content
+    return content, before
 
 
-def _atomic_write_text(path: Path, content: str) -> None:
+def _file_version(path: Path) -> str:
+    info = path.stat()
+    return (
+        f"{info.st_dev}:{info.st_ino}:{info.st_size}:"
+        f"{info.st_mtime_ns}:{info.st_ctime_ns}"
+    )
+
+
+def _observe_file(context: ToolContext, path: Path, version: str) -> None:
+    observations = context.resource_observations
+    if observations is not None:
+        observations.observe(
+            context.task_id,
+            file_resource_key(path),
+            version,
+        )
+
+
+def _require_current_observation(
+    context: ToolContext,
+    path: Path,
+    current_version: str,
+) -> None:
+    if not context.task_id or context.resource_observations is None:
+        return
+    expected = context.resource_observations.expected(
+        context.task_id,
+        file_resource_key(path),
+    )
+    if expected is None:
+        raise ValueError("覆盖已有文件前必须先读取该文件")
+    if expected != current_version:
+        raise ValueError("文件已被其他任务修改，请重新读取后再试")
+
+
+def _atomic_write_text(
+    path: Path,
+    content: str,
+    *,
+    expected_version: str | None,
+) -> None:
+    """Publish one complete file while enforcing the caller's observation.
+
+    ``None`` means create-if-absent. An existing version means replace only
+    when the target still matches the content observed inside the resource
+    lock. A unique sibling temporary file avoids collisions with another
+    Runtime or a crashed earlier write.
+    """
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.lumora-tmp")
-    with temporary.open("w", encoding="utf-8", newline="") as file:
-        file.write(content)
-    temporary.replace(path)
+    original_mode: int | None = None
+    if expected_version is not None:
+        try:
+            original_mode = stat.S_IMODE(path.stat().st_mode)
+        except FileNotFoundError:
+            pass
+
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="",
+            prefix=f".{path.name}.",
+            suffix=".lumora-tmp",
+            dir=path.parent,
+            delete=False,
+        ) as file:
+            temporary = Path(file.name)
+            file.write(content)
+            file.flush()
+            os.fsync(file.fileno())
+
+        if original_mode is not None:
+            os.chmod(temporary, original_mode)
+
+        if expected_version is None:
+            try:
+                # Linking a prepared sibling is an atomic create-if-absent.
+                os.link(temporary, path)
+            except FileExistsError as error:
+                raise ValueError(
+                    "目标文件已被其他任务创建，请先读取后再试"
+                ) from error
+            temporary.unlink()
+            temporary = None
+            return
+
+        try:
+            actual_version = _file_version(path)
+        except FileNotFoundError as error:
+            raise ValueError(
+                "文件在提交写入前发生变化，请重新读取后再试"
+            ) from error
+        if actual_version != expected_version:
+            raise ValueError("文件在提交写入前发生变化，请重新读取后再试")
+        os.replace(temporary, path)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _use_file_newlines(text: str, file_content: str) -> str:

@@ -189,6 +189,129 @@ describe("task store", () => {
     await cachedOpen;
   });
 
+  it("keeps a running conversation timer and work log stable across task switches", async () => {
+    const firstTask = {
+      ...createdTask,
+      taskId: "task-running",
+      goal: "运行任务",
+    };
+    const secondTask = {
+      ...createdTask,
+      taskId: "task-idle",
+      goal: "空闲任务",
+    };
+    const startedAt = "2026-08-17T01:02:03.000Z";
+    const api = createApi();
+    vi.mocked(api.list).mockResolvedValue([firstTask, secondTask]);
+    vi.mocked(api.get).mockImplementation(async (taskId) =>
+      taskId === firstTask.taskId ? firstTask : secondTask,
+    );
+    const modelApi = createModelApi();
+    const runningMessages: ChatMessage[] = [
+      {
+        messageId: "running-user",
+        role: "user",
+        content: "检查并发状态",
+      },
+      {
+        runtimeId: "running-assistant-runtime",
+        role: "assistant",
+        content: "",
+        workLog: [
+          {
+            itemId: "progress-preserved",
+            kind: "progress",
+            status: "running",
+            content: "正在检查任务队列",
+          },
+        ],
+      },
+    ];
+    let persistedMessages = runningMessages;
+    let firstRunStatus: ConversationRunSnapshot["status"] = "RUNNING";
+    vi.mocked(modelApi.listMessages).mockImplementation(async (taskId) =>
+      taskId === firstTask.taskId ? persistedMessages : [],
+    );
+    vi.mocked(modelApi.getActiveRun).mockImplementation(async (taskId) =>
+      taskId === firstTask.taskId
+        ? {
+            ...activeRun(firstRunStatus, "run-running"),
+            taskId: firstTask.taskId,
+            startedAt,
+            lastEventSequence: 5,
+          }
+        : undefined,
+    );
+    let onRunningEvent:
+      | Parameters<LumoraModelApi["subscribeRun"]>[3]
+      | undefined;
+    vi.mocked(modelApi.subscribeRun).mockImplementation(
+      (taskId, _runId, _afterSequence, onEvent) => {
+        if (taskId === firstTask.taskId) onRunningEvent = onEvent;
+        return () => undefined;
+      },
+    );
+    const store = createTaskStore(api, modelApi);
+    await store.getState().loadRecentTasks();
+    await store.getState().openTask(firstTask.taskId);
+
+    expect(store.getState().chatStartedAt).toBe(Date.parse(startedAt));
+    onRunningEvent?.({
+      runId: "run-running",
+      sequence: 3,
+      occurredAt: "2026-08-17T01:02:06.000Z",
+      event: {
+        type: "usage",
+        delta: "",
+        model: "test-model",
+        errorMessage: "",
+      },
+    });
+    const liveMessages = store.getState().messages;
+    expect(store.getState().activeRun?.lastEventSequence).toBe(3);
+
+    await store.getState().openTask(secondTask.taskId);
+    const reopening = store.getState().openTask(firstTask.taskId);
+
+    expect(store.getState().isChatting).toBe(true);
+    expect(store.getState().chatStartedAt).toBe(Date.parse(startedAt));
+    expect(store.getState().messages).toBe(liveMessages);
+    expect(store.getState().messages.at(-1)?.workLog).toEqual([
+      expect.objectContaining({ itemId: "progress-preserved" }),
+    ]);
+
+    await reopening;
+    expect(store.getState().isChatting).toBe(true);
+    expect(store.getState().chatStartedAt).toBe(Date.parse(startedAt));
+    expect(store.getState().messages).toBe(liveMessages);
+    expect(modelApi.subscribeRun).toHaveBeenLastCalledWith(
+      firstTask.taskId,
+      "run-running",
+      3,
+      expect.any(Function),
+    );
+
+    await store.getState().openTask(secondTask.taskId);
+    firstRunStatus = "COMPLETED";
+    persistedMessages = [
+      runningMessages[0]!,
+      {
+        messageId: "running-assistant",
+        role: "assistant",
+        content: "并发状态检查完成",
+        durationMs: 12_000,
+      },
+    ];
+    await store.getState().openTask(firstTask.taskId);
+
+    expect(store.getState().isChatting).toBe(false);
+    expect(store.getState().chatStartedAt).toBeUndefined();
+    expect(store.getState().messages.at(-1)).toMatchObject({
+      content: "并发状态检查完成",
+      durationMs: 12_000,
+    });
+  });
+
   it("shows manual compaction as an independent processing record", async () => {
     const api = createApi();
     const modelApi = createModelApi();

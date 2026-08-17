@@ -5,8 +5,15 @@ spring:
     url: jdbc:sqlite:${LUMORA_DATABASE_PATH:./runtime/lumora.db}
     driver-class-name: org.sqlite.JDBC
     hikari:
+      # SQLite 同时只允许一个写事务。任务仍可并发执行，但短数据库提交
+      # 通过单连接池排队，避免不同持久化服务互相触发 SQLITE_BUSY。
+      maximum-pool-size: 1
+      minimum-idle: 1
       # SQLite 的外键开关属于连接状态，每个池连接都必须初始化。
       connection-init-sql: PRAGMA foreign_keys=ON
+      data-source-properties:
+        # 外部短暂占锁时等待释放，不把瞬时竞争直接升级为任务失败。
+        busy_timeout: 10000
   liquibase:
     change-log: classpath:db/changelog/db.changelog-master.yaml
 
@@ -25,5 +32,5 @@ lumora:
   agent-startup-token: ${LUMORA_AGENT_STARTUP_TOKEN:${LUMORA_STARTUP_TOKEN:}}
   memory-auto-extraction-enabled: ${LUMORA_MEMORY_AUTO_EXTRACTION_ENABLED:true}
   runs:
-    # 当前产品只调度一个会话；调度器和运行存储已支持提高该值。
-    max-concurrent: ${LUMORA_MAX_CONCURRENT_RUNS:1}
+    # 不同任务可并发；同一任务仍由其持久问题队列严格串行。
+    max-concurrent: ${LUMORA_MAX_CONCURRENT_RUNS:3}

@@ -4,3 +4,4 @@ server:
 lumora:
   startup-token: replace-with-at-least-32-local-characters
   protocol-version: "1"
+  max-parallel-tool-calls: 10

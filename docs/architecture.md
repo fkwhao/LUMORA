@@ -208,8 +208,11 @@ Turn 存在 `PAUSING` 耐久事件；普通模型或工具失败不会被自动�
 
 应用重启后，Java 将遗留的 `QUEUED`、`RUNNING`、`PAUSING` 和 `WAITING_APPROVAL` Run 恢复为
 `PAUSED`；已经开始的 Turn 会先从事件记录重建并封存中间轨迹，未开始的排队 Run 保留原触发
-输入。当前 `lumora.runs.max-concurrent` 默认为 `1`，但 Run 存储、事件流和调度器按 `run_id`
-隔离，并发上限可在后续多会话执行时提高，而不需要重写暂停协议。
+输入。当前 `lumora.runs.max-concurrent` 默认为 `3`，不同任务在有界槽位内并发；Run 存储、
+事件流和调度器按 `run_id` 隔离。同一任务仍只保留一个活动 Run，其问题队列严格串行。
+Python 工具层在跨 Run 共享的资源域中协调工作区和文件访问，并对完整文件覆盖执行陈旧
+版本检查；同一模型步骤内的显式安全工具通过有界滚动池并发，独占工具形成顺序屏障。
+完整边界见[任务并发与资源感知设计](cross-task-concurrency-design.md)。
 
 ### 问题队列与运行中引导
 

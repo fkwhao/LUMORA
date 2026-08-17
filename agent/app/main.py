@@ -41,6 +41,7 @@ def create_app(
     resolved_chat_service = chat_service or ChatService(
         provider,
         PromptBuilder(),
+        max_parallel_tool_calls=settings.max_parallel_tool_calls,
     )
     resolved_memory_extraction_service = (
         memory_extraction_service or MemoryExtractionService(provider)

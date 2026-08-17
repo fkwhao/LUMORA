@@ -12,6 +12,11 @@ from app.context.planner import ContextPlanner
 from app.dto.request.chat_completion_request import ChatMessageRequest
 from app.dto.response.chat_completion_response import TokenUsageResponse
 from app.execution.tool_call_executor import ToolCallExecutor
+from app.execution.tool_call_scheduler import (
+    ToolCallAborted,
+    ToolCallCompleted,
+    ToolCallScheduler,
+)
 from app.execution.tool_result_processor import ToolResultProcessor
 from app.harness.contracts import (
     HistoryCompactor,
@@ -37,10 +42,13 @@ from app.tool.base import ToolContext
 from app.tool.registry import ToolRegistry
 
 DEFAULT_MAX_TOOL_ITERATIONS = 64
+DEFAULT_MAX_PARALLEL_TOOL_CALLS = 10
 MAX_IDENTICAL_TOOL_ITERATIONS = 3
 DEFAULT_MAX_STREAM_RETRIES = 2
 DEFAULT_STREAM_RETRY_BASE_DELAY = 0.5
 _TRANSIENT_STREAM_ERRORS = (httpx.TransportError, json.JSONDecodeError)
+
+
 class AgentLoopRunner:
     """编排模型回合、工具执行和公开工作事件。"""
 
@@ -58,6 +66,7 @@ class AgentLoopRunner:
         approval_reviewer: ApprovalReviewer | None = None,
         max_tool_iterations: int = DEFAULT_MAX_TOOL_ITERATIONS,
         max_identical_tool_iterations: int = MAX_IDENTICAL_TOOL_ITERATIONS,
+        max_parallel_tool_calls: int = DEFAULT_MAX_PARALLEL_TOOL_CALLS,
         max_stream_retries: int = DEFAULT_MAX_STREAM_RETRIES,
         stream_retry_base_delay: float = DEFAULT_STREAM_RETRY_BASE_DELAY,
     ) -> None:
@@ -78,6 +87,9 @@ class AgentLoopRunner:
             2,
             max_identical_tool_iterations,
         )
+        if max_parallel_tool_calls < 1:
+            raise ValueError("max_parallel_tool_calls 必须大于 0")
+        self._max_parallel_tool_calls = max_parallel_tool_calls
         self._max_stream_retries = max(0, max_stream_retries)
         self._stream_retry_base_delay = max(0.0, stream_retry_base_delay)
 
@@ -459,31 +471,26 @@ class AgentLoopRunner:
                 active_context_tokens=active_context_tokens,
             )
             request_messages.append(assistant_message)
-            inline_result_chars = 0
             pending_tool_messages: list[dict[str, Any]] = []
             tool_results: list[str] = []
             latest_user_request = _latest_user_request(request_messages)
-            for call_index, call in enumerate(turn.tool_calls):
-                if _pause_requested(run_control):
-                    for pending_call in turn.tool_calls[call_index:]:
-                        aborted_message = _aborted_tool_message(pending_call)
-                        request_messages.append(aborted_message)
-                        yield _protocol_message_event(
-                            aborted_message, resolved_model
-                        )
-                    yield _paused_event(resolved_model)
-                    return
-                result_text = "工具调用未返回结果"
-                async for event, result_text in tool_executor.execute(
-                    call,
-                    tool_context,
-                    resolved_model,
-                    settings,
-                    permission_policy,
-                    inline_result_chars,
-                    latest_user_request,
-                    turn.content[-10_000:],
-                ):
+            scheduler = ToolCallScheduler(
+                tool_executor,
+                self._result_processor,
+                self._max_parallel_tool_calls,
+            )
+            async for item in scheduler.stream(
+                turn.tool_calls,
+                tool_context,
+                resolved_model,
+                settings,
+                permission_policy,
+                latest_user_request,
+                turn.content[-10_000:],
+                run_control,
+            ):
+                if isinstance(item, RunEvent):
+                    event = item
                     if (
                         event.type == "usage"
                         and event.usage is not None
@@ -506,31 +513,30 @@ class AgentLoopRunner:
                         )
                         continue
                     yield event
-                inline_result_chars += len(result_text)
-                tool_results.append(result_text)
-                tool_message = {
-                    "role": "tool",
-                    "tool_call_id": call.call_id,
-                    "content": result_text,
-                }
+                    continue
+                if isinstance(item, ToolCallCompleted):
+                    tool_results.append(item.result_text)
+                    tool_message = {
+                        "role": "tool",
+                        "tool_call_id": item.call.call_id,
+                        "content": item.result_text,
+                    }
+                else:
+                    assert isinstance(item, ToolCallAborted)
+                    tool_message = _aborted_tool_message(item.call)
                 pending_tool_messages.append(tool_message)
                 request_messages.append(tool_message)
                 yield _protocol_message_event(tool_message, resolved_model)
-                if _pause_requested(run_control):
-                    for pending_call in turn.tool_calls[call_index + 1:]:
-                        aborted_message = _aborted_tool_message(pending_call)
-                        request_messages.append(aborted_message)
-                        yield _protocol_message_event(
-                            aborted_message, resolved_model
-                        )
-                    yield RunEvent(
-                        type="usage",
-                        model=resolved_model,
-                        usage=_to_run_usage(cumulative_usage),
-                        active_context_tokens=active_context_tokens,
-                    )
-                    yield _paused_event(resolved_model)
-                    return
+
+            if scheduler.paused:
+                yield RunEvent(
+                    type="usage",
+                    model=resolved_model,
+                    usage=_to_run_usage(cumulative_usage),
+                    active_context_tokens=active_context_tokens,
+                )
+                yield _paused_event(resolved_model)
+                return
 
             active_tokens = self._token_estimator.estimate_hybrid(
                 turn.usage.prompt_tokens,

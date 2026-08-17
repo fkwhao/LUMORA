@@ -7,6 +7,10 @@ const historyTitleMarquee = keyframes({
   },
 });
 
+const historyProcessingSpin = keyframes({
+  to: { transform: "translateY(-50%) rotate(360deg)" },
+});
+
 const historyPixelDense = keyframes({
   "0%, 100%": { opacity: "0.72", filter: "brightness(0.92)" },
   "27%": { opacity: "0.94", filter: "brightness(1.08)" },
@@ -546,6 +550,30 @@ globalStyle(".history-processing-pixels i.density-trace", {
   animation: `${historyPixelTrace} 1280ms ease-in-out infinite`,
 });
 
+globalStyle(".history-processing-indicator", {
+  position: "absolute",
+  zIndex: "2",
+  top: "50%",
+  right: "11px",
+  width: "14px",
+  height: "14px",
+  border: "2px solid color-mix(in srgb, var(--subtle) 38%, transparent)",
+  borderTopColor: "var(--muted)",
+  borderRadius: "50%",
+  animation: `${historyProcessingSpin} 850ms linear infinite`,
+  opacity: "1",
+  pointerEvents: "none",
+  transform: "translateY(-50%)",
+  transition: "opacity 120ms ease",
+});
+
+globalStyle(
+  ".history-row:hover .history-processing-indicator,\n.history-row:focus-within .history-processing-indicator",
+  {
+    opacity: "0",
+  },
+);
+
 globalStyle(".project-task-group .history-row", {
   marginLeft: "1px",
 });
@@ -575,6 +603,10 @@ globalStyle(".history-row .history-item", {
   gap: "0",
   paddingLeft: "11px",
   paddingRight: "11px",
+});
+
+globalStyle(".history-row.processing .history-item", {
+  paddingRight: "34px",
 });
 
 globalStyle(".history-archive-action", {
@@ -633,7 +665,7 @@ globalStyle(".history-title-text", {
   whiteSpace: "nowrap",
 });
 
-globalStyle(".history-row.processing .history-title-text", {
+globalStyle(".history-row.particle-processing .history-title-text", {
   textShadow: "0 1px 2px var(--canvas), 0 0 7px var(--canvas)",
 });
 

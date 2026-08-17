@@ -41,6 +41,11 @@ interface WorkPhase {
   items: WorkLogItem[];
 }
 
+interface LiveClock {
+  now: number;
+  fallbackStartedAt: number;
+}
+
 /** 展示公开的进度说明和真实工具事件，不渲染模型隐藏推理。 */
 export const AgentRunSummary = memo(function AgentRunSummary({
   startedAt,
@@ -54,11 +59,16 @@ export const AgentRunSummary = memo(function AgentRunSummary({
   onOpenArtifact,
 }: AgentRunSummaryProps) {
   const [expanded, setExpanded] = useState(running && !answerStarted);
-  const [elapsedMs, setElapsedMs] = useState(() =>
-    running && startedAt
-      ? Math.max(0, Date.now() - startedAt)
-      : durationMs ?? 0,
-  );
+  const [liveClock, setLiveClock] = useState<LiveClock>(() => {
+    const now = Date.now();
+    return { now, fallbackStartedAt: now };
+  });
+  const elapsedMs = running
+    ? Math.max(
+        0,
+        liveClock.now - (startedAt ?? liveClock.fallbackStartedAt),
+      )
+    : durationMs ?? 0;
   const phases = useMemo(
     () => buildWorkPhases(workLog.length > 0 ? workLog : taskEventsAsWorkLog(events)),
     [events, workLog],
@@ -66,17 +76,16 @@ export const AgentRunSummary = memo(function AgentRunSummary({
   const hasDetails = phases.length > 0;
   const label = summaryLabel(running, stopped, elapsedMs, durationMs);
 
-  useEffect(() => {
-    if (!running) {
-      setElapsedMs(durationMs ?? 0);
-      return;
-    }
-    const started = startedAt ?? Date.now();
-    const updateElapsed = () => setElapsedMs(Math.max(0, Date.now() - started));
-    updateElapsed();
-    const timer = window.setInterval(updateElapsed, 500);
+  useLayoutEffect(() => {
+    if (!running) return;
+    const fallbackStartedAt = Date.now();
+    const updateClock = () => {
+      setLiveClock({ now: Date.now(), fallbackStartedAt });
+    };
+    updateClock();
+    const timer = window.setInterval(updateClock, 500);
     return () => window.clearInterval(timer);
-  }, [durationMs, running, startedAt]);
+  }, [running, startedAt]);
 
   useLayoutEffect(() => {
     // Keep the live work log mounted for the entire run. Hosted-search

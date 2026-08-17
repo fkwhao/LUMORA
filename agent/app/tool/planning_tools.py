@@ -54,6 +54,9 @@ def planning_tools() -> tuple[Tool, ...]:
             category=ToolCategory.OTHER,
             read_only=True,
             concurrency_safe=False,
+            concurrency_key=lambda context, _data: (
+                f"task:{context.task_id or context.correlation_id}:plan"
+            ),
             validate=_validate_plan,
             execute=_update_plan,
             title=lambda _data: "更新执行计划",

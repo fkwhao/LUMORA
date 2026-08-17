@@ -27,6 +27,7 @@ import {
 import { SettingsPage } from "./features/settings/SettingsPage";
 import { HomePage } from "./features/tasks/HomePage";
 import { ConversationHubPage } from "./features/tasks/ConversationHubPage";
+import { useProcessingTaskIds } from "./features/tasks/state/use-processing-task-ids";
 import {
   loadProjectNames,
   saveActiveProject,
@@ -102,6 +103,7 @@ function ConnectedApp({
     [api, modelApi],
   );
   const activeTask = useStore(store, (state) => state.activeTask);
+  const activeRun = useStore(store, (state) => state.activeRun);
   const recentTasks = useStore(store, (state) => state.recentTasks);
   const archivedTaskIds = useStore(
     store,
@@ -155,6 +157,17 @@ function ConnectedApp({
     const archivedTaskIdSet = new Set(archivedTaskIds);
     return recentTasks.filter((task) => !archivedTaskIdSet.has(task.taskId));
   }, [archivedTaskIds, recentTasks]);
+  const sidebarTaskIds = useMemo(
+    () => activeTasks.map((task) => task.taskId),
+    [activeTasks],
+  );
+  const processingTaskIds = useProcessingTaskIds({
+    modelApi,
+    taskIds: sidebarTaskIds,
+    activeTaskId: activeTask?.taskId,
+    activeRun,
+    isChatting,
+  });
   const conversationTabs = useMemo(
     () =>
       openTabIds.flatMap((taskId) => {
@@ -476,7 +489,7 @@ function ConnectedApp({
       {windowChrome}
       <AppSidebar
         activeTaskId={activeTask?.taskId}
-        processingTaskId={isChatting ? activeTask?.taskId : undefined}
+        processingTaskIds={processingTaskIds}
         activeView={activeView}
         isLoadingHistory={isLoadingHistory}
         recentTasks={recentTasks}

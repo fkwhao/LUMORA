@@ -124,6 +124,429 @@ def test_agent_loop_claims_steer_at_the_next_model_boundary() -> None:
     asyncio.run(_assert_steer_is_claimed_at_model_boundary())
 
 
+def test_agent_loop_runs_safe_sibling_tools_concurrently_in_model_order() -> None:
+    asyncio.run(_assert_safe_sibling_tools_overlap_and_commit_in_order())
+
+
+def test_agent_loop_treats_unsafe_tools_as_ordering_barriers() -> None:
+    asyncio.run(_assert_unsafe_tool_is_an_ordering_barrier())
+
+
+def test_agent_loop_bounds_the_parallel_tool_pool() -> None:
+    asyncio.run(_assert_parallel_tool_pool_is_bounded())
+
+
+def test_agent_loop_pause_drains_started_parallel_calls_without_replenishing() -> None:
+    asyncio.run(_assert_parallel_pause_stops_pool_replenishment())
+
+
+async def _assert_safe_sibling_tools_overlap_and_commit_in_order() -> None:
+    turn_number = 0
+    second_started = asyncio.Event()
+    release_first = asyncio.Event()
+    execution_starts: list[str] = []
+
+    async def complete_turn(*_args):
+        nonlocal turn_number
+        turn_number += 1
+        if turn_number == 1:
+            return ProviderTurn(
+                content="并行读取两个目标。",
+                reasoning="",
+                model="test-model",
+                usage=TokenUsageResponse(
+                    promptTokens=10,
+                    completionTokens=3,
+                    totalTokens=13,
+                ),
+                tool_calls=(
+                    ProviderToolCall(
+                        "call-first", "parallel_read", '{"name":"first"}'
+                    ),
+                    ProviderToolCall(
+                        "call-second", "parallel_read", '{"name":"second"}'
+                    ),
+                ),
+            )
+        return ProviderTurn(
+            content="读取完成。",
+            reasoning="",
+            model="test-model",
+            usage=TokenUsageResponse(
+                promptTokens=18,
+                completionTokens=3,
+                totalTokens=21,
+            ),
+            tool_calls=(),
+        )
+
+    async def execute(_context, data):
+        name = str(data["name"])
+        execution_starts.append(name)
+        if name == "first":
+            await asyncio.wait_for(second_started.wait(), timeout=1)
+            await release_first.wait()
+        else:
+            second_started.set()
+            asyncio.get_running_loop().call_later(0.01, release_first.set)
+        return ToolResult(f"result-{name}")
+
+    registry = ToolRegistry((function_tool(
+        name="parallel_read",
+        description="并发读取测试",
+        input_schema={
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+        execute=execute,
+        read_only=True,
+        concurrency_safe=True,
+    ),))
+    events = [
+        event
+        async for event in AgentLoopRunner(complete_turn).stream(
+            _settings(),
+            PromptAssembly(()),
+            [ChatMessageRequest(role="user", content="读取两个目标")],
+            None,
+            registry,
+            ToolContext(Path(".")),
+        )
+    ]
+
+    assert execution_starts == ["first", "second"]
+    completed = [event for event in events if event.type == "tool_completed"]
+    assert [event.tool_call_id for event in completed] == [
+        "call-first",
+        "call-second",
+    ]
+    protocol_results = [
+        event.metadata["message"]
+        for event in events
+        if event.type == "protocol_message"
+        and event.metadata["message"]["role"] == "tool"
+    ]
+    assert [message["toolCallId"] for message in protocol_results] == [
+        "call-first",
+        "call-second",
+    ]
+
+
+async def _assert_unsafe_tool_is_an_ordering_barrier() -> None:
+    turn_number = 0
+    activity: list[str] = []
+    first_read_active = False
+    write_finished = False
+
+    async def complete_turn(*_args):
+        nonlocal turn_number
+        turn_number += 1
+        if turn_number == 1:
+            return ProviderTurn(
+                content="读取、写入、再读取。",
+                reasoning="",
+                model="test-model",
+                usage=TokenUsageResponse(
+                    promptTokens=10,
+                    completionTokens=3,
+                    totalTokens=13,
+                ),
+                tool_calls=(
+                    ProviderToolCall(
+                        "read-before", "safe_read", '{"phase":"before"}'
+                    ),
+                    ProviderToolCall("write", "unsafe_write", "{}"),
+                    ProviderToolCall(
+                        "read-after", "safe_read", '{"phase":"after"}'
+                    ),
+                ),
+            )
+        return ProviderTurn(
+            content="执行完成。",
+            reasoning="",
+            model="test-model",
+            usage=TokenUsageResponse(
+                promptTokens=20,
+                completionTokens=2,
+                totalTokens=22,
+            ),
+            tool_calls=(),
+        )
+
+    async def read(_context, data):
+        nonlocal first_read_active
+        phase = str(data["phase"])
+        if phase == "before":
+            first_read_active = True
+            activity.append("read-before-start")
+            await asyncio.sleep(0.01)
+            activity.append("read-before-end")
+            first_read_active = False
+        else:
+            assert write_finished is True
+            activity.append("read-after")
+        return ToolResult(phase)
+
+    async def write(_context, _data):
+        nonlocal write_finished
+        assert first_read_active is False
+        activity.append("write")
+        write_finished = True
+        return ToolResult("written")
+
+    registry = ToolRegistry((
+        function_tool(
+            name="safe_read",
+            description="安全读取",
+            input_schema={
+                "type": "object",
+                "properties": {"phase": {"type": "string"}},
+                "required": ["phase"],
+                "additionalProperties": False,
+            },
+            execute=read,
+            read_only=True,
+            concurrency_safe=True,
+        ),
+        function_tool(
+            name="unsafe_write",
+            description="独占写入",
+            input_schema={
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+            execute=write,
+            read_only=True,
+            concurrency_safe=False,
+        ),
+    ))
+    _events = [
+        event
+        async for event in AgentLoopRunner(complete_turn).stream(
+            _settings(),
+            PromptAssembly(()),
+            [ChatMessageRequest(role="user", content="按顺序处理")],
+            None,
+            registry,
+            ToolContext(Path(".")),
+            permission_policy=None,
+        )
+    ]
+
+    assert activity == [
+        "read-before-start",
+        "read-before-end",
+        "write",
+        "read-after",
+    ]
+
+
+async def _assert_parallel_tool_pool_is_bounded() -> None:
+    turn_number = 0
+    started: list[int] = []
+    active = 0
+    maximum_active = 0
+    first_wave_started = asyncio.Event()
+    release_first_wave = asyncio.Event()
+
+    async def complete_turn(*_args):
+        nonlocal turn_number
+        turn_number += 1
+        if turn_number == 1:
+            return ProviderTurn(
+                content="并发读取四项。",
+                reasoning="",
+                model="test-model",
+                usage=TokenUsageResponse(
+                    promptTokens=10,
+                    completionTokens=4,
+                    totalTokens=14,
+                ),
+                tool_calls=tuple(
+                    ProviderToolCall(
+                        f"call-{index}",
+                        "bounded_read",
+                        f'{{"index":{index}}}',
+                    )
+                    for index in range(4)
+                ),
+            )
+        return ProviderTurn(
+            content="全部读取完成。",
+            reasoning="",
+            model="test-model",
+            usage=TokenUsageResponse(
+                promptTokens=20,
+                completionTokens=2,
+                totalTokens=22,
+            ),
+            tool_calls=(),
+        )
+
+    async def execute(_context, data):
+        nonlocal active, maximum_active
+        index = int(data["index"])
+        started.append(index)
+        active += 1
+        maximum_active = max(maximum_active, active)
+        try:
+            if index < 2:
+                if len(started) == 2:
+                    first_wave_started.set()
+                await release_first_wave.wait()
+            await asyncio.sleep(0)
+            return ToolResult(str(index))
+        finally:
+            active -= 1
+
+    registry = ToolRegistry((function_tool(
+        name="bounded_read",
+        description="有界并发读取",
+        input_schema={
+            "type": "object",
+            "properties": {"index": {"type": "integer"}},
+            "required": ["index"],
+            "additionalProperties": False,
+        },
+        execute=execute,
+        read_only=True,
+        concurrency_safe=True,
+    ),))
+
+    async def collect() -> list:
+        return [
+            event
+            async for event in AgentLoopRunner(
+                complete_turn,
+                max_parallel_tool_calls=2,
+            ).stream(
+                _settings(),
+                PromptAssembly(()),
+                [ChatMessageRequest(role="user", content="读取四项")],
+                None,
+                registry,
+                ToolContext(Path(".")),
+            )
+        ]
+
+    task = asyncio.create_task(collect())
+    await asyncio.wait_for(first_wave_started.wait(), timeout=1)
+    await asyncio.sleep(0)
+    assert started == [0, 1]
+    release_first_wave.set()
+    events = await asyncio.wait_for(task, timeout=1)
+
+    assert started == [0, 1, 2, 3]
+    assert maximum_active == 2
+    completed = [event for event in events if event.type == "tool_completed"]
+    assert [event.tool_call_id for event in completed] == [
+        "call-0",
+        "call-1",
+        "call-2",
+        "call-3",
+    ]
+
+
+async def _assert_parallel_pause_stops_pool_replenishment() -> None:
+    controls = RunControlRegistry()
+    control = controls.register("parallel-pause")
+    turn_number = 0
+    started: list[int] = []
+    first_wave_started = asyncio.Event()
+    release_started = asyncio.Event()
+
+    async def complete_turn(*_args):
+        nonlocal turn_number
+        turn_number += 1
+        return ProviderTurn(
+            content="读取三项。",
+            reasoning="",
+            model="test-model",
+            usage=TokenUsageResponse(
+                promptTokens=10,
+                completionTokens=3,
+                totalTokens=13,
+            ),
+            tool_calls=tuple(
+                ProviderToolCall(
+                    f"pause-call-{index}",
+                    "pausable_read",
+                    f'{{"index":{index}}}',
+                )
+                for index in range(3)
+            ),
+        )
+
+    async def execute(_context, data):
+        index = int(data["index"])
+        started.append(index)
+        if len(started) == 2:
+            first_wave_started.set()
+        await release_started.wait()
+        return ToolResult(str(index))
+
+    registry = ToolRegistry((function_tool(
+        name="pausable_read",
+        description="暂停并发读取",
+        input_schema={
+            "type": "object",
+            "properties": {"index": {"type": "integer"}},
+            "required": ["index"],
+            "additionalProperties": False,
+        },
+        execute=execute,
+        read_only=True,
+        concurrency_safe=True,
+    ),))
+
+    async def collect() -> list:
+        return [
+            event
+            async for event in AgentLoopRunner(
+                complete_turn,
+                max_parallel_tool_calls=2,
+            ).stream(
+                _settings(),
+                PromptAssembly(()),
+                [ChatMessageRequest(role="user", content="读取三项")],
+                None,
+                registry,
+                ToolContext(Path(".")),
+                run_control=control,
+            )
+        ]
+
+    task = asyncio.create_task(collect())
+    await asyncio.wait_for(first_wave_started.wait(), timeout=1)
+    assert await controls.pause("parallel-pause") is True
+    await asyncio.sleep(0)
+    release_started.set()
+    events = await asyncio.wait_for(task, timeout=1)
+    controls.unregister("parallel-pause", control)
+
+    assert started == [0, 1]
+    completed = [event for event in events if event.type == "tool_completed"]
+    assert [event.tool_call_id for event in completed] == [
+        "pause-call-0",
+        "pause-call-1",
+    ]
+    protocol = [
+        event.metadata["message"]
+        for event in events
+        if event.type == "protocol_message"
+    ]
+    skipped = next(
+        message
+        for message in protocol
+        if message.get("toolCallId") == "pause-call-2"
+    )
+    assert "ABORTED_BEFORE_DISPATCH" in skipped["content"]
+    assert events[-1].type == "paused"
+
+
 async def _assert_steer_is_claimed_at_model_boundary() -> None:
     controls = RunControlRegistry()
     control = controls.register("run-steer")

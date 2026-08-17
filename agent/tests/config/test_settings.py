@@ -17,6 +17,7 @@ server:
 lumora:
   startup-token: {"a" * 43}
   protocol-version: "1"
+  max-parallel-tool-calls: 4
 """,
                 encoding="utf-8",
             )
@@ -25,6 +26,7 @@ lumora:
         self.assertEqual(settings.port, 45123)
         self.assertEqual(settings.startup_token, "a" * 43)
         self.assertEqual(settings.protocol_version, "1")
+        self.assertEqual(settings.max_parallel_tool_calls, 4)
 
     def test_rejects_invalid_port_range(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

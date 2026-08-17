@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentRunSummary } from "../../src/renderer/features/tasks/AgentRunSummary";
@@ -200,6 +200,37 @@ describe("AgentRunSummary", () => {
 
     expect(screen.getByRole("status", { name: /正在处理 5s/ })).toBeVisible();
     expect(screen.queryByText(/正在处理 0s/)).not.toBeInTheDocument();
+  });
+
+  it("catches up immediately when a running conversation is restored", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(10_000);
+      render(
+        <AgentRunSummary
+          running
+          startedAt={4_000}
+          workLog={[
+            {
+              itemId: "progress-restored-timer",
+              kind: "progress",
+              status: "running",
+              content: "正在恢复会话",
+            },
+          ]}
+        />,
+      );
+      expect(screen.getByRole("status", { name: /正在处理 6s/ })).toBeVisible();
+
+      vi.setSystemTime(18_000);
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+
+      expect(screen.getByRole("status", { name: /正在处理 14s/ })).toBeVisible();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps live details stable through provisional text and folds on completion", () => {

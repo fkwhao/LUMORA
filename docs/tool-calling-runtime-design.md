@@ -55,14 +55,17 @@ is_read_only(input)
 is_destructive(input)
 is_concurrency_safe(input)
 concurrency_key(context, input)
+resource_accesses(context, input)
 display_title(input)
 execute(context, input) -> ToolResult
 to_model_definition()
 ```
 
 风险和并发属性接收本次输入，而不是固定布尔值，因此同一个工具可以根据目标路径或
-参数调整策略。`ToolContext` 当前携带已解析的工作区路径、关联 ID 和取消检测函数；
-后续可在不污染工具输入 Schema 的情况下加入审批凭证或运行身份。
+参数调整策略。`resource_accesses` 返回本次调用的资源 key 与 READ/WRITE 模式。请求级
+Registry 副本共享同一资源锁和文件观察域，因此声明会跨 Run 生效；没有声明的非并发
+安全工具继续回退到 `concurrency_key` 独占锁。`ToolContext` 当前携带已解析的工作区路径、
+任务/关联 ID、文件观察域和取消检测函数。
 
 `ToolContext.allow_external_paths` 只会在路径沙箱审批通过后为本次调用临时开启，不能由
 模型输入。`ToolResult`：
@@ -105,8 +108,10 @@ registry.register(tool)
 2. 根据 Java 传入的名称白名单筛选真实可用工具。
 3. 从工具对象生成 OpenAI Function Calling 定义。
 4. 执行基础 JSON Schema 校验和工具语义校验。
-5. 按并发安全属性和资源 key 串行化冲突调用。
-6. 统一统计耗时并补充分类、只读、破坏性和标题 metadata。
+5. Agent Loop 按 `is_concurrency_safe(input)` 将兄弟调用划分为有界并发组和独占屏障。
+6. 按资源 READ/WRITE 声明或兼容并发 key 协调同 Run 与跨 Run 的实际冲突。
+7. 保存任务读取到的文件版本，拒绝基于陈旧观察执行完整覆盖。
+8. 统一统计耗时、资源等待并补充分类、只读、破坏性和标题 metadata。
 
 内置实现按能力拆分：`artifact_tools.py` 维护 Artifact 分段读取与搜索，
 `filesystem_tools.py` 维护工作区文件能力，`shell_tools.py` 维护子进程能力；
@@ -411,8 +416,8 @@ correlationId 恢复 Python 中对应的 Future。重复、过期、跨任务或
 - 文件执行发生在 Python 进程权限下，没有操作系统级目录隔离。
 - Shell 仍在宿主进程权限下运行；黑名单不是操作系统沙箱，必须保留自动拒绝边界、人工
   模式的 HITL 和最小权限。
-- 多工具调用当前按模型返回顺序执行；注册中心具备并发策略，但 Provider 尚未并行
-  调度同一回合的多个调用。
+- 不同 Run 可以同时执行工具并共享资源协调；同一模型响应中的显式安全调用使用默认上限
+  为 10 的滚动并发池，独占调用形成屏障，所有结果按模型返回顺序提交。
 
 项目共享配置属于仓库输入；克隆不受信任项目时应检查其中的 allow 规则。即使项目规则
 恶意放行，硬黑名单、路径沙箱和任意层 deny 仍不可绕过。
@@ -422,7 +427,7 @@ correlationId 恢复 Python 中对应的 Future。重复、过期、跨任务或
 1. 定义最小且关闭 `additionalProperties` 的输入 Schema。
 2. 使用 `validate` 表达 Schema 无法覆盖的业务约束。
 3. 正确声明分类、只读、破坏性和并发属性。
-4. 对共享资源提供稳定的 `concurrency_key`。
+4. 对工作区或文件资源提供稳定的 `resource_accesses`；兼容工具至少提供 `concurrency_key`。
 5. 限制输入、执行时间和输出体积。
 6. 确保敏感信息不进入 content、metadata、异常或日志。
 7. 用 `function_tool(...)` 创建并注册；不要在 Java 或 Prompt 复制 Schema。
