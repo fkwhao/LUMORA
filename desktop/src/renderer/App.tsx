@@ -458,6 +458,8 @@ function ConnectedApp({
           skillApi={skillApi}
           workspacePath={activeTask ? taskProjectPaths[activeTask.taskId] : undefined}
           archivedTasks={archivedTasks}
+          taskProjectPaths={taskProjectPaths}
+          projectNames={projectNames}
           notify={notify}
           onBack={() =>
             navigateTo({ view: "work", taskId: activeTask?.taskId })

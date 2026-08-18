@@ -1,7 +1,11 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { App } from "../../src/renderer/App";
+import {
+  PROJECT_NAMES_STORAGE_KEY,
+  TASK_PROJECT_PATHS_STORAGE_KEY,
+} from "../../src/renderer/constants/storage";
 import type {
   LumoraTaskApi,
   TaskSnapshot,
@@ -26,6 +30,14 @@ const tasks: TaskSummary[] = [
 describe("task archive flow", () => {
   it("archives from the task row and manages tasks in settings", async () => {
     localStorage.clear();
+    localStorage.setItem(
+      TASK_PROJECT_PATHS_STORAGE_KEY,
+      JSON.stringify({ "task-archive-1": "F:\\project\\LUMORA" }),
+    );
+    localStorage.setItem(
+      PROJECT_NAMES_STORAGE_KEY,
+      JSON.stringify({ "F:\\project\\LUMORA": "LUMORA" }),
+    );
     const api = createApi();
     render(<App api={api} />);
 
@@ -49,11 +61,22 @@ describe("task archive flow", () => {
       screen.getByRole("button", { name: /已归档任务/ }),
     );
 
-    expect(screen.getByText("整理项目文档")).toBeVisible();
-    expect(screen.getByText("检查代码规范")).toBeVisible();
+    expect(
+      screen.getByRole("combobox", { name: "筛选归档项目" }),
+    ).toBeVisible();
+    const projectGroup = screen.getByRole("region", {
+      name: "归档项目：LUMORA",
+    });
+    const unscopedGroup = screen.getByRole("region", {
+      name: "归档项目：无项目",
+    });
+    expect(within(projectGroup).getByText("整理项目文档")).toBeVisible();
+    expect(within(projectGroup).getByText("1 个任务")).toBeVisible();
+    expect(within(unscopedGroup).getByText("检查代码规范")).toBeVisible();
+    expect(within(unscopedGroup).getByText("1 个任务")).toBeVisible();
 
     fireEvent.click(
-      screen.getAllByRole("button", { name: "取消归档" })[0]!,
+      within(projectGroup).getByRole("button", { name: "取消归档" }),
     );
     expect(screen.queryByText("整理项目文档")).not.toBeInTheDocument();
 

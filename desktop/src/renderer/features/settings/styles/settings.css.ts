@@ -432,6 +432,11 @@ globalStyle(".settings-actions button:disabled", {
 
 globalStyle(".archived-settings", {
   padding: "0 56px 70px",
+  "@media": {
+    "(max-width: 1120px)": {
+      padding: "0 32px 56px",
+    },
+  },
 });
 
 globalStyle(".archived-header", {
@@ -481,8 +486,16 @@ globalStyle(".archive-manager", {
   margin: "0 auto",
 });
 
+globalStyle(".archive-toolbar", {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) 190px",
+  alignItems: "center",
+  gap: "12px",
+});
+
 globalStyle(".archive-search", {
   display: "grid",
+  minWidth: "0",
   gridTemplateColumns: "auto 1fr",
   height: "39px",
   alignItems: "center",
@@ -511,32 +524,84 @@ globalStyle(".archive-search input", {
   fontSize: "11px",
 });
 
-globalStyle(".archive-list", {
-  marginTop: "18px",
-  overflow: "hidden",
-  border: "1px solid #dfe3e8",
-  borderRadius: "13px",
+globalStyle(".archive-project-filter", {
+  width: "190px",
+  height: "39px",
+  padding: "0 11px",
+  color: "#4c535c",
+  borderColor: "#dce1e7",
+  borderRadius: "10px",
   background: "#fff",
-  boxShadow: "0 12px 34px rgb(47 58 73 / 6%)",
+  fontSize: "10.5px",
 });
 
-globalStyle(".archive-list-heading", {
+globalStyle(".archive-project-filter:hover:not(:disabled)", {
+  borderColor: "#c9cfd7",
+  background: "#fafbfc",
+});
+
+globalStyle(".archive-project-filter-content", {
+  minWidth: "190px",
+  padding: "5px",
+  borderRadius: "11px",
+});
+
+globalStyle(".archive-project-filter-option", {
+  minHeight: "31px",
+  padding: "0 30px 0 9px",
+  fontSize: "10px",
+});
+
+globalStyle(".archive-groups", {
+  display: "grid",
+  gap: "28px",
+  marginTop: "24px",
+});
+
+globalStyle(".archive-project-group", {
+  minWidth: "0",
+});
+
+globalStyle(".archive-project-heading", {
   display: "flex",
-  minHeight: "42px",
+  minHeight: "30px",
   alignItems: "center",
   justifyContent: "space-between",
-  padding: "0 15px",
-  color: "#656d78",
-  borderBottom: "1px solid #e5e8ec",
-  background: "#f8f9fb",
-  fontSize: "10px",
-  fontWeight: "650",
+  gap: "14px",
+  padding: "0 5px",
 });
 
-globalStyle(".archive-list-heading small", {
-  color: "#9299a3",
-  fontSize: "9px",
-  fontWeight: "500",
+globalStyle(".archive-project-heading > div", {
+  display: "flex",
+  minWidth: "0",
+  alignItems: "center",
+  gap: "8px",
+  color: "#555d67",
+});
+
+globalStyle(".archive-project-heading strong", {
+  overflow: "hidden",
+  color: "#272c33",
+  fontSize: "11.5px",
+  fontWeight: "650",
+  letterSpacing: "-0.01em",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(".archive-project-heading small", {
+  flexShrink: "0",
+  color: "#8c939d",
+  fontSize: "9.5px",
+});
+
+globalStyle(".archive-list", {
+  marginTop: "8px",
+  overflow: "hidden",
+  border: "1px solid #dfe3e8",
+  borderRadius: "14px",
+  background: "#fff",
+  boxShadow: "0 8px 24px rgb(47 58 73 / 4%)",
 });
 
 globalStyle(".archive-task-row", {
@@ -620,7 +685,7 @@ globalStyle(".archive-empty", {
   minHeight: "300px",
   placeContent: "center",
   justifyItems: "center",
-  marginTop: "18px",
+  marginTop: "24px",
   color: "#7c8590",
   border: "1px dashed #d7dce2",
   borderRadius: "13px",

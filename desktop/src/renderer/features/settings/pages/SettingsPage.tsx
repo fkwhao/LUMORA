@@ -8,6 +8,7 @@ import {
   CircleCheck,
   Eye,
   EyeOff,
+  Folder,
   LockKeyhole,
   Palette,
   UserRound,
@@ -20,7 +21,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type {
   ApiFormat,
@@ -62,6 +63,8 @@ interface SettingsPageProps {
   skillApi?: LumoraSkillApi;
   workspacePath?: string;
   archivedTasks: TaskSummary[];
+  taskProjectPaths?: Record<string, string>;
+  projectNames?: Record<string, string>;
   onBack(): void;
   onRestoreTask(taskId: string): void;
   onDeleteTask(taskId: string): void;
@@ -93,6 +96,8 @@ export function SettingsPage({
   skillApi,
   workspacePath,
   archivedTasks,
+  taskProjectPaths = {},
+  projectNames = {},
   onBack,
   onRestoreTask,
   onDeleteTask,
@@ -120,9 +125,6 @@ export function SettingsPage({
     normalizedSettingsQuery,
   );
   const showArchived = "已归档任务".includes(normalizedSettingsQuery);
-  const filteredArchivedTasks = archivedTasks.filter((task) =>
-    task.goal.toLowerCase().includes(archiveQuery.trim().toLowerCase()),
-  );
 
   function confirmDelete() {
     if (!pendingDelete) {
@@ -239,8 +241,10 @@ export function SettingsPage({
         ) : (
           <ArchivedTasksPanel
             query={archiveQuery}
-            tasks={filteredArchivedTasks}
+            tasks={archivedTasks}
             totalCount={archivedTasks.length}
+            taskProjectPaths={taskProjectPaths}
+            projectNames={projectNames}
             onQueryChange={setArchiveQuery}
             onRestore={(taskId) => {
               onRestoreTask(taskId);
@@ -297,6 +301,8 @@ interface ArchivedTasksPanelProps {
   tasks: TaskSummary[];
   totalCount: number;
   query: string;
+  taskProjectPaths: Record<string, string>;
+  projectNames: Record<string, string>;
   onQueryChange(value: string): void;
   onRestore(taskId: string): void;
   onDelete(taskId: string): void;
@@ -307,11 +313,48 @@ function ArchivedTasksPanel({
   tasks,
   totalCount,
   query,
+  taskProjectPaths,
+  projectNames,
   onQueryChange,
   onRestore,
   onDelete,
   onDeleteAll,
 }: ArchivedTasksPanelProps) {
+  const groups = useMemo(
+    () => createArchivedTaskGroups(tasks, taskProjectPaths, projectNames),
+    [projectNames, taskProjectPaths, tasks],
+  );
+  const [selectedProjectKey, setSelectedProjectKey] = useState(
+    ALL_ARCHIVED_PROJECTS_KEY,
+  );
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const visibleGroups = groups
+    .filter(
+      (group) =>
+        selectedProjectKey === ALL_ARCHIVED_PROJECTS_KEY ||
+        group.key === selectedProjectKey,
+    )
+    .map((group) => ({
+      ...group,
+      tasks:
+        normalizedQuery &&
+        !group.name.toLocaleLowerCase().includes(normalizedQuery)
+          ? group.tasks.filter((task) =>
+              task.goal.toLocaleLowerCase().includes(normalizedQuery),
+            )
+          : group.tasks,
+    }))
+    .filter((group) => group.tasks.length > 0);
+
+  useEffect(() => {
+    if (
+      selectedProjectKey !== ALL_ARCHIVED_PROJECTS_KEY &&
+      !groups.some((group) => group.key === selectedProjectKey)
+    ) {
+      setSelectedProjectKey(ALL_ARCHIVED_PROJECTS_KEY);
+    }
+  }, [groups, selectedProjectKey]);
+
   return (
     <main className="settings-layout archived-settings">
       <header className="archived-header">
@@ -332,13 +375,51 @@ function ArchivedTasksPanel({
       </header>
 
       <section className="archive-manager">
-        <SettingsSearchInput
-          ariaLabel="搜索已归档任务"
-          className="archive-search"
-          placeholder="搜索已归档任务"
-          value={query}
-          onChange={onQueryChange}
-        />
+        <div className="archive-toolbar">
+          <SettingsSearchInput
+            ariaLabel="搜索已归档任务"
+            className="archive-search"
+            placeholder="搜索已归档任务"
+            value={query}
+            onChange={onQueryChange}
+          />
+          <Select
+            value={selectedProjectKey}
+            onValueChange={(nextValue) => {
+              if (nextValue) setSelectedProjectKey(nextValue);
+            }}
+          >
+            <SelectTrigger
+              className="archive-project-filter"
+              aria-label="筛选归档项目"
+              disabled={totalCount === 0}
+            >
+              <Folder size={15} strokeWidth={1.65} />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent
+              className="archive-project-filter-content"
+              align="end"
+              alignItemWithTrigger={false}
+            >
+              <SelectItem
+                className="archive-project-filter-option"
+                value={ALL_ARCHIVED_PROJECTS_KEY}
+              >
+                所有项目
+              </SelectItem>
+              {groups.map((group) => (
+                <SelectItem
+                  className="archive-project-filter-option"
+                  value={group.key}
+                  key={group.key}
+                >
+                  {group.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
         {totalCount === 0 ? (
           <div className="archive-empty">
@@ -346,46 +427,110 @@ function ArchivedTasksPanel({
             <strong>没有已归档任务</strong>
             <p>在应用侧边栏悬停任务，点击归档图标后会显示在这里。</p>
           </div>
-        ) : tasks.length === 0 ? (
+        ) : visibleGroups.length === 0 ? (
           <div className="archive-empty compact">
             <strong>没有匹配的归档任务</strong>
           </div>
         ) : (
-          <div className="archive-list">
-            <div className="archive-list-heading">
-              <span>本地任务</span>
-              <small>{tasks.length} 个任务</small>
-            </div>
-            {tasks.map((task) => (
-              <article className="archive-task-row" key={task.taskId}>
-                <div>
-                  <strong>{task.goal}</strong>
-                  <small>{formatTaskTime(task.updatedAt)}</small>
+          <div className="archive-groups">
+            {visibleGroups.map((group) => (
+              <section
+                className="archive-project-group"
+                aria-label={`归档项目：${group.name}`}
+                key={group.key}
+              >
+                <header className="archive-project-heading" title={group.path}>
+                  <div>
+                    <Folder size={16} strokeWidth={1.65} />
+                    <strong>{group.name}</strong>
+                  </div>
+                  <small>{group.tasks.length} 个任务</small>
+                </header>
+                <div className="archive-list">
+                  {group.tasks.map((task) => (
+                    <article className="archive-task-row" key={task.taskId}>
+                      <div>
+                        <strong>{task.goal}</strong>
+                        <small>{formatTaskTime(task.updatedAt)}</small>
+                      </div>
+                      <button
+                        className="archive-delete"
+                        type="button"
+                        aria-label={`删除归档任务：${task.goal}`}
+                        title="删除"
+                        onClick={() => onDelete(task.taskId)}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                      <button
+                        className="archive-restore"
+                        type="button"
+                        onClick={() => onRestore(task.taskId)}
+                      >
+                        <RotateCcw size={14} />
+                        取消归档
+                      </button>
+                    </article>
+                  ))}
                 </div>
-                <button
-                  className="archive-delete"
-                  type="button"
-                  aria-label={`删除归档任务：${task.goal}`}
-                  title="删除"
-                  onClick={() => onDelete(task.taskId)}
-                >
-                  <Trash2 size={15} />
-                </button>
-                <button
-                  className="archive-restore"
-                  type="button"
-                  onClick={() => onRestore(task.taskId)}
-                >
-                  <RotateCcw size={14} />
-                  取消归档
-                </button>
-              </article>
+              </section>
             ))}
           </div>
         )}
       </section>
     </main>
   );
+}
+
+interface ArchivedTaskGroup {
+  key: string;
+  name: string;
+  path?: string;
+  tasks: TaskSummary[];
+}
+
+const ALL_ARCHIVED_PROJECTS_KEY = "__all_archived_projects__";
+const NO_ARCHIVED_PROJECT_KEY = "__no_archived_project__";
+
+function createArchivedTaskGroups(
+  tasks: TaskSummary[],
+  taskProjectPaths: Record<string, string>,
+  projectNames: Record<string, string>,
+): ArchivedTaskGroup[] {
+  const projectGroups = new Map<string, ArchivedTaskGroup>();
+  const unscopedTasks: TaskSummary[] = [];
+
+  for (const task of tasks) {
+    const path = taskProjectPaths[task.taskId];
+    if (!path) {
+      unscopedTasks.push(task);
+      continue;
+    }
+    const group = projectGroups.get(path) ?? {
+      key: path,
+      path,
+      name: projectNames[path] ?? projectNameFromPath(path),
+      tasks: [],
+    };
+    group.tasks.push(task);
+    projectGroups.set(path, group);
+  }
+
+  const groups = [...projectGroups.values()].sort((left, right) =>
+    left.name.localeCompare(right.name, "zh-CN"),
+  );
+  if (unscopedTasks.length > 0) {
+    groups.push({
+      key: NO_ARCHIVED_PROJECT_KEY,
+      name: "无项目",
+      tasks: unscopedTasks,
+    });
+  }
+  return groups;
+}
+
+function projectNameFromPath(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 }
 
 function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {

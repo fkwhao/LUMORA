@@ -105,7 +105,7 @@ globalStyle(
 );
 
 globalStyle(
-  '[data-theme="dark"] .settings-search,\n[data-theme="dark"] .history-search,\n[data-theme="dark"] .archive-search,\n[data-theme="dark"] .settings-form-grid input,\n[data-theme="dark"] .settings-form-grid select',
+  '[data-theme="dark"] .settings-search,\n[data-theme="dark"] .history-search,\n[data-theme="dark"] .archive-search,\n[data-theme="dark"] .archive-project-filter,\n[data-theme="dark"] .settings-form-grid input,\n[data-theme="dark"] .settings-form-grid select',
   {
     color: "var(--ink)",
     borderColor: "var(--appearance-line, var(--line-strong))",
@@ -138,7 +138,7 @@ globalStyle(
 );
 
 globalStyle(
-  '[data-theme="dark"] .settings-card-heading,\n[data-theme="dark"] .settings-actions,\n[data-theme="dark"] .archive-list-heading',
+  '[data-theme="dark"] .settings-card-heading,\n[data-theme="dark"] .settings-actions',
   {
     borderColor: "var(--appearance-line, var(--line))",
     background: "var(--surface-soft)",
@@ -162,7 +162,7 @@ globalStyle('[data-theme="dark"] .archive-task-row:hover', {
 });
 
 globalStyle(
-  '[data-theme="dark"] .archive-task-row strong,\n[data-theme="dark"] .archive-empty strong,\n[data-theme="dark"] .settings-unavailable strong',
+  '[data-theme="dark"] .archive-task-row strong,\n[data-theme="dark"] .archive-project-heading strong,\n[data-theme="dark"] .archive-empty strong,\n[data-theme="dark"] .settings-unavailable strong',
   {
     color: "var(--ink)",
   },
