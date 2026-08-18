@@ -40,7 +40,8 @@ public class ConversationInputController {
             @Valid @RequestBody CreateConversationInputRequest request
     ) {
         return ConversationInputResponse.from(runCoordinator.enqueueInput(
-                taskId, request.content(), request.target(), request.model(),
+                taskId, request.content(), request.attachments(),
+                request.target(), request.model(),
                 request.reasoningEffort(), request.workspacePath(),
                 request.permissionMode(), request.position()
         ));
@@ -53,7 +54,8 @@ public class ConversationInputController {
             @Valid @RequestBody UpdateConversationInputRequest request
     ) {
         return ConversationInputResponse.from(runCoordinator.updateInput(
-                taskId, inputId, request.content(), request.target(),
+                taskId, inputId, request.content(), request.attachments(),
+                request.target(),
                 request.model(), request.reasoningEffort(),
                 request.workspacePath(), request.permissionMode(),
                 request.position()

@@ -67,7 +67,11 @@ export interface TaskState {
   isDecidingToolApproval: boolean;
   loadRecentTasks(): Promise<void>;
   openTask(taskId: string): Promise<void>;
-  createTask(goal: string, projectPath?: string): Promise<TaskSnapshot>;
+  createTask(
+    goal: string,
+    projectPath?: string,
+    options?: ChatRequestOptions,
+  ): Promise<TaskSnapshot>;
   sendMessage(content: string, options?: ChatRequestOptions): Promise<void>;
   enqueueInput(
     content: string,
@@ -529,7 +533,7 @@ export function createTaskStore(
       }
     },
 
-    async createTask(goal, projectPath) {
+    async createTask(goal, projectPath, options) {
       openTaskRequest += 1;
       const normalizedGoal = goal.trim();
       if (!normalizedGoal) {
@@ -582,7 +586,10 @@ export function createTaskStore(
         }
         saveArchivedTaskIds(get().archivedTaskIds);
         saveDeletedTaskIds(get().deletedTaskIds);
-        await get().sendMessage(normalizedGoal);
+        await get().sendMessage(normalizedGoal, {
+          ...options,
+          workspacePath: options?.workspacePath ?? projectPath,
+        });
         return task;
       } catch (error) {
         const message = toErrorMessage(error);
@@ -607,6 +614,7 @@ export function createTaskStore(
         runtimeId: createOptimisticMessageId(),
         role: "user",
         content: normalizedContent,
+        attachments: options?.attachments,
         createdAt: new Date().toISOString(),
       };
       const messages = [
@@ -1052,6 +1060,8 @@ export function createTaskStore(
         {
           ...currentMessages[targetIndex],
           content: normalizedContent,
+          attachments:
+            options?.attachments ?? currentMessages[targetIndex]?.attachments,
           createdAt: new Date().toISOString(),
         },
         {

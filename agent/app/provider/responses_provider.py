@@ -10,6 +10,7 @@ from app.dto.response.chat_completion_response import TokenUsageResponse
 from app.harness.contracts import ProviderToolCall, ProviderTurn, ProviderTurnEvent
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.prompt.prompt_loader import PromptLoader
+from app.provider.attachment_content import responses_attachment_blocks
 from app.provider.hosted_web_search import (
     ProviderWebSearch,
     responses_web_searches,
@@ -622,7 +623,14 @@ def _responses_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             })
             continue
         content = message.get("content")
-        if content:
+        attachments = list(message.get("attachments") or [])
+        if attachments:
+            blocks: list[dict[str, Any]] = []
+            if content:
+                blocks.append({"type": "input_text", "text": str(content)})
+            blocks.extend(responses_attachment_blocks(attachments))
+            items.append({"role": role, "content": blocks})
+        elif content:
             items.append({"role": role, "content": str(content)})
         for raw_call in message.get("tool_calls") or []:
             function = raw_call.get("function") or {}

@@ -1,6 +1,8 @@
 package com.lumora.core.conversation.api.dto.response;
 
 import java.time.Instant;
+import java.util.List;
+import com.lumora.core.conversation.domain.model.MessageAttachment;
 
 public class ConversationMessageResponse {
 
@@ -12,6 +14,7 @@ public class ConversationMessageResponse {
     private final boolean usageRecordOnly;
     private final String role;
     private final String content;
+    private final List<MessageAttachment> attachments;
     private final String model;
     private final TokenUsageResponse usage;
     private final int activeContextTokens;
@@ -28,6 +31,7 @@ public class ConversationMessageResponse {
             boolean usageRecordOnly,
             String role,
             String content,
+            List<MessageAttachment> attachments,
             String model,
             TokenUsageResponse usage,
             int activeContextTokens,
@@ -43,6 +47,7 @@ public class ConversationMessageResponse {
         this.usageRecordOnly = usageRecordOnly;
         this.role = role;
         this.content = content;
+        this.attachments = List.copyOf(attachments);
         this.model = model;
         this.usage = usage;
         this.activeContextTokens = Math.max(0, activeContextTokens);
@@ -71,6 +76,8 @@ public class ConversationMessageResponse {
     public String getContent() {
         return content;
     }
+
+    public List<MessageAttachment> getAttachments() { return attachments; }
 
     public String getModel() {
         return model;

@@ -14,6 +14,7 @@ import com.lumora.core.conversation.domain.model.ChatMessage;
 import com.lumora.core.conversation.domain.model.ChatStreamEvent;
 import com.lumora.core.conversation.domain.model.ChatStreamEventType;
 import com.lumora.core.conversation.domain.model.TokenUsage;
+import com.lumora.core.conversation.domain.model.MessageAttachment;
 import com.lumora.core.task.application.service.TaskService;
 import com.lumora.core.memory.application.service.MemoryService;
 import lombok.RequiredArgsConstructor;
@@ -72,10 +73,19 @@ public class ConversationPersistenceService {
             String content,
             String workspacePath
     ) {
+        return prepareNewMessage(taskId, content, List.of(), workspacePath);
+    }
+
+    public synchronized ConversationRunContext prepareNewMessage(
+            String taskId,
+            String content,
+            List<MessageAttachment> attachments,
+            String workspacePath
+    ) {
         // 用户消息和后续模型上下文必须在同一事务内生成，避免消息已落库但上下文不完整。
         ConversationRunContext context = transactionTemplate.execute(
                 status -> prepareNewMessageInTransaction(
-                        taskId, content, workspacePath
+                        taskId, content, attachments, workspacePath
                 )
         );
         if (context == null) {
@@ -98,12 +108,25 @@ public class ConversationPersistenceService {
             String content,
             String workspacePath
     ) {
+        return prepareRegeneration(
+                taskId, messageId, content, List.of(), workspacePath
+        );
+    }
+
+    public synchronized ConversationRunContext prepareRegeneration(
+            String taskId,
+            String messageId,
+            String content,
+            List<MessageAttachment> attachments,
+            String workspacePath
+    ) {
         // 重新生成会删除旧回答，必须和用户消息更新保持原子性。
         ConversationRunContext context = transactionTemplate.execute(
                 status -> prepareRegenerationInTransaction(
                         taskId,
                         messageId,
                         content,
+                        attachments,
                         workspacePath
                 )
         );
@@ -281,6 +304,7 @@ public class ConversationPersistenceService {
     private ConversationRunContext prepareNewMessageInTransaction(
             String taskId,
             String content,
+            List<MessageAttachment> attachments,
             String workspacePath
     ) {
         // 1. 确认任务存在，并取得任务唯一会话。
@@ -300,6 +324,7 @@ public class ConversationPersistenceService {
                         .getMessageId(),
                 history.size() + 1,
                 content,
+                attachments,
                 now
         );
         messageMapper.insert(userMessage);
@@ -322,6 +347,7 @@ public class ConversationPersistenceService {
             String taskId,
             String messageId,
             String content,
+            List<MessageAttachment> attachments,
             String workspacePath
     ) {
         // 1. 找到并校验允许编辑的最后一条用户消息。
@@ -339,7 +365,9 @@ public class ConversationPersistenceService {
         Instant now = clock.instant();
         deactivateAfter(conversation.getConversationId(), target);
         ConversationMessage currentUser = target;
-        if (!target.getContent().equals(content)) {
+        String attachmentsJson = MessageAttachmentJson.encode(attachments);
+        if (!target.getContent().equals(content)
+                || !attachmentsJson.equals(target.getAttachmentsJson())) {
             target.setActivePath(false);
             messageMapper.updateById(target);
             currentUser = newUserMessage(
@@ -348,6 +376,7 @@ public class ConversationPersistenceService {
                     target.getParentMessageId(),
                     target.getMessageDepth(),
                     content,
+                    attachments,
                     now
             );
             messageMapper.insert(currentUser);
@@ -516,6 +545,7 @@ public class ConversationPersistenceService {
                 parent.getMessageId(),
                 parent.getMessageDepth() + 1,
                 content.trim(),
+                List.of(),
                 now
         );
         messageMapper.insert(message);
@@ -850,6 +880,7 @@ public class ConversationPersistenceService {
             String parentMessageId,
             int messageDepth,
             String content,
+            List<MessageAttachment> attachments,
             Instant now
     ) {
         ConversationMessage message = new ConversationMessage(
@@ -865,6 +896,7 @@ public class ConversationPersistenceService {
                 now
         );
         message.setParentMessageId(parentMessageId);
+        message.setAttachmentsJson(MessageAttachmentJson.encode(attachments));
         message.setMessageDepth(messageDepth);
         message.setActivePath(true);
         return message;
@@ -982,7 +1014,10 @@ public class ConversationPersistenceService {
                 message.getRole().name().toLowerCase(),
                 message.getContent(),
                 message.getMessageId(),
-                message.getSequence()
+                message.getSequence(),
+                List.of(),
+                null,
+                MessageAttachmentJson.decode(message.getAttachmentsJson())
         ));
     }
 

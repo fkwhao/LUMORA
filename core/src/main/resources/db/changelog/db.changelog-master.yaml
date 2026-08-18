@@ -235,3 +235,12 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 027-conversation-attachment-references
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V27__conversation_attachment_references.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

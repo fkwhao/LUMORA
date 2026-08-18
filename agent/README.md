@@ -7,7 +7,7 @@ Python 3.12 Agent 推理与编排运行时。
 - Agent Harness、动态计划、模型—工具循环和上下文压缩。
 - Chat Completions、OpenAI Responses、Anthropic Messages 三种协议适配，
   对话流式响应、TokenUsage 归一化和模型设置。
-- 文件、Shell、Artifact 与远程 MCP 工具注册、结果保护和权限执行。
+- 文件、PDF 分页读取/检索、Shell、Artifact 与远程 MCP 工具注册、结果保护和权限执行。
 - 确定性权限分级、自动审批 Reviewer 和人工审批暂停/恢复。
 - Responses 与 Anthropic 的供应商托管 Web Search 事件和来源转换。
 - 通过 REST/SSE 接收 Java 的会话请求并返回统一运行事件。
@@ -57,6 +57,10 @@ app/main.py            FastAPI 与 Uvicorn 生命周期
 文件级资源协调：读取可共享，同文件写入独占，Shell 在调用期间作为工作区屏障。完整文件
 覆盖还会校验该任务最后读取的版本，避免另一个任务修改后被旧内容覆盖。设计边界见
 [任务并发与资源感知设计](../docs/cross-task-concurrency-design.md)。
+
+PDF 附件通过当前 Run 的 `attachmentId` 暴露给 `read_pdf` 和 `search_pdf`，不把任意绝对路径
+开放给模型。解析结果只进入当前工具结果，不建立向量索引、缓存文件或第二份持久化附件；
+扫描版 PDF 会明确返回需要 OCR，避免把空文本误判为已成功读取。
 
 ## 测试
 

@@ -31,6 +31,8 @@ public class ConversationMessage {
     private ChatMessageRole role;
     @TableField("content")
     private String content;
+    @TableField("attachments_json")
+    private String attachmentsJson;
     @TableField("model")
     private String model;
     @TableField("prompt_tokens")
@@ -111,6 +113,7 @@ public class ConversationMessage {
         this.sequence = sequence;
         this.role = role;
         this.content = content;
+        this.attachmentsJson = "[]";
         this.model = model;
         this.promptTokens = promptTokens;
         this.completionTokens = completionTokens;
@@ -177,6 +180,11 @@ public class ConversationMessage {
 
     public void setContent(String content) {
         this.content = content;
+    }
+
+    public String getAttachmentsJson() { return attachmentsJson; }
+    public void setAttachmentsJson(String attachmentsJson) {
+        this.attachmentsJson = attachmentsJson == null ? "[]" : attachmentsJson;
     }
 
     public String getModel() {

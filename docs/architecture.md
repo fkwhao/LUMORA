@@ -26,6 +26,9 @@ Python Agent Runtime
 - Preload 只暴露按业务领域划分的白名单能力。
 - Main 负责窗口生命周期、Java REST Client、SSE 重连和协议校验。
 - Renderer 不启用 Node.js 集成，也不持有后端地址和启动令牌。
+- 附件采用单副本引用：本地文件直接引用原路径，纯剪贴板图片只写入一份系统临时文件；
+  数据库仅保存元数据。PDF 通过会话附件 ID 进入本地分页读取/检索工具，不依赖模型供应商的
+  文件协议。完整生命周期见 [附件引用与模型输入设计](attachment-design.md)。
 
 ### Java Local Core
 
@@ -284,7 +287,7 @@ Python Harness 的 Tool Registry 提供名称、用途、输入 JSON Schema、�
 再按行分段读取，现有文件的局部修改通过唯一文本匹配的原子补丁完成。注册中心
 统一执行 Schema 校验、业务校验、工作区约束、并发锁和 UI metadata 装配。工具返回
 的 `content` 会反馈给模型，`metadata` 只沿 SSE 事件发送给 UI，不进入模型上下文。
-内置工具按 `planning_tools.py`、`artifact_tools.py`、`filesystem_tools.py` 和
+内置工具按 `planning_tools.py`、`artifact_tools.py`、`pdf_tools.py`、`filesystem_tools.py` 和
 `shell_tools.py` 分能力维护，
 `default_registry.py` 只按稳定顺序装配；`tool_runtime.py` 保留旧导入兼容入口。破坏性属性
 同时用于审计、界面表达和执行前权限审批，不能只依赖 Prompt 或标记本身阻止危险操作。

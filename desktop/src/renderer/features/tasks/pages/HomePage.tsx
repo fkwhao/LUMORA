@@ -9,11 +9,13 @@ import {
   Laptop,
   MoreHorizontal,
   Paperclip,
+  Image as ImageIcon,
   X,
 } from "lucide-react";
 import { useStore } from "zustand";
 
 import type { ProjectDirectory } from "../../../../shared/window-contract";
+import type { MessageAttachment } from "../../../../shared/attachment-contract";
 import { resizeTextarea } from "../../../utils/auto-resize-textarea";
 import { submitFormOnEnter } from "../../../utils/submit-on-enter";
 import {
@@ -36,9 +38,59 @@ const contextActions = [
   { icon: Laptop, label: "应用" },
 ];
 
+function HomeAttachmentChip({
+  attachment,
+  onRemove,
+}: {
+  attachment: MessageAttachment;
+  onRemove(): void;
+}) {
+  const [preview, setPreview] = useState<string>();
+
+  useEffect(() => {
+    let active = true;
+    if (attachment.kind !== "IMAGE") {
+      setPreview(undefined);
+      return;
+    }
+    void window.lumora.attachments.readImagePreview(attachment)
+      .then((src) => {
+        if (active) setPreview(src);
+      })
+      .catch(() => {
+        if (active) setPreview(undefined);
+      });
+    return () => {
+      active = false;
+    };
+  }, [attachment]);
+
+  return (
+    <span className="home-attachment-chip">
+      <i aria-hidden="true" className={preview ? "has-preview" : undefined}>
+        {preview
+          ? <img alt="" src={preview} />
+          : attachment.kind === "IMAGE"
+            ? <ImageIcon size={16} />
+            : <File size={16} />}
+      </i>
+      <span title={attachment.path}>{attachment.name}</span>
+      <button
+        type="button"
+        aria-label={`移除附件 ${attachment.name}`}
+        onClick={onRemove}
+      >
+        <X size={12} />
+      </button>
+    </span>
+  );
+}
+
 export function HomePage({ store, composerMotion, notify }: HomePageProps) {
   const [goal, setGoal] = useState("");
   const [contexts, setContexts] = useState<string[]>([]);
+  const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
+  const [isDraggingAttachment, setIsDraggingAttachment] = useState(false);
   const [project, setProject] = useState<ProjectDirectory | undefined>(
     loadActiveProject,
   );
@@ -52,7 +104,10 @@ export function HomePage({ store, composerMotion, notify }: HomePageProps) {
   async function submitGoal(event: React.FormEvent) {
     event.preventDefault();
     try {
-      await store.getState().createTask(goal, project?.path);
+      const content = goal.trim()
+        || (attachments.length > 0 ? "请查看这些附件。" : "");
+      if (!content) return;
+      await store.getState().createTask(content, project?.path, { attachments });
     } catch {
       // Store 已经提供面向用户的错误信息，表单无需重复处理异常。
     }
@@ -84,6 +139,24 @@ export function HomePage({ store, composerMotion, notify }: HomePageProps) {
       ? input.setAttribute("webkitdirectory", "")
       : input.removeAttribute("webkitdirectory");
     input.click();
+  }
+
+  async function addAttachmentFiles(files: File[]) {
+    const available = Math.max(0, 10 - attachments.length);
+    const selected = files.slice(0, available);
+    if (selected.length === 0) {
+      notify("一次最多添加 10 个附件");
+      return;
+    }
+    try {
+      const prepared = await Promise.all(
+        selected.map((file) => window.lumora.attachments.prepare(file)),
+      );
+      setAttachments((current) => [...current, ...prepared]);
+      notify(`已添加 ${prepared.length} 个附件`, "success");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "添加附件失败");
+    }
   }
 
   function addContext(label: string) {
@@ -143,23 +216,54 @@ export function HomePage({ store, composerMotion, notify }: HomePageProps) {
             )}
           </div>
 
-          <form className="goal-composer" onSubmit={submitGoal}>
+          <form
+            className={`goal-composer${isDraggingAttachment ? " is-dragging-attachment" : ""}`}
+            onSubmit={submitGoal}
+            onDragEnter={(event) => {
+              if (event.dataTransfer.types.includes("Files")) {
+                event.preventDefault();
+                setIsDraggingAttachment(true);
+              }
+            }}
+            onDragOver={(event) => {
+              if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+            }}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setIsDraggingAttachment(false);
+              }
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              setIsDraggingAttachment(false);
+              void addAttachmentFiles([...event.dataTransfer.files]);
+            }}
+          >
             <input
               ref={fileInput}
               className="visually-hidden"
               type="file"
               multiple
               onChange={(event) => {
-                const names = [...(event.target.files ?? [])]
-                  .slice(0, 4)
-                  .map((file) => file.name);
-                if (names.length > 0) {
-                  setContexts((items) => [...new Set([...items, ...names])]);
-                  notify(`已选择 ${names.length} 个本地资源`, "success");
-                }
+                void addAttachmentFiles([...(event.target.files ?? [])]);
                 event.target.value = "";
               }}
             />
+            {attachments.length > 0 && (
+              <div className="home-attachment-strip" aria-label="待发送附件">
+                {attachments.map((attachment) => (
+                  <HomeAttachmentChip
+                    attachment={attachment}
+                    key={attachment.attachmentId}
+                    onRemove={() => setAttachments((current) =>
+                        current.filter((item) =>
+                          item.attachmentId !== attachment.attachmentId
+                        )
+                      )}
+                  />
+                ))}
+              </div>
+            )}
             <textarea
               ref={goalInput}
               id="task-goal"
@@ -167,6 +271,12 @@ export function HomePage({ store, composerMotion, notify }: HomePageProps) {
               value={goal}
               onChange={(event) => setGoal(event.target.value)}
               onKeyDown={submitFormOnEnter}
+              onPaste={(event) => {
+                const files = [...event.clipboardData.files];
+                if (files.length === 0) return;
+                event.preventDefault();
+                void addAttachmentFiles(files);
+              }}
               placeholder="描述要完成的任务…"
               rows={4}
             />
@@ -213,7 +323,7 @@ export function HomePage({ store, composerMotion, notify }: HomePageProps) {
                 className="submit-task"
                 type="submit"
                 aria-label="开始任务"
-                disabled={!goal.trim() || isCreating}
+                disabled={(!goal.trim() && attachments.length === 0) || isCreating}
               >
                 <ArrowUp size={17} strokeWidth={2.1} />
               </button>

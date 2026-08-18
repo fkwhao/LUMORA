@@ -687,6 +687,44 @@ components:
         toolCallId:
           type: string
           maxLength: 500
+        attachments:
+          type: array
+          maxItems: 10
+          description: 附件路径引用；不包含文件字节或 Base64 持久化内容。
+          items:
+            $ref: "#/components/schemas/ChatAttachment"
+    ChatAttachment:
+      type: object
+      additionalProperties: false
+      required: [attachmentId, name, mimeType, size, path, kind, source]
+      properties:
+        attachmentId:
+          type: string
+          minLength: 1
+          maxLength: 100
+        name:
+          type: string
+          minLength: 1
+          maxLength: 260
+        mimeType:
+          type: string
+          minLength: 1
+          maxLength: 160
+        size:
+          type: integer
+          minimum: 0
+          maximum: 26214400
+        path:
+          type: string
+          minLength: 1
+          maxLength: 4000
+          description: 当前操作系统中的绝对文件路径，仅在模型请求组装时读取。
+        kind:
+          type: string
+          enum: [IMAGE, FILE]
+        source:
+          type: string
+          enum: [LOCAL_FILE, CLIPBOARD_TEMP]
     ChatToolCall:
       type: object
       additionalProperties: false

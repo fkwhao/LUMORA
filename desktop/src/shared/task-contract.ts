@@ -98,6 +98,7 @@ export interface LumoraTaskApi {
 export interface LumoraApi {
   tasks: LumoraTaskApi;
   model: LumoraModelApi;
+  attachments: LumoraAttachmentApi;
   memory: LumoraMemoryApi;
   mcp: LumoraMcpApi;
   skill: LumoraSkillApi;
@@ -110,6 +111,7 @@ declare global {
   }
 }
 import type { LumoraModelApi } from "./model-contract";
+import type { LumoraAttachmentApi } from "./attachment-contract";
 import type { LumoraMemoryApi } from "./memory-contract";
 import type { LumoraMcpApi } from "./mcp-contract";
 import type { LumoraSkillApi } from "./skill-contract";

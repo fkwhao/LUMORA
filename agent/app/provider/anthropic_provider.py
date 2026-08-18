@@ -9,6 +9,7 @@ from app.dto.response.chat_completion_response import TokenUsageResponse
 from app.harness.contracts import ProviderToolCall, ProviderTurn, ProviderTurnEvent
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.prompt.prompt_loader import PromptLoader
+from app.provider.attachment_content import anthropic_attachment_blocks
 from app.provider.hosted_web_search import (
     ProviderWebSearch,
     anthropic_web_sources,
@@ -587,6 +588,9 @@ def _anthropic_messages(
         content = message.get("content")
         if content:
             blocks.append({"type": "text", "text": str(content)})
+        blocks.extend(anthropic_attachment_blocks(
+            list(message.get("attachments") or [])
+        ))
         for raw_call in message.get("tool_calls") or []:
             function = raw_call.get("function") or {}
             arguments = str(function.get("arguments") or "{}")

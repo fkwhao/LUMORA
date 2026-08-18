@@ -62,6 +62,8 @@ export interface ListModelsInput {
   apiKey?: string;
 }
 
+import type { MessageAttachment } from "./attachment-contract";
+
 export interface ChatMessage {
   messageId?: string;
   /** Renderer-only identity kept stable while an optimistic message is persisted. */
@@ -74,6 +76,7 @@ export interface ChatMessage {
   threadMessages?: ChatMessage[];
   role: "user" | "assistant";
   content: string;
+  attachments?: MessageAttachment[];
   model?: string;
   usage?: TokenUsage;
   activeContextTokens?: number;
@@ -171,6 +174,7 @@ export interface ChatRequestOptions {
   reasoningEffort?: ReasoningEffort;
   workspacePath?: string;
   permissionMode?: PermissionMode;
+  attachments?: MessageAttachment[];
 }
 
 export type ChatStreamEventType =
@@ -269,6 +273,7 @@ export interface ConversationInput {
   target: ConversationInputTarget;
   status: ConversationInputStatus;
   content: string;
+  attachments?: MessageAttachment[];
   model: string;
   reasoningEffort: string;
   workspacePath: string;

@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { ipcMain } from "electron";
 
 import type {
@@ -14,6 +16,7 @@ import type {
   UpdateModelSettingsInput,
   ToolApprovalDecision,
 } from "../../../shared/model-contract";
+import type { MessageAttachment } from "../../../shared/attachment-contract";
 import type { ModelGateway } from "./model-gateway";
 
 export const modelIpcChannels = {
@@ -470,7 +473,55 @@ function validateChatRequestOptions(
   if (permissionMode && !permissionModes.has(permissionMode)) {
     throw new TypeError("权限模式无效");
   }
-  return { model, reasoningEffort, workspacePath, permissionMode };
+  const attachments = validateAttachments(options.attachments);
+  return {
+    model,
+    reasoningEffort,
+    workspacePath,
+    permissionMode,
+    attachments,
+  };
+}
+
+function validateAttachments(
+  value: unknown,
+): MessageAttachment[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 10) {
+    throw new TypeError("附件数量无效");
+  }
+  return value.map((raw) => {
+    if (!raw || typeof raw !== "object") throw new TypeError("附件无效");
+    const attachment = raw as Partial<MessageAttachment>;
+    const size = attachment.size ?? -1;
+    const maximumSize = attachment.kind === "IMAGE"
+      ? 20 * 1024 * 1024
+      : 25 * 1024 * 1024;
+    if (
+      typeof attachment.attachmentId !== "string" ||
+      !attachment.attachmentId.trim() ||
+      attachment.attachmentId.length > 100 ||
+      typeof attachment.name !== "string" ||
+      !attachment.name.trim() ||
+      attachment.name.length > 260 ||
+      typeof attachment.mimeType !== "string" ||
+      !attachment.mimeType.trim() ||
+      attachment.mimeType.length > 160 ||
+      typeof attachment.path !== "string" ||
+      !attachment.path.trim() ||
+      attachment.path.length > 4000 ||
+      !path.isAbsolute(attachment.path) ||
+      !Number.isSafeInteger(size) ||
+      size < 0 ||
+      size > maximumSize ||
+      (attachment.kind !== "IMAGE" && attachment.kind !== "FILE") ||
+      (attachment.source !== "LOCAL_FILE" &&
+        attachment.source !== "CLIPBOARD_TEMP")
+    ) {
+      throw new TypeError("附件引用无效");
+    }
+    return attachment as MessageAttachment;
+  });
 }
 
 function validateConversationInput(
@@ -530,6 +581,7 @@ function validateMessages(messages: ChatMessage[]): ChatMessage[] {
     return {
       role: message.role,
       content: requireText(message.content, "消息内容"),
+      attachments: validateAttachments(message.attachments),
     };
   });
 }

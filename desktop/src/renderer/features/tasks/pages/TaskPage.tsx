@@ -92,6 +92,11 @@ import { ConversationUsagePane } from "../components/ConversationUsagePane";
 import { ConversationInputQueue } from "../components/ConversationInputQueue";
 import { PlanTodoList } from "../components/PlanTodoList";
 import {
+  attachmentReferences,
+  completeAttachments,
+  lumoraAttachmentAdapter,
+} from "../attachments/lumora-attachment-adapter";
+import {
   loadContextPaneWidth,
   saveContextPaneWidth,
 } from "../../layout/context-pane-preferences";
@@ -178,6 +183,7 @@ export const TaskPage = memo(function TaskPage({
     (state) => state.lastChatDurationMs,
   );
   const [composerText, setComposerText] = useState("");
+  const [composerAttachmentCount, setComposerAttachmentCount] = useState(0);
   const [skills, setSkills] = useState<SkillSummary[]>([]);
   const [moreOpen, setMoreOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -597,6 +603,10 @@ export const TaskPage = memo(function TaskPage({
           id,
           role: message.role,
           content: message.content,
+          attachments:
+            message.role === "user"
+              ? completeAttachments(message.attachments)
+              : undefined,
           createdAt: message.createdAt
             ? new Date(message.createdAt)
             : undefined,
@@ -681,11 +691,13 @@ export const TaskPage = memo(function TaskPage({
 
   const handleNewMessage = useCallback(
     async (message: AppendMessage) => {
-      const content = textFromAppendMessage(message).trim();
+      const attachments = attachmentReferences(message.attachments);
+      const content = textFromAppendMessage(message).trim()
+        || (attachments.length > 0 ? "请查看这些附件。" : "");
       if (!content) return;
       setComposerText("");
       setComposerMenu(null);
-      if (content === "/compact") {
+      if (content === "/compact" && attachments.length === 0) {
         await store.getState().compactContext(selectedModel || undefined);
         return;
       }
@@ -702,6 +714,7 @@ export const TaskPage = memo(function TaskPage({
         model: selectedModel || undefined,
         reasoningEffort: reasoningEffort || undefined,
         permissionMode,
+        attachments,
       };
       if (shouldQueue) {
         await state.enqueueInput(content, "NEXT_TURN", options);
@@ -740,6 +753,7 @@ export const TaskPage = memo(function TaskPage({
         sourceIndex >= 0 ? sourceIndex : parentIndex + 1
       ];
       const content = textFromAppendMessage(message).trim();
+      const attachments = attachmentReferences(message.attachments);
       if (!target?.messageId || target.role !== "user" || !content) {
         notify("无法定位要编辑的消息，请刷新任务后重试", "info");
         return;
@@ -749,6 +763,7 @@ export const TaskPage = memo(function TaskPage({
           model: selectedModel || undefined,
           reasoningEffort: reasoningEffort || undefined,
           permissionMode,
+          attachments,
         });
       } catch (error) {
         notify(
@@ -781,6 +796,7 @@ export const TaskPage = memo(function TaskPage({
             model: selectedModel || undefined,
             reasoningEffort: reasoningEffort || undefined,
             permissionMode,
+            attachments: target.attachments,
           });
       } catch (error) {
         notify(
@@ -822,6 +838,7 @@ export const TaskPage = memo(function TaskPage({
     onReload: handleReloadMessage,
     onCancel: async () => store.getState().stopChat(),
     adapters: {
+      attachments: lumoraAttachmentAdapter,
       feedback: {
         submit: ({ type }) =>
           notify(type === "positive" ? "已喜欢这条回复" : "已记录反馈", "success"),
@@ -830,9 +847,23 @@ export const TaskPage = memo(function TaskPage({
     unstable_capabilities: { copy: true },
   });
 
+  useEffect(() => {
+    const composer = runtime.thread.composer;
+    const refresh = () => {
+      setComposerAttachmentCount(composer.getState().attachments.length);
+    };
+    refresh();
+    return composer.subscribe(refresh);
+  }, [runtime]);
+
   const enqueueComposerInput = useCallback(
     async () => {
-      const content = composerText.trim();
+      const composer = runtime.thread.composer;
+      const attachments = attachmentReferences(
+        composer.getState().attachments,
+      );
+      const content = composerText.trim()
+        || (attachments.length > 0 ? "请查看这些附件。" : "");
       if (!content) {
         followUpInputRef.current?.focus();
         return;
@@ -841,8 +872,9 @@ export const TaskPage = memo(function TaskPage({
         model: selectedModel || undefined,
         reasoningEffort: reasoningEffort || undefined,
         permissionMode,
+        attachments,
       });
-      runtime.thread.composer.setText("");
+      await composer.reset();
       setComposerText("");
       notify("问题已加入队列", "success");
     }, [
@@ -2005,9 +2037,15 @@ export const TaskPage = memo(function TaskPage({
             multiple
             onChange={(event) => {
               const count = event.target.files?.length ?? 0;
-              if (count > 0) {
-                notify(`已选择 ${count} 个本地资源`, "success");
-              }
+              const files = [...(event.target.files ?? [])].slice(0, 10);
+              if (files.length > 0) void Promise.all(
+                files.map((file) => runtime.thread.composer.addAttachment(file)),
+              ).then(() => notify(`已添加 ${files.length} 个附件`, "success"))
+                .catch((error) => notify(
+                  error instanceof Error ? error.message : "添加附件失败",
+                  "info",
+                ));
+              if (count > 10) notify("一次最多添加 10 个附件", "info");
               event.target.value = "";
             }}
           />
@@ -2063,7 +2101,7 @@ export const TaskPage = memo(function TaskPage({
               ));
             }}
             composerRunningActions={
-              composerText.trim() ? (
+              composerText.trim() || composerAttachmentCount > 0 ? (
                 <button
                   className="aui-composer-send inline-flex size-7 items-center justify-center rounded-full transition-transform hover:scale-[1.04] disabled:opacity-35"
                   type="button"
@@ -2180,7 +2218,7 @@ export const TaskPage = memo(function TaskPage({
               ) : null
             }
             contentRef={conversationContentRef}
-            showAttachmentButton={false}
+            showAttachmentButton
             viewportProps={{
               ref: conversationScrollRef,
               onScroll: updateActiveQuestion,

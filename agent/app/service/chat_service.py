@@ -51,7 +51,7 @@ from app.prompt.prompt_context import PromptContext
 from app.provider.token_usage import add_token_usage, empty_token_usage
 from app.service.mcp_service import to_mcp_config
 from app.skill.catalog import SkillCatalog
-from app.tool.base import ToolContext
+from app.tool.base import ToolAttachment, ToolContext
 from app.tool.default_registry import create_default_tool_registry
 from app.tool.registry import ToolRegistry
 
@@ -322,6 +322,7 @@ class ChatService:
                     correlation_id=correlation_id,
                     task_id=request.prompt_context.task_id or correlation_id,
                     artifact_store=self._artifact_store,
+                    attachments=self._tool_attachments(request),
                 )
                 if prompt.tools
                 else None
@@ -462,6 +463,7 @@ class ChatService:
         )
         registry = tool_registry or self._tool_registry
         skills = self._skill_catalog.discover(context.workspace_path)
+        attachment_tool_names = self._attachment_tool_names(request)
         registered_names = registry.names()
         base_names = set(self._tool_registry.names())
         mcp_names = tuple(
@@ -478,7 +480,12 @@ class ChatService:
                 if skills and name in registered_names
             )
             allowed_names = tuple(dict.fromkeys(
-                (*allowed_local_names, *skill_tool_names, *mcp_names)
+                (
+                    *allowed_local_names,
+                    *attachment_tool_names,
+                    *skill_tool_names,
+                    *mcp_names,
+                )
             ))
         elif context.workspace_path:
             allowed_names = tuple(
@@ -487,6 +494,7 @@ class ChatService:
             )
         else:
             allowed_names = tuple(dict.fromkeys((
+                *attachment_tool_names,
                 *(name for name in ("load_skill", "read_skill_resource")
                   if skills and name in registered_names),
                 *mcp_names,
@@ -532,10 +540,19 @@ class ChatService:
             registry = self._tool_registry.copy()
         else:
             user_skills = self._skill_catalog.discover()
+            attachment_tool_names = self._attachment_tool_names(request)
             registry = self._tool_registry.select(
                 name
-                for name in ("load_skill", "read_skill_resource")
-                if user_skills and name in self._tool_registry.names()
+                for name in (
+                    *attachment_tool_names,
+                    "load_skill",
+                    "read_skill_resource",
+                )
+                if (
+                    name in attachment_tool_names
+                    or user_skills
+                )
+                and name in self._tool_registry.names()
             )
         expose_capabilities = should_expose_capability_tools(
             self._current_user_request(request)
@@ -638,6 +655,46 @@ class ChatService:
             ),
             "",
         )
+
+    def _attachment_tool_names(
+        self,
+        request: ChatCompletionRequest,
+    ) -> tuple[str, ...]:
+        has_pdf = any(
+            attachment.mime_type.casefold() == "application/pdf"
+            for message in request.messages
+            for attachment in message.attachments
+        )
+        return (
+            ("read_pdf", "search_pdf")
+            if has_pdf
+            and {"read_pdf", "search_pdf"}.issubset(
+                self._tool_registry.names()
+            )
+            else ()
+        )
+
+    @staticmethod
+    def _tool_attachments(
+        request: ChatCompletionRequest,
+    ) -> dict[str, ToolAttachment]:
+        attachments: dict[str, ToolAttachment] = {}
+        for message in request.messages:
+            for attachment in message.attachments:
+                if attachment.mime_type.casefold() != "application/pdf":
+                    continue
+                candidate = ToolAttachment(
+                    attachment_id=attachment.attachment_id,
+                    name=attachment.name,
+                    mime_type=attachment.mime_type,
+                    path=Path(attachment.path),
+                    size=attachment.size,
+                )
+                existing = attachments.get(candidate.attachment_id)
+                if existing is not None and existing != candidate:
+                    raise ValueError("同一附件 ID 对应了不同的 PDF 引用")
+                attachments[candidate.attachment_id] = candidate
+        return attachments
 
     @staticmethod
     def _connection(

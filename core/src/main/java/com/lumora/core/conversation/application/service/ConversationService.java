@@ -3,6 +3,7 @@ package com.lumora.core.conversation.application.service;
 import com.lumora.core.conversation.domain.entity.ConversationMessage;
 import com.lumora.core.conversation.domain.model.ChatStreamEvent;
 import com.lumora.core.conversation.domain.model.ContextCompaction;
+import com.lumora.core.conversation.domain.model.MessageAttachment;
 
 import java.util.List;
 import java.util.function.Consumer;
@@ -37,9 +38,27 @@ public interface ConversationService {
      * @throws IllegalArgumentException 请求参数无效
      * @throws IllegalStateException 当前任务已有生成流程
      */
+    default void streamMessage(
+            String taskId,
+            String content,
+            String model,
+            String reasoningEffort,
+            String workspacePath,
+            String permissionMode,
+            String correlationId,
+            Consumer<ChatStreamEvent> eventConsumer,
+            Runnable completionCallback,
+            Consumer<Throwable> errorCallback
+    ) {
+        streamMessage(taskId, content, List.of(), model, reasoningEffort,
+                workspacePath, permissionMode, correlationId, eventConsumer,
+                completionCallback, errorCallback);
+    }
+
     void streamMessage(
             String taskId,
             String content,
+            List<MessageAttachment> attachments,
             String model,
             String reasoningEffort,
             String workspacePath,
@@ -63,10 +82,29 @@ public interface ConversationService {
      * @throws IllegalArgumentException 消息不存在或不是最后一条用户消息
      * @throws IllegalStateException 当前任务已有生成流程
      */
+    default void regenerateMessage(
+            String taskId,
+            String messageId,
+            String content,
+            String model,
+            String reasoningEffort,
+            String workspacePath,
+            String permissionMode,
+            String correlationId,
+            Consumer<ChatStreamEvent> eventConsumer,
+            Runnable completionCallback,
+            Consumer<Throwable> errorCallback
+    ) {
+        regenerateMessage(taskId, messageId, content, List.of(), model,
+                reasoningEffort, workspacePath, permissionMode, correlationId,
+                eventConsumer, completionCallback, errorCallback);
+    }
+
     void regenerateMessage(
             String taskId,
             String messageId,
             String content,
+            List<MessageAttachment> attachments,
             String model,
             String reasoningEffort,
             String workspacePath,

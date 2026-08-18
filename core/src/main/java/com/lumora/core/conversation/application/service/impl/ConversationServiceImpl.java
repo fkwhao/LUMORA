@@ -4,6 +4,7 @@ import com.lumora.core.conversation.domain.entity.ConversationMessage;
 import com.lumora.core.conversation.domain.model.ChatStreamEvent;
 import com.lumora.core.conversation.domain.model.ChatStreamEventType;
 import com.lumora.core.conversation.domain.model.ContextCompaction;
+import com.lumora.core.conversation.domain.model.MessageAttachment;
 import com.lumora.core.conversation.application.service.ArtifactService;
 import com.lumora.core.conversation.application.service.ConversationService;
 import com.lumora.core.conversation.application.model.ConversationRunRequest;
@@ -140,6 +141,7 @@ public class ConversationServiceImpl implements ConversationService {
     public void streamMessage(
             String taskId,
             String content,
+            List<MessageAttachment> attachments,
             String model,
             String reasoningEffort,
             String workspacePath,
@@ -150,6 +152,8 @@ public class ConversationServiceImpl implements ConversationService {
             Consumer<Throwable> errorCallback
     ) {
         String normalizedContent = requireText(content, "消息内容");
+        List<MessageAttachment> normalizedAttachments =
+                MessageAttachment.normalize(attachments);
         startGeneration(
                 taskId,
                 requireText(correlationId, "关联 ID"),
@@ -157,11 +161,16 @@ public class ConversationServiceImpl implements ConversationService {
                 reasoningEffort,
                 workspacePath,
                 permissionMode,
-                () -> persistenceService.prepareNewMessage(
-                        taskId,
-                        normalizedContent,
-                        workspacePath
-                ),
+                () -> normalizedAttachments.isEmpty()
+                        ? persistenceService.prepareNewMessage(
+                                taskId, normalizedContent, workspacePath
+                        )
+                        : persistenceService.prepareNewMessage(
+                                taskId,
+                                normalizedContent,
+                                normalizedAttachments,
+                                workspacePath
+                        ),
                 eventConsumer,
                 completionCallback,
                 errorCallback
@@ -173,6 +182,7 @@ public class ConversationServiceImpl implements ConversationService {
             String taskId,
             String messageId,
             String content,
+            List<MessageAttachment> attachments,
             String model,
             String reasoningEffort,
             String workspacePath,
@@ -184,6 +194,8 @@ public class ConversationServiceImpl implements ConversationService {
     ) {
         String normalizedMessageId = requireText(messageId, "消息 ID");
         String normalizedContent = requireText(content, "消息内容");
+        List<MessageAttachment> normalizedAttachments =
+                MessageAttachment.normalize(attachments);
         startGeneration(
                 taskId,
                 requireText(correlationId, "关联 ID"),
@@ -191,12 +203,20 @@ public class ConversationServiceImpl implements ConversationService {
                 reasoningEffort,
                 workspacePath,
                 permissionMode,
-                () -> persistenceService.prepareRegeneration(
-                        taskId,
-                        normalizedMessageId,
-                        normalizedContent,
-                        workspacePath
-                ),
+                () -> normalizedAttachments.isEmpty()
+                        ? persistenceService.prepareRegeneration(
+                                taskId,
+                                normalizedMessageId,
+                                normalizedContent,
+                                workspacePath
+                        )
+                        : persistenceService.prepareRegeneration(
+                                taskId,
+                                normalizedMessageId,
+                                normalizedContent,
+                                normalizedAttachments,
+                                workspacePath
+                        ),
                 eventConsumer,
                 completionCallback,
                 errorCallback

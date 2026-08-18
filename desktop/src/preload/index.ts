@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 import type {
   ApprovalDecisionInput,
@@ -31,8 +31,44 @@ import type { ResolvedAppearanceTheme } from "../shared/window-contract";
 import type { SaveMcpServerInput } from "../shared/mcp-contract";
 import type { LumoraSkillApi } from "../shared/skill-contract";
 import type { ProjectDirectory } from "../shared/window-contract";
+import type {
+  MaterializeClipboardImageInput,
+  MessageAttachment,
+} from "../shared/attachment-contract";
 
 const api: LumoraApi = {
+  attachments: {
+    prepare: async (file: File) => {
+      if (
+        !file ||
+        typeof file.name !== "string" ||
+        typeof file.type !== "string" ||
+        typeof file.arrayBuffer !== "function"
+      ) {
+        throw new TypeError("附件文件无效");
+      }
+      const filePath = webUtils.getPathForFile(file);
+      if (filePath) {
+        return ipcRenderer.invoke(
+          "attachments:reference-local",
+          filePath,
+          file.type,
+        );
+      }
+      if (!file.type.startsWith("image/")) {
+        throw new TypeError("只能粘贴图片；其他附件请选择本地文件");
+      }
+      const input: MaterializeClipboardImageInput = {
+        name: file.name,
+        mimeType: file.type,
+        bytes: new Uint8Array(await file.arrayBuffer()),
+      };
+      return ipcRenderer.invoke("attachments:materialize-clipboard-image", input);
+    },
+    select: () => ipcRenderer.invoke("attachments:select"),
+    readImagePreview: (attachment: MessageAttachment) =>
+      ipcRenderer.invoke("attachments:read-image-preview", attachment),
+  },
   tasks: {
     create: (goal) => ipcRenderer.invoke("tasks:create", validateGoal(goal)),
     list: () => ipcRenderer.invoke("tasks:list"),

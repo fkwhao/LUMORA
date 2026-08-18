@@ -7,6 +7,7 @@ import {
   CornerUpLeft,
   MoreHorizontal,
   Pause,
+  Paperclip,
   Pencil,
   Play,
   Trash2,
@@ -102,9 +103,17 @@ export function ConversationInputQueue({
                       onChange={(event) => setDraft(event.target.value)}
                     />
                   ) : (
-                    <p className="min-w-0 flex-1 truncate text-sm text-foreground">
-                      {input.content}
-                    </p>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm text-foreground">
+                        {input.content}
+                      </p>
+                      {(input.attachments?.length ?? 0) > 0 && (
+                        <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-muted-foreground">
+                          <Paperclip className="size-3 shrink-0" />
+                          {input.attachments!.map((item) => item.name).join("、")}
+                        </p>
+                      )}
+                    </div>
                   )}
 
                   {editing ? (
@@ -133,9 +142,15 @@ export function ConversationInputQueue({
                       <button
                         className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
                         type="button"
-                        disabled={busy || !canAdjustDirection}
+                        disabled={
+                          busy ||
+                          !canAdjustDirection ||
+                          (input.attachments?.length ?? 0) > 0
+                        }
                         title={
-                          canAdjustDirection
+                          (input.attachments?.length ?? 0) > 0
+                            ? "带附件的问题会在下一轮完整发送"
+                            : canAdjustDirection
                             ? "作为引导发送给当前运行"
                             : "当前没有可调整方向的运行"
                         }

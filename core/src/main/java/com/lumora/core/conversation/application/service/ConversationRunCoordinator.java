@@ -12,6 +12,8 @@ import com.lumora.core.conversation.domain.model.ConversationRunStatus;
 import com.lumora.core.conversation.domain.model.ConversationRunTrigger;
 import com.lumora.core.conversation.domain.model.ConversationInputStatus;
 import com.lumora.core.conversation.domain.model.ConversationInputTarget;
+import com.lumora.core.conversation.domain.model.MessageAttachment;
+import com.lumora.core.conversation.application.support.MessageAttachmentJson;
 import com.lumora.core.task.application.service.TaskService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -86,8 +88,23 @@ public class ConversationRunCoordinator {
             String permissionMode,
             String correlationId
     ) {
+        return startMessage(taskId, content, List.of(), model,
+                reasoningEffort, workspacePath, permissionMode, correlationId);
+    }
+
+    public ConversationRun startMessage(
+            String taskId,
+            String content,
+            List<MessageAttachment> attachments,
+            String model,
+            String reasoningEffort,
+            String workspacePath,
+            String permissionMode,
+            String correlationId
+    ) {
         return createAndEnqueue(
                 taskId, ConversationRunTrigger.MESSAGE, null, content,
+                attachments,
                 model, reasoningEffort, workspacePath, permissionMode,
                 correlationId
         );
@@ -103,8 +120,24 @@ public class ConversationRunCoordinator {
             String permissionMode,
             String correlationId
     ) {
+        return startRegeneration(taskId, messageId, content, List.of(), model,
+                reasoningEffort, workspacePath, permissionMode, correlationId);
+    }
+
+    public ConversationRun startRegeneration(
+            String taskId,
+            String messageId,
+            String content,
+            List<MessageAttachment> attachments,
+            String model,
+            String reasoningEffort,
+            String workspacePath,
+            String permissionMode,
+            String correlationId
+    ) {
         return createAndEnqueue(
                 taskId, ConversationRunTrigger.REGENERATE, messageId, content,
+                attachments,
                 model, reasoningEffort, workspacePath, permissionMode,
                 correlationId
         );
@@ -135,6 +168,21 @@ public class ConversationRunCoordinator {
             String permissionMode,
             Long position
     ) {
+        return enqueueInput(taskId, content, List.of(), target, model,
+                reasoningEffort, workspacePath, permissionMode, position);
+    }
+
+    public synchronized ConversationInput enqueueInput(
+            String taskId,
+            String content,
+            List<MessageAttachment> attachments,
+            ConversationInputTarget target,
+            String model,
+            String reasoningEffort,
+            String workspacePath,
+            String permissionMode,
+            Long position
+    ) {
         taskService.getTask(taskId);
         String normalizedContent = requireText(content, "消息内容");
         if (target == null) {
@@ -143,6 +191,12 @@ public class ConversationRunCoordinator {
         ConversationRun active = runStore.findActiveForTask(taskId);
         if (target == ConversationInputTarget.NEXT_STEP && active == null) {
             throw new IllegalStateException("当前没有可引导的活动运行");
+        }
+        List<MessageAttachment> normalizedAttachments =
+                MessageAttachment.normalize(attachments);
+        if (target == ConversationInputTarget.NEXT_STEP
+                && !normalizedAttachments.isEmpty()) {
+            throw new IllegalArgumentException("带附件的问题只能排到下一轮");
         }
         Instant now = clock.instant();
         ConversationInput input = new ConversationInput();
@@ -153,6 +207,9 @@ public class ConversationRunCoordinator {
         input.setTarget(target);
         input.setStatus(ConversationInputStatus.PENDING);
         input.setContent(normalizedContent);
+        input.setAttachmentsJson(MessageAttachmentJson.encode(
+                normalizedAttachments
+        ));
         input.setModel(valueOrEmpty(model));
         input.setReasoningEffort(valueOrEmpty(reasoningEffort));
         input.setWorkspacePath(valueOrEmpty(workspacePath));
@@ -185,6 +242,22 @@ public class ConversationRunCoordinator {
             String permissionMode,
             Long position
     ) {
+        return updateInput(taskId, inputId, content, null, target, model,
+                reasoningEffort, workspacePath, permissionMode, position);
+    }
+
+    public synchronized ConversationInput updateInput(
+            String taskId,
+            String inputId,
+            String content,
+            List<MessageAttachment> attachments,
+            ConversationInputTarget target,
+            String model,
+            String reasoningEffort,
+            String workspacePath,
+            String permissionMode,
+            Long position
+    ) {
         taskService.getTask(taskId);
         ConversationInput input = inputStore.requireForTask(taskId, inputId);
         if (!input.getStatus().isEditable()) {
@@ -196,6 +269,13 @@ public class ConversationRunCoordinator {
         if (nextTarget == ConversationInputTarget.NEXT_STEP
                 && active == null) {
             throw new IllegalStateException("当前没有可引导的活动运行");
+        }
+        List<MessageAttachment> nextAttachments = attachments == null
+                ? MessageAttachmentJson.decode(input.getAttachmentsJson())
+                : MessageAttachment.normalize(attachments);
+        if (nextTarget == ConversationInputTarget.NEXT_STEP
+                && !nextAttachments.isEmpty()) {
+            throw new IllegalArgumentException("带附件的问题只能排到下一轮");
         }
         String nextContent = content == null
                 ? input.getContent() : requireText(content, "消息内容");
@@ -221,6 +301,7 @@ public class ConversationRunCoordinator {
         }
 
         input.setContent(nextContent);
+        input.setAttachmentsJson(MessageAttachmentJson.encode(nextAttachments));
         input.setTarget(nextTarget);
         input.setRunId(nextTarget == ConversationInputTarget.NEXT_STEP
                 ? active.getRunId() : null);
@@ -451,6 +532,7 @@ public class ConversationRunCoordinator {
             ConversationRunTrigger trigger,
             String sourceMessageId,
             String content,
+            List<MessageAttachment> attachments,
             String model,
             String reasoningEffort,
             String workspacePath,
@@ -473,6 +555,7 @@ public class ConversationRunCoordinator {
         run.setTriggerType(trigger);
         run.setSourceMessageId(valueOrEmpty(sourceMessageId));
         run.setInputContent(normalizedContent);
+        run.setAttachmentsJson(MessageAttachmentJson.encode(attachments));
         run.setModel(valueOrEmpty(model));
         run.setReasoningEffort(valueOrEmpty(reasoningEffort));
         run.setWorkspacePath(valueOrEmpty(workspacePath));
@@ -558,6 +641,7 @@ public class ConversationRunCoordinator {
         run.setTriggerType(ConversationRunTrigger.MESSAGE);
         run.setSourceMessageId("");
         run.setInputContent(input.getContent());
+        run.setAttachmentsJson(input.getAttachmentsJson());
         run.setModel(input.getModel());
         run.setReasoningEffort(input.getReasoningEffort());
         run.setWorkspacePath(input.getWorkspacePath());
@@ -603,20 +687,40 @@ public class ConversationRunCoordinator {
         java.util.function.Consumer<Throwable> failure =
                 error -> fail(run.getRunId(), error);
         String correlationId = runtimeTurnId(run);
+        List<MessageAttachment> attachments = MessageAttachmentJson.decode(
+                run.getAttachmentsJson()
+        );
         if (run.getTriggerType() == ConversationRunTrigger.REGENERATE) {
-            conversationService.regenerateMessage(
-                    run.getTaskId(),
-                    run.getSourceMessageId(),
-                    run.getInputContent(),
-                    run.getModel(),
-                    emptyToNull(run.getReasoningEffort()),
-                    emptyToNull(run.getWorkspacePath()),
-                    emptyToNull(run.getPermissionMode()),
-                    correlationId,
-                    eventConsumer,
-                    completion,
-                    failure
-            );
+            if (attachments.isEmpty()) {
+                conversationService.regenerateMessage(
+                        run.getTaskId(),
+                        run.getSourceMessageId(),
+                        run.getInputContent(),
+                        run.getModel(),
+                        emptyToNull(run.getReasoningEffort()),
+                        emptyToNull(run.getWorkspacePath()),
+                        emptyToNull(run.getPermissionMode()),
+                        correlationId,
+                        eventConsumer,
+                        completion,
+                        failure
+                );
+            } else {
+                conversationService.regenerateMessage(
+                        run.getTaskId(),
+                        run.getSourceMessageId(),
+                        run.getInputContent(),
+                        attachments,
+                        run.getModel(),
+                        emptyToNull(run.getReasoningEffort()),
+                        emptyToNull(run.getWorkspacePath()),
+                        emptyToNull(run.getPermissionMode()),
+                        correlationId,
+                        eventConsumer,
+                        completion,
+                        failure
+                );
+            }
             deliverPendingSteers(run);
             return;
         }
@@ -635,18 +739,34 @@ public class ConversationRunCoordinator {
             deliverPendingSteers(run);
             return;
         }
-        conversationService.streamMessage(
-                run.getTaskId(),
-                run.getInputContent(),
-                run.getModel(),
-                emptyToNull(run.getReasoningEffort()),
-                emptyToNull(run.getWorkspacePath()),
-                emptyToNull(run.getPermissionMode()),
-                correlationId,
-                eventConsumer,
-                completion,
-                failure
-        );
+        if (attachments.isEmpty()) {
+            conversationService.streamMessage(
+                    run.getTaskId(),
+                    run.getInputContent(),
+                    run.getModel(),
+                    emptyToNull(run.getReasoningEffort()),
+                    emptyToNull(run.getWorkspacePath()),
+                    emptyToNull(run.getPermissionMode()),
+                    correlationId,
+                    eventConsumer,
+                    completion,
+                    failure
+            );
+        } else {
+            conversationService.streamMessage(
+                    run.getTaskId(),
+                    run.getInputContent(),
+                    attachments,
+                    run.getModel(),
+                    emptyToNull(run.getReasoningEffort()),
+                    emptyToNull(run.getWorkspacePath()),
+                    emptyToNull(run.getPermissionMode()),
+                    correlationId,
+                    eventConsumer,
+                    completion,
+                    failure
+            );
+        }
         deliverPendingSteers(run);
     }
 

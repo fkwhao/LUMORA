@@ -111,6 +111,89 @@ globalStyle(".goal-composer", {
   boxShadow: "0 18px 50px rgb(20 25 32 / 8%)",
 });
 
+globalStyle(".goal-composer.is-dragging-attachment", {
+  borderColor: "color-mix(in srgb, var(--ink) 42%, var(--line-strong))",
+  background: "color-mix(in srgb, var(--surface) 92%, var(--ink) 8%)",
+  boxShadow: "0 0 0 3px color-mix(in srgb, var(--ink) 8%, transparent)",
+});
+
+globalStyle(".home-attachment-strip", {
+  display: "flex",
+  gap: "8px",
+  overflowX: "auto",
+  padding: "12px 0 1px",
+  scrollbarWidth: "thin",
+});
+
+globalStyle(".home-attachment-chip", {
+  display: "flex",
+  minWidth: "0",
+  maxWidth: "230px",
+  height: "48px",
+  alignItems: "center",
+  gap: "9px",
+  flex: "0 0 auto",
+  padding: "0 8px",
+  border: "1px solid var(--line)",
+  borderRadius: "12px",
+  background: "color-mix(in srgb, var(--surface) 94%, var(--ink) 6%)",
+});
+
+globalStyle(".home-attachment-chip > i", {
+  display: "inline-flex",
+  width: "31px",
+  height: "31px",
+  alignItems: "center",
+  justifyContent: "center",
+  flex: "0 0 auto",
+  borderRadius: "9px",
+  color: "var(--muted)",
+  background: "var(--surface)",
+  boxShadow: "inset 0 0 0 1px var(--line)",
+  overflow: "hidden",
+});
+
+globalStyle(".home-attachment-chip > i.has-preview", {
+  background: "var(--surface-soft)",
+});
+
+globalStyle(".home-attachment-chip > i > img", {
+  display: "block",
+  width: "100%",
+  height: "100%",
+  objectFit: "cover",
+});
+
+globalStyle(".home-attachment-chip > span", {
+  overflow: "hidden",
+  flex: "1 1 auto",
+  color: "var(--ink)",
+  fontSize: "12px",
+  fontWeight: "560",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(".home-attachment-chip > button", {
+  display: "inline-flex",
+  width: "22px",
+  height: "22px",
+  alignItems: "center",
+  justifyContent: "center",
+  flex: "0 0 auto",
+  padding: "0",
+  border: "0",
+  borderRadius: "50%",
+  color: "var(--muted)",
+  background: "transparent",
+  cursor: "pointer",
+});
+
+globalStyle(".home-attachment-chip > button:hover", {
+  color: "var(--ink)",
+  background: "var(--hover)",
+});
+
 globalStyle(".home-layout.composer-enter-from-bottom .goal-composer", {
   animation: `${composerFromBottom} 520ms cubic-bezier(0.22, 1, 0.36, 1) both`,
   transformOrigin: "bottom center",

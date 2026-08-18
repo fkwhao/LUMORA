@@ -76,6 +76,7 @@ public class ConversationController {
         ConversationRun run = runCoordinator.startMessage(
                 taskId,
                 request.getContent(),
+                request.getAttachments(),
                 request.getModel(),
                 request.getReasoningEffort(),
                 request.getWorkspacePath(),
@@ -100,6 +101,7 @@ public class ConversationController {
                 taskId,
                 messageId,
                 request.getContent(),
+                request.getAttachments(),
                 request.getModel(),
                 request.getReasoningEffort(),
                 request.getWorkspacePath(),

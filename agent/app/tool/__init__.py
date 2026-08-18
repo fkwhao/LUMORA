@@ -1,6 +1,7 @@
 from app.tool.base import (
     FunctionTool,
     Tool,
+    ToolAttachment,
     ToolCategory,
     ToolContext,
     ToolResult,
@@ -26,6 +27,7 @@ __all__ = [
     "ResourceLockReport",
     "ResourceObservationStore",
     "Tool",
+    "ToolAttachment",
     "ToolCategory",
     "ToolContext",
     "ToolInputError",

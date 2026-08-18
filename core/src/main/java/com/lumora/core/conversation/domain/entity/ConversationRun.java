@@ -25,6 +25,8 @@ public class ConversationRun {
     private String sourceMessageId;
     @TableField("input_content")
     private String inputContent;
+    @TableField("attachments_json")
+    private String attachmentsJson;
     @TableField("model")
     private String model;
     @TableField("reasoning_effort")
@@ -63,6 +65,10 @@ public class ConversationRun {
     public void setSourceMessageId(String sourceMessageId) { this.sourceMessageId = sourceMessageId; }
     public String getInputContent() { return inputContent; }
     public void setInputContent(String inputContent) { this.inputContent = inputContent; }
+    public String getAttachmentsJson() { return attachmentsJson; }
+    public void setAttachmentsJson(String attachmentsJson) {
+        this.attachmentsJson = attachmentsJson == null ? "[]" : attachmentsJson;
+    }
     public String getModel() { return model; }
     public void setModel(String model) { this.model = model; }
     public String getReasoningEffort() { return reasoningEffort; }

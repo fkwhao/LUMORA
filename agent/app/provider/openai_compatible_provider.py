@@ -21,6 +21,7 @@ from app.harness.run_event import RunEvent, RunUsage
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.prompt.prompt_assembly import PromptAssembly
 from app.prompt.prompt_loader import PromptLoader
+from app.provider.attachment_content import openai_chat_messages
 from app.provider.http_client import create_model_http_client
 from app.provider.token_usage import estimate_stream_usage, parse_chat_usage
 
@@ -118,10 +119,9 @@ class OpenAICompatibleProvider:
                 "role": "user",
                 "content": "已有的早期对话摘要：\n" + existing_summary,
             })
-        source_messages.extend(
-            message.as_provider_message()
-            for message in messages
-        )
+        source_messages.extend(openai_chat_messages([
+            message.as_provider_message() for message in messages
+        ]))
         source_messages.append({
             "role": "user",
             "content": self._prompt_loader.load_specialized(
@@ -306,7 +306,7 @@ class OpenAICompatibleProvider:
     ) -> ProviderTurn:
         request_body: dict[str, Any] = {
             "model": settings.model,
-            "messages": messages,
+            "messages": openai_chat_messages(messages),
             "tools": list(tools),
             "tool_choice": "auto",
             "stream": False,
@@ -363,7 +363,7 @@ class OpenAICompatibleProvider:
     ) -> AsyncIterator[ProviderTurnEvent]:
         request_body: dict[str, Any] = {
             "model": settings.model,
-            "messages": messages,
+            "messages": openai_chat_messages(messages),
             "tools": list(tools),
             "tool_choice": "auto",
             "stream": True,
@@ -574,11 +574,11 @@ class OpenAICompatibleProvider:
         stream: bool,
         reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
-        request_messages: list[dict[str, Any]] = [
+        request_messages: list[dict[str, Any]] = openai_chat_messages([
             *prompt.system_messages,
             *prompt.context_messages,
             *[message.as_provider_message() for message in messages],
-        ]
+        ])
         request_body: dict[str, Any] = {
             "model": settings.model,
             "messages": request_messages,

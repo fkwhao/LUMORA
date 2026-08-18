@@ -25,6 +25,15 @@ class ToolCategory(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class ToolAttachment:
+    attachment_id: str
+    name: str
+    mime_type: str
+    path: Path
+    size: int
+
+
+@dataclass(frozen=True, slots=True)
 class ToolContext:
     workspace_path: Path
     workspace_scoped: bool = True
@@ -36,6 +45,10 @@ class ToolContext:
         repr=False,
     )
     allow_external_paths: bool = False
+    attachments: Mapping[str, ToolAttachment] = field(
+        default_factory=dict,
+        repr=False,
+    )
     cancelled: Callable[[], bool] = field(default=lambda: False, repr=False)
 
 

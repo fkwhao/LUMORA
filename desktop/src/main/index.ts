@@ -3,6 +3,7 @@ import { app, BrowserWindow, screen, shell } from "electron";
 
 import { registerTaskIpc } from "./ipc";
 import { registerAppearanceIpc } from "./appearance-ipc";
+import { registerAttachmentIpc } from "./attachment-ipc";
 import { registerModelIpc } from "./model-ipc";
 import { registerMemoryIpc } from "./memory-ipc";
 import { registerMcpIpc } from "./mcp-ipc";
@@ -56,6 +57,7 @@ let unregisterMemoryIpc: (() => void) | undefined;
 let unregisterMcpIpc: (() => void) | undefined;
 let unregisterSkillIpc: (() => void) | undefined;
 let unregisterAppearanceIpc: (() => void) | undefined;
+let unregisterAttachmentIpc: (() => void) | undefined;
 let unregisterWorkspaceIpc: (() => void) | undefined;
 
 async function createWindow(): Promise<BrowserWindow> {
@@ -111,6 +113,7 @@ app.whenReady().then(async () => {
   unregisterMcpIpc = registerMcpIpc(mcpGateway);
   unregisterSkillIpc = registerSkillIpc();
   unregisterAppearanceIpc = registerAppearanceIpc();
+  unregisterAttachmentIpc = registerAttachmentIpc();
   unregisterWorkspaceIpc = registerWorkspaceIpc();
   await createWindow();
 
@@ -134,6 +137,7 @@ app.on("before-quit", () => {
   unregisterMcpIpc?.();
   unregisterSkillIpc?.();
   unregisterAppearanceIpc?.();
+  unregisterAttachmentIpc?.();
   unregisterWorkspaceIpc?.();
   gateway.dispose();
 });

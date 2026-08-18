@@ -10,6 +10,18 @@ class ChatToolCallRequest(BaseModel):
     arguments: str = Field(default="{}", max_length=1_000_000)
 
 
+class ChatAttachmentRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    attachment_id: str = Field(alias="attachmentId", min_length=1, max_length=100)
+    name: str = Field(min_length=1, max_length=260)
+    mime_type: str = Field(alias="mimeType", min_length=1, max_length=160)
+    size: int = Field(ge=0, le=25 * 1024 * 1024)
+    path: str = Field(min_length=1, max_length=4000)
+    kind: Literal["IMAGE", "FILE"]
+    source: Literal["LOCAL_FILE", "CLIPBOARD_TEMP"]
+
+
 class ChatMessageRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -27,6 +39,10 @@ class ChatMessageRequest(BaseModel):
         alias="toolCallId",
         max_length=500,
     )
+    attachments: list[ChatAttachmentRequest] = Field(
+        default_factory=list,
+        max_length=10,
+    )
 
     @model_validator(mode="after")
     def validate_protocol_message(self) -> "ChatMessageRequest":
@@ -40,6 +56,8 @@ class ChatMessageRequest(BaseModel):
             raise ValueError("工具消息必须关联工具调用 ID")
         if self.role != "assistant" and self.tool_calls:
             raise ValueError("只有助手消息可以包含工具调用")
+        if self.role != "user" and self.attachments:
+            raise ValueError("只有用户消息可以包含附件")
         return self
 
     def as_provider_message(self) -> dict[str, object]:
@@ -61,6 +79,11 @@ class ChatMessageRequest(BaseModel):
             ]
         if self.tool_call_id:
             message["tool_call_id"] = self.tool_call_id
+        if self.attachments:
+            message["attachments"] = [
+                attachment.model_dump(by_alias=True)
+                for attachment in self.attachments
+            ]
         return message
 
 

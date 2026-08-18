@@ -1,11 +1,13 @@
 package com.lumora.core.conversation.api.dto.request;
 
 import com.lumora.core.conversation.domain.model.ConversationConstants;
-
-import com.lumora.core.conversation.domain.model.ConversationConstants;
+import com.lumora.core.conversation.domain.model.MessageAttachment;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+
+import java.util.List;
 
 public class SendMessageRequest {
 
@@ -15,6 +17,11 @@ public class SendMessageRequest {
             message = "消息内容过长"
     )
     private String content;
+
+    @Valid
+    @Size(max = MessageAttachment.MAX_ATTACHMENTS,
+            message = "一次最多添加 10 个附件")
+    private List<MessageAttachment> attachments = List.of();
 
     @Size(max = 160, message = "模型名称过长")
     private String model;
@@ -47,6 +54,14 @@ public class SendMessageRequest {
 
     public void setContent(String content) {
         this.content = content;
+    }
+
+    public List<MessageAttachment> getAttachments() {
+        return MessageAttachment.normalize(attachments);
+    }
+
+    public void setAttachments(List<MessageAttachment> attachments) {
+        this.attachments = attachments == null ? List.of() : attachments;
     }
 
     public String getModel() {

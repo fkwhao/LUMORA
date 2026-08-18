@@ -5,6 +5,7 @@ import com.lumora.core.agent.dto.request.AgentChatMessageRequest;
 import com.lumora.core.agent.dto.request.AgentChatToolCallRequest;
 import com.lumora.core.agent.dto.request.AgentModelConnectionRequest;
 import com.lumora.core.agent.dto.request.AgentMemoryContextRequest;
+import com.lumora.core.agent.dto.request.AgentMessageAttachmentRequest;
 import com.lumora.core.agent.dto.request.AgentMcpServerRequest;
 import com.lumora.core.agent.dto.request.AgentPromptContextRequest;
 import com.lumora.core.agent.dto.response.AgentChatCompletionResponse;
@@ -158,7 +159,10 @@ public class AgentDtoMapper {
                                         call.id(), call.name(), call.arguments()
                                 ))
                                 .toList(),
-                        message.getToolCallId()
+                        message.getToolCallId(),
+                        message.getAttachments().stream()
+                                .map(AgentMessageAttachmentRequest::new)
+                                .toList()
                 ))
                 .toList();
         return new AgentChatCompletionRequest(

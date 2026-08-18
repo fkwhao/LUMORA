@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any, ClassVar
 
 from app.context.planner import ContextPlan
@@ -245,6 +246,52 @@ def test_remote_mcp_is_available_without_workspace(monkeypatch: Any) -> None:
     ]
     assert len(FakeMcpClient.instances) == 1
     assert FakeMcpClient.instances[0].closed is False
+
+
+def test_pdf_tools_are_exposed_without_workspace_for_attached_pdf(
+    tmp_path: Path,
+) -> None:
+    pdf_path = tmp_path / "manual.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    harness = CapturingHarness()
+    service = ChatService(
+        ModelListProvider(),  # type: ignore[arg-type]
+        PromptBuilder(),
+        agent_harness=harness,  # type: ignore[arg-type]
+    )
+    request = ChatCompletionRequest.model_validate({
+        "messages": [{
+            "role": "user",
+            "content": "读取附件",
+            "attachments": [{
+                "attachmentId": "pdf-1",
+                "name": "manual.pdf",
+                "mimeType": "application/pdf",
+                "size": pdf_path.stat().st_size,
+                "path": str(pdf_path),
+                "kind": "FILE",
+                "source": "LOCAL_FILE",
+            }],
+        }],
+        "connection": {
+            "providerName": "DeepSeek",
+            "baseUrl": "https://api.deepseek.com/anthropic",
+            "model": "deepseek-v4-pro",
+            "apiKey": "secret",
+            "apiFormat": "anthropic",
+        },
+    })
+
+    asyncio.run(_drain(service.stream(request, "pdf-run")))
+
+    assert [tool["function"]["name"] for tool in harness.prompt.tools] == [
+        "read_pdf",
+        "search_pdf",
+    ]
+    assert harness.tool_context.workspace_scoped is False
+    attachment = harness.tool_context.attachments["pdf-1"]
+    assert attachment.path == pdf_path
+    assert attachment.mime_type == "application/pdf"
 
 
 def test_mcp_session_is_reused_across_turns_and_closed_on_shutdown(
