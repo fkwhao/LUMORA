@@ -33,6 +33,8 @@ Electron Renderer
 
 - 创建或继续任务，由模型通过 `update_plan` 发布动态结构化计划并直接执行。
 - 按模型配置真实路由 Chat Completions、OpenAI Responses 和 Anthropic Messages，支持流式持续对话、模型选择和模型级推理强度。
+- 支持在输入框添加本地文件和粘贴剪贴板图片；本地文件直接引用原路径，剪贴板图片仅生成一份系统临时文件，会话和队列只持久化附件元数据与路径引用。
+- 通过模型无关的 `read_pdf` 和 `search_pdf` 工具分页读取、检索带文本层的 PDF，无需依赖供应商原生文档能力，也不做向量切分或解析结果持久化；扫描型 PDF 的 OCR 尚未实现。
 - 在授权工作区内执行文件搜索、分段读取、局部补丁、完整写入和非交互 Shell 命令。
 - 使用结构化工作记录展示概括阶段和真实工具活动；模型隐藏推理不作为聊天正文展示。
 - 对敏感工具调用进行确定性分级、自动 Reviewer 或人工审批，并从工具记录打开局部 Diff 或大型结果 Artifact。
@@ -88,6 +90,9 @@ context: full
 
 跨任务 Run 调度、文件资源协调和当前非目标见
 [任务并发与资源感知设计](docs/cross-task-concurrency-design.md)。
+
+图片、文件与 PDF 的引用模型、生命周期、供应商路由和安全边界见
+[附件设计](docs/attachment-design.md)。
 
 ## 安全说明
 
