@@ -9,6 +9,9 @@ public class CreateTaskRequest {
     @Size(max = 2000, message = "任务目标不能超过 2000 个字符")
     private String goal;
 
+    @Size(max = 4096, message = "工作区路径不能超过 4096 个字符")
+    private String workspacePath;
+
     public CreateTaskRequest() {
     }
 
@@ -18,5 +21,13 @@ public class CreateTaskRequest {
 
     public void setGoal(String goal) {
         this.goal = goal;
+    }
+
+    public String getWorkspacePath() {
+        return workspacePath;
+    }
+
+    public void setWorkspacePath(String workspacePath) {
+        this.workspacePath = workspacePath;
     }
 }

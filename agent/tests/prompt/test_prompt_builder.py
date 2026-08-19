@@ -77,7 +77,8 @@ class PromptBuilderTest(unittest.TestCase):
             [segment.key for segment in with_delegate.segments],
         )
         self.assertIn("不使用固定的复杂度分数", with_delegate.system_prompt)
-        self.assertIn("前台 one-shot 调用", with_delegate.system_prompt)
+        self.assertIn("mode=one_shot", with_delegate.system_prompt)
+        self.assertIn("mode=continuable", with_delegate.system_prompt)
         self.assertIn("多个互不依赖的任务应在同一模型回合一起调用", with_delegate.system_prompt)
         self.assertNotIn(
             "tool.delegate_task.guidance",

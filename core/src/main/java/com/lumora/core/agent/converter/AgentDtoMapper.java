@@ -8,6 +8,7 @@ import com.lumora.core.agent.dto.request.AgentMemoryContextRequest;
 import com.lumora.core.agent.dto.request.AgentMessageAttachmentRequest;
 import com.lumora.core.agent.dto.request.AgentMcpServerRequest;
 import com.lumora.core.agent.dto.request.AgentPromptContextRequest;
+import com.lumora.core.agent.dto.request.AgentSessionSnapshotRequest;
 import com.lumora.core.agent.dto.response.AgentChatCompletionResponse;
 import com.lumora.core.agent.dto.response.AgentContextCompactionResponse;
 import com.lumora.core.agent.dto.response.AgentChatStreamEventResponse;
@@ -22,6 +23,7 @@ import com.lumora.core.memory.application.model.MemoryExtractionBatch;
 import com.lumora.core.conversation.domain.model.ChatCompletion;
 import com.lumora.core.conversation.domain.model.ChatMessage;
 import com.lumora.core.conversation.domain.model.ChatStreamEvent;
+import com.lumora.core.conversation.domain.model.AgentSessionSnapshot;
 import com.lumora.core.conversation.domain.model.ContextCompaction;
 import com.lumora.core.model.domain.model.ModelConnection;
 import com.lumora.core.memory.domain.model.MemoryContextItem;
@@ -148,6 +150,24 @@ public class AgentDtoMapper {
             List<MemoryContextItem> memoryCandidates,
             List<McpServerRuntimeConfiguration> mcpServers
     ) {
+        return toChatRequest(messages, connection, reasoningEffort,
+                memorySummary, workspacePath, permissionMode, taskId,
+                conversationSummary, memoryCandidates, mcpServers, List.of());
+    }
+
+    public AgentChatCompletionRequest toChatRequest(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<MemoryContextItem> memoryCandidates,
+            List<McpServerRuntimeConfiguration> mcpServers,
+            List<AgentSessionSnapshot> agentSessions
+    ) {
         List<AgentChatMessageRequest> requestMessages = messages.stream()
                 .map(message -> new AgentChatMessageRequest(
                         message.getRole(),
@@ -178,6 +198,9 @@ public class AgentDtoMapper {
                                 .map(AgentMemoryContextRequest::new)
                                 .toList(),
                         mcpServers.stream().map(AgentMcpServerRequest::new)
+                                .toList(),
+                        agentSessions.stream()
+                                .map(AgentSessionSnapshotRequest::new)
                                 .toList()
                 ),
                 normalizeOptionalText(reasoningEffort)

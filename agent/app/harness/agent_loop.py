@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import random
 import uuid
 from collections.abc import AsyncIterator, Awaitable
 from typing import Any
@@ -11,6 +12,7 @@ from app.context.estimator import TokenEstimator
 from app.context.planner import ContextPlanner
 from app.dto.request.chat_completion_request import ChatMessageRequest
 from app.dto.response.chat_completion_response import TokenUsageResponse
+from app.execution.budget import BudgetExceeded
 from app.execution.tool_call_executor import ToolCallExecutor
 from app.execution.tool_call_scheduler import (
     ToolCallAborted,
@@ -141,6 +143,13 @@ class AgentLoopRunner:
             if _pause_requested(run_control):
                 yield _paused_event(resolved_model)
                 return
+            budget = tool_context.execution_budget
+            if budget is not None:
+                try:
+                    budget.reserve_model_request()
+                except BudgetExceeded as error:
+                    yield _budget_failed_event(error, resolved_model)
+                    return
             if run_control is not None:
                 for steer in run_control.claim_steers():
                     steer_message = {
@@ -237,7 +246,14 @@ class AgentLoopRunner:
                                 f"{self._max_stream_retries}）"
                             ),
                             model=resolved_model,
-                            metadata={"replacesAssistantContent": True},
+                            metadata={
+                                "replacesAssistantContent": True,
+                                "failureKind": "transient_model_stream_error",
+                                "retryable": True,
+                                "attempt": stream_retries + 1,
+                                "maxAttempts": self._max_stream_retries + 1,
+                                "modelExecutionState": "not_committed",
+                            },
                         )
                         if content_was_streamed:
                             yield RunEvent(
@@ -257,8 +273,15 @@ class AgentLoopRunner:
                         delay = self._stream_retry_base_delay * (
                             2 ** (stream_retries - 1)
                         )
+                        delay *= random.uniform(0.8, 1.2)
                         if delay:
                             await asyncio.sleep(delay)
+                        if budget is not None:
+                            try:
+                                budget.reserve_model_request()
+                            except BudgetExceeded as error:
+                                yield _budget_failed_event(error, resolved_model)
+                                return
                         turn_stream = self._stream_turn(
                             settings,
                             request_messages,
@@ -401,11 +424,22 @@ class AgentLoopRunner:
                     )
             assert turn is not None
             resolved_model = turn.model
+            settled_usage = add_token_usage((retry_usage, turn.usage))
             cumulative_usage = add_token_usage((
                 cumulative_usage,
-                retry_usage,
-                turn.usage,
+                settled_usage,
             ))
+            if budget is not None:
+                try:
+                    budget.settle_tokens(settled_usage.total_tokens)
+                except BudgetExceeded as error:
+                    yield RunEvent(
+                        type="usage",
+                        model=resolved_model,
+                        usage=_to_run_usage(cumulative_usage),
+                    )
+                    yield _budget_failed_event(error, resolved_model)
+                    return
             active_context_tokens = turn.usage.prompt_tokens or (
                 self._token_estimator.estimate_messages(request_messages)
                 + self._token_estimator.estimate_tools(prompt.tools)
@@ -590,9 +624,14 @@ class AgentLoopRunner:
                         model=resolved_model,
                     )
                     try:
+                        if budget is not None:
+                            budget.reserve_model_request()
                         compacted = await self._compact_history(
                             settings, compactable, active_summary
                         )
+                    except BudgetExceeded as error:
+                        yield _budget_failed_event(error, resolved_model)
+                        return
                     except Exception:  # noqa: BLE001 - provider boundary
                         yield RunEvent(
                             type="context_compaction_failed",
@@ -606,6 +645,17 @@ class AgentLoopRunner:
                     cumulative_usage = add_token_usage(
                         (cumulative_usage, compacted.usage)
                     )
+                    if budget is not None:
+                        try:
+                            budget.settle_tokens(compacted.usage.total_tokens)
+                        except BudgetExceeded as error:
+                            yield RunEvent(
+                                type="usage",
+                                model=compacted.model,
+                                usage=_to_run_usage(cumulative_usage),
+                            )
+                            yield _budget_failed_event(error, compacted.model)
+                            return
                     active_summary = compacted.message
                     prompt = self._prompt_supplier(active_summary)
                     request_messages = [
@@ -650,6 +700,15 @@ def _to_run_usage(usage: TokenUsageResponse) -> RunUsage:
         cache_read_tokens=usage.cache_read_tokens,
         cache_write_tokens=usage.cache_write_tokens,
         cache_metrics_available=usage.cache_metrics_available,
+    )
+
+
+def _budget_failed_event(error: BudgetExceeded, model: str) -> RunEvent:
+    return RunEvent(
+        type="failed",
+        error_message=str(error),
+        model=model,
+        metadata=error.metadata(),
     )
 
 

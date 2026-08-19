@@ -29,6 +29,32 @@ import static org.mockito.Mockito.when;
 class ConversationRunStoreTest {
 
     @Test
+    void findsTheLatestNonBlankWorkspaceForATask() {
+        ConversationRunMapper runMapper = mock(ConversationRunMapper.class);
+        ConversationRun blank = new ConversationRun();
+        blank.setWorkspacePath("   ");
+        ConversationRun latestWithWorkspace = new ConversationRun();
+        latestWithWorkspace.setWorkspacePath(" F:\\project\\test ");
+        ConversationRun older = new ConversationRun();
+        older.setWorkspacePath("F:\\project\\older");
+        when(runMapper.selectList(any())).thenReturn(List.of(
+                blank, latestWithWorkspace, older
+        ));
+        ConversationRunStore store = new ConversationRunStore(
+                runMapper,
+                mock(ConversationRunEventMapper.class),
+                mock(AgentSessionStore.class),
+                new ObjectMapper(),
+                mock(TransactionTemplate.class),
+                Clock.systemUTC()
+        );
+
+        String workspacePath = store.findLatestWorkspacePathForTask("task-1");
+
+        assertThat(workspacePath).isEqualTo("F:\\project\\test");
+    }
+
+    @Test
     void appendsAnOrderedBatchWithOneRunUpdate() {
         ConversationRunMapper runMapper = mock(ConversationRunMapper.class);
         ConversationRunEventMapper eventMapper = mock(
@@ -52,6 +78,7 @@ class ConversationRunStoreTest {
         ConversationRunStore store = new ConversationRunStore(
                 runMapper,
                 eventMapper,
+                mock(AgentSessionStore.class),
                 new ObjectMapper(),
                 transactionTemplate,
                 clock

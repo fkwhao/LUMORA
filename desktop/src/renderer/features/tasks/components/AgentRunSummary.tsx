@@ -6,7 +6,6 @@ import {
   useState,
 } from "react";
 import {
-  Bot,
   ChevronDown,
   ChevronRight,
   FilePenLine,
@@ -21,6 +20,7 @@ import {
 import type { WorkLogItem } from "../../../../shared/model-contract";
 import type { TaskEvent } from "../../../../shared/task-contract";
 import { isPlanWorkLogItem } from "../../../../shared/execution-plan";
+import { AgentIdentityAvatar } from "./AgentIdentityAvatar";
 import { ProcessingLattice } from "./ProcessingLattice";
 import { WebSearch } from "./WebSearch";
 
@@ -282,9 +282,10 @@ function AgentCallItem({
         onClick={() => agentId && onOpenAgent?.(agentId)}
         aria-label={`查看 ${label} 的执行过程`}
       >
-        <span className="agent-call-avatar" aria-hidden="true">
-          <Bot size={14} />
-        </span>
+        <AgentIdentityAvatar
+          agentId={agentId || item.itemId}
+          className="agent-call-avatar"
+        />
         <span className={item.status === "running" ? "shimmer-text" : ""}>
           <strong>{label}</strong>
           <small>{statusLabel}</small>

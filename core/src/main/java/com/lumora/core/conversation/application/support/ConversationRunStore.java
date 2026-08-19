@@ -40,6 +40,7 @@ public class ConversationRunStore {
 
     private final ConversationRunMapper runMapper;
     private final ConversationRunEventMapper eventMapper;
+    private final AgentSessionStore agentSessionStore;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
     private final Clock clock;
@@ -80,6 +81,21 @@ public class ConversationRunStore {
                                 ConversationRunStatus.WAITING_APPROVAL)
                         .orderByDesc(ConversationRun::getUpdatedAt)
         ).stream().findFirst().orElse(null);
+    }
+
+    public String findLatestWorkspacePathForTask(String taskId) {
+        return runMapper.selectList(
+                Wrappers.<ConversationRun>lambdaQuery()
+                        .eq(ConversationRun::getTaskId, taskId)
+                        .isNotNull(ConversationRun::getWorkspacePath)
+                        .ne(ConversationRun::getWorkspacePath, "")
+                        .orderByDesc(ConversationRun::getCreatedAt)
+        ).stream()
+                .map(ConversationRun::getWorkspacePath)
+                .filter(path -> path != null && !path.isBlank())
+                .map(String::trim)
+                .findFirst()
+                .orElse("");
     }
 
     public List<ConversationRun> listRecoverable() {
@@ -201,6 +217,7 @@ public class ConversationRunStore {
             stored.setEventJson(writeEvent(event));
             stored.setOccurredAt(occurredAt);
             eventMapper.insert(stored);
+            agentSessionStore.project(run, event, occurredAt);
             envelopes.add(new ConversationRunEventEnvelope(
                     runId, sequence, event, occurredAt
             ));

@@ -14,7 +14,23 @@ from app.harness.run_event import RunEvent, RunUsage
 from app.mcp.model import McpServerConfig, McpToolDefinition
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.prompt.prompt_builder import PromptBuilder
-from app.service.chat_service import ChatService
+from app.service.chat_service import (
+    ChatService,
+    _stream_with_background_events,
+    _with_prelude_usage,
+)
+
+_SESSION_CONTROL_TOOLS = (
+    "delegate_task",
+    "send_agent_message",
+    "list_agent_sessions",
+    "interrupt_agent",
+    "report_to_parent",
+    "create_workflow",
+    "list_workflows",
+    "run_workflow",
+    "retry_workflow_node",
+)
 
 
 class ModelListProvider:
@@ -164,6 +180,60 @@ def test_automatic_compaction_usage_is_included_in_stream_totals() -> None:
     assert usage.usage.cache_read_tokens == 14
 
 
+def test_compaction_prelude_is_not_added_to_subagent_usage_delta() -> None:
+    event = RunEvent(
+        type="usage",
+        usage=RunUsage(
+            prompt_tokens=7,
+            completion_tokens=3,
+            total_tokens=10,
+        ),
+        metadata={"usageDelta": True, "usageCategory": "subagent"},
+    )
+    prelude = TokenUsageResponse(
+        promptTokens=20,
+        completionTokens=5,
+        totalTokens=25,
+    )
+
+    projected = _with_prelude_usage(event, prelude)
+
+    assert projected.usage == event.usage
+
+
+def test_root_completion_is_emitted_after_background_settlement() -> None:
+    queue: asyncio.Queue[RunEvent] = asyncio.Queue()
+
+    class Manager:
+        async def wait_for_activations(self) -> None:
+            await queue.put(RunEvent(
+                type="agent_reported",
+                item_id="agent-1",
+                output="完成",
+            ))
+
+        async def shutdown(self) -> None:
+            return None
+
+    async def root_stream() -> AsyncIterator[RunEvent]:
+        yield RunEvent(type="completed")
+
+    async def collect() -> list[RunEvent]:
+        return [
+            event
+            async for event in _stream_with_background_events(
+                root_stream(), queue, Manager()  # type: ignore[arg-type]
+            )
+        ]
+
+    events = asyncio.run(collect())
+
+    assert [event.type for event in events] == [
+        "agent_reported",
+        "completed",
+    ]
+
+
 class FakeMcpClient:
     instances: ClassVar[list["FakeMcpClient"]] = []
 
@@ -240,13 +310,13 @@ def test_remote_mcp_is_available_without_workspace(monkeypatch: Any) -> None:
 
     assert harness.registry.names() == (
         "mcp__remote__echo",
-        "delegate_task",
+        *_SESSION_CONTROL_TOOLS,
     )
     assert harness.tool_context is not None
     assert harness.tool_context.workspace_scoped is False
     assert [tool["function"]["name"] for tool in harness.prompt.tools] == [
         "mcp__remote__echo",
-        "delegate_task",
+        *_SESSION_CONTROL_TOOLS,
     ]
     assert "  - delegate_task" in harness.prompt.system_prompt
     assert "已连接 1 个可选 MCP 工具" in harness.prompt.system_prompt
@@ -293,7 +363,7 @@ def test_pdf_tools_are_exposed_without_workspace_for_attached_pdf(
     assert [tool["function"]["name"] for tool in harness.prompt.tools] == [
         "read_pdf",
         "search_pdf",
-        "delegate_task",
+        *_SESSION_CONTROL_TOOLS,
     ]
     assert harness.tool_context.workspace_scoped is False
     attachment = harness.tool_context.attachments["pdf-1"]
@@ -347,7 +417,7 @@ def test_mcp_server_is_not_connected_for_ordinary_request(
         for name in harness.registry.names()
     )
     assert [tool["function"]["name"] for tool in harness.prompt.tools] == [
-        "delegate_task"
+        *_SESSION_CONTROL_TOOLS,
     ]
     assert CapabilityMcpClient.instances == []
 
@@ -373,7 +443,7 @@ def test_mcp_capability_catalogs_are_exposed_for_explicit_feature_request(
         "mcpmeta__remote__resource_read",
         "mcpmeta__remote__prompt_catalog",
         "mcpmeta__remote__prompt_get",
-        "delegate_task",
+        *_SESSION_CONTROL_TOOLS,
     )
 
 
@@ -394,7 +464,7 @@ def test_mcp_server_name_activates_related_request(monkeypatch: Any) -> None:
 
     assert harness.registry.names() == (
         "mcp__remote__echo",
-        "delegate_task",
+        *_SESSION_CONTROL_TOOLS,
     )
 
 

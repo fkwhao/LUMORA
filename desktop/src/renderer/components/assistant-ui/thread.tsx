@@ -213,7 +213,7 @@ const ThreadRoot: FC<
         scrollToBottomOnThreadSwitch={false}
         data-slot="aui_thread-viewport"
         className={cn(
-          "relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth",
+          "relative flex flex-1 flex-col overflow-x-auto overflow-y-auto scroll-smooth",
           viewportProps?.className,
         )}
       >

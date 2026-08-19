@@ -1,7 +1,6 @@
 import {
   Activity,
   ArrowLeft,
-  Bot,
   Check,
   ChevronRight,
   Copy,
@@ -17,6 +16,7 @@ import {
 
 import type { WorkLogItem, WorkLogItemStatus } from "../../../../shared/model-contract";
 import { MarkdownMessage } from "../../../components/MarkdownMessage";
+import { AgentIdentityAvatar } from "./AgentIdentityAvatar";
 
 export interface SubagentSession {
   agentId: string;
@@ -31,6 +31,14 @@ export interface SubagentSession {
   completionTokens?: number;
   totalTokens?: number;
   activeContextTokens?: number;
+  mode?: "one_shot" | "continuable";
+  activationStatus?: string;
+  pendingInboxCount?: number;
+  lastInboxSequence?: number;
+  consumedInboxSequence?: number;
+  checkpointSequence?: number;
+  unreadReportCount?: number;
+  recovered?: boolean;
   createdAt?: string;
   answer: string;
   events: WorkLogItem[];
@@ -98,13 +106,31 @@ export function SubagentSessionPane({
             >
               <span className="subagent-session-status" data-status={session.status}>
                 <i aria-hidden="true" />
-                {statusLabel(session.status)}
+                {session.mode === "continuable"
+                  ? activationLabel(session.activationStatus)
+                  : statusLabel(session.status)}
               </span>
               {session.durationMs !== undefined && (
                 <span>{formatDuration(session.durationMs)}</span>
               )}
               <span>{session.model || "沿用 Supervisor 模型"}</span>
               <span>Depth {session.delegationDepth}</span>
+              {session.mode === "continuable" && (
+                <span>Session 可续接</span>
+              )}
+              {session.mode === "continuable" && (
+                <span>Activation {activationLabel(session.activationStatus)}</span>
+              )}
+              {session.pendingInboxCount !== undefined && (
+                <span>Inbox {session.pendingInboxCount} 待处理</span>
+              )}
+              {session.checkpointSequence !== undefined && (
+                <span>Checkpoint #{session.checkpointSequence}</span>
+              )}
+              {(session.unreadReportCount ?? 0) > 0 && (
+                <span>报告 {session.unreadReportCount}</span>
+              )}
+              {session.recovered && <span>可恢复</span>}
               {session.totalTokens !== undefined && (
                 <span>{formatTokens(session.totalTokens)} tokens</span>
               )}
@@ -149,12 +175,13 @@ export function SubagentSessionPane({
                       onClick={() => onOpenAgent(child.agentId)}
                       aria-label={`查看 ${child.label} 的执行过程`}
                     >
-                      <span className="subagent-pane-avatar" data-status={child.status}>
-                        <Bot size={13} />
-                      </span>
+                      <AgentIdentityAvatar
+                        agentId={child.agentId}
+                        className="subagent-pane-avatar"
+                      />
                       <span>
                         <strong>{child.label}</strong>
-                        <small>{statusText(child.status, child.durationMs)}</small>
+                        <small>{sessionStatusText(child)}</small>
                       </span>
                       <ChevronRight size={14} />
                     </button>
@@ -253,9 +280,22 @@ function statusLabel(status: WorkLogItemStatus): string {
   return "已完成";
 }
 
-function statusText(status: WorkLogItemStatus, durationMs?: number): string {
-  const duration = durationMs === undefined ? "" : ` · ${formatDuration(durationMs)}`;
-  return `${statusLabel(status)}${duration}`;
+function activationLabel(status?: string): string {
+  if (status === "running") return "执行中";
+  if (status === "interrupted") return "已中止，可续接";
+  if (status === "failed") return "失败，可续接";
+  if (status === "closed") return "已关闭";
+  return "空闲";
+}
+
+function sessionStatusText(session: SubagentSession): string {
+  const duration = session.durationMs === undefined
+    ? ""
+    : ` · ${formatDuration(session.durationMs)}`;
+  const label = session.mode === "continuable"
+    ? activationLabel(session.activationStatus)
+    : statusLabel(session.status);
+  return `${label}${duration}`;
 }
 
 function shortId(value: string): string {

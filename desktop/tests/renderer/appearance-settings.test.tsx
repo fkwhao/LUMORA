@@ -57,6 +57,7 @@ function createApi(): LumoraTaskApi {
     create: vi.fn(),
     list: vi.fn(async () => []),
     get: vi.fn(),
+    updateWorkspace: vi.fn(),
     updatePreferences: vi.fn(),
     subscribe: vi.fn(() => () => undefined),
     decideApproval: vi.fn(),

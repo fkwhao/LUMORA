@@ -39,6 +39,7 @@ describe("Java REST task gateway", () => {
         body: {
           taskId: "task-1",
           goal: "整理下载目录",
+          workspacePath: "F:\\project\\test",
           status: "PLANNING",
           lastEventSequence: 0,
           activeStep: "",
@@ -65,9 +66,10 @@ describe("Java REST task gateway", () => {
       sessionToken: "test-token",
     });
 
-    const task = await gateway.create("整理下载目录");
+    const task = await gateway.create("整理下载目录", "F:\\project\\test");
 
     expect(task.taskId).toBe("task-1");
+    expect(task.workspacePath).toBe("F:\\project\\test");
     expect(task.planSteps).toEqual([
       {
         stepId: "step-1",
@@ -88,7 +90,10 @@ describe("Java REST task gateway", () => {
     expect(receivedCorrelationId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     );
-    expect(JSON.parse(receivedBody)).toEqual({ goal: "整理下载目录" });
+    expect(JSON.parse(receivedBody)).toEqual({
+      goal: "整理下载目录",
+      workspacePath: "F:\\project\\test",
+    });
   });
 
   it("returns the stable Java error message", async () => {
@@ -145,6 +150,43 @@ describe("Java REST task gateway", () => {
       reasoningEffort: "high",
     });
     expect(updated.selectedReasoningEffort).toBe("high");
+  });
+
+  it("persists the task workspace through the Java API", async () => {
+    let receivedMethod = "";
+    let receivedUrl = "";
+    let receivedBody = "";
+    const baseUrl = await listen(async (request) => {
+      receivedMethod = request.method ?? "";
+      receivedUrl = request.url ?? "";
+      receivedBody = await readBody(request);
+      return {
+        status: 200,
+        body: {
+          taskId: "task-1",
+          goal: "test",
+          status: "COMPLETED",
+          workspacePath: "F:\\project\\LUMORA",
+          planSteps: [],
+        },
+      };
+    });
+    const gateway = new RestTaskGateway({
+      baseUrl,
+      sessionToken: "test-token",
+    });
+
+    const updated = await gateway.updateWorkspace({
+      taskId: "task-1",
+      workspacePath: "F:\\project\\LUMORA",
+    });
+
+    expect(receivedMethod).toBe("PUT");
+    expect(receivedUrl).toBe("/api/v1/tasks/task-1/workspace");
+    expect(JSON.parse(receivedBody)).toEqual({
+      workspacePath: "F:\\project\\LUMORA",
+    });
+    expect(updated.workspacePath).toBe("F:\\project\\LUMORA");
   });
 });
 

@@ -3,19 +3,25 @@
 ## 1. 目标与当前状态
 
 LUMORA 的主 Agent 在运行时扮演 Supervisor，根据任务动态决定是否委派，不预设固定的
-“搜索 Agent”或“代码 Agent”。当前已经交付第一阶段：一次性、独立上下文、完整工具能力的
-协作 Agent Session，并支持在受控深度内递归委派。
+“搜索 Agent”或“代码 Agent”。当前已交付一次性与可续接两种独立上下文、完整工具能力的
+协作 Agent Session，并支持在受控深度内递归委派。复杂长期任务还可以选择显式 DAG；所有路径
+共享请求级预算、安全重试和多写者冲突规划，简单任务不承担 DAG 建模成本。
 
 ```text
 父 Run / Supervisor
-  └── delegate_task(description, prompt)
+  ├── delegate_task(description, prompt, mode, writeScopes?)
         └── Agent Session · Depth 1
               ├── 独立消息历史
               ├── 继承本请求可见工具与权限
               ├── 实时可见执行事件
+              ├── one_shot：前台等待最终报告
+              ├── continuable：FIFO Inbox → 单一 Activation → Checkpoint
+              ├── send / list / interrupt / report
               ├── delegate_task(...)
               │     └── Agent Session · Depth 2/3
               └── 最终报告返回父 Agent
+  └── create_workflow(nodes[])
+        └── ready nodes → 无写冲突的并行 wave → 依赖后继
 ```
 
 一次模型回合可以产生多个 `delegate_task`。它们是并发安全的控制面调用，因此复用现有有界
@@ -31,17 +37,18 @@ LUMORA 的主 Agent 在运行时扮演 Supervisor，根据任务动态决定是�
   接收多轮消息，并在进程内创建至多一个可重建的 `Activation` 执行当前活跃期。
 - `Activation` 是 Session 的临时驻留执行体，不是预创建的通用 Worker Pool；Provider 可以决定
   子 Agent 在进程内、其他 Harness 或外部进程中执行。
-- Subagent 层表达父子 Session 树、并行 sibling 和深度上限，没有把任务依赖建模为显式 DAG。
-  依赖顺序与兄弟写入冲突仍由模型协调；显式 DAG 是 LUMORA 的后续增强，不是兼容前提。
+- Subagent 层继续表达父子 Session 树、并行 sibling 和深度上限；显式 DAG 作为其上的可选计划层，
+  只在任务确有依赖、多个 wave、deadline、节点级重试或写入冲突规划时使用，不是兼容前提。
 
-因此当前 LUMORA 对齐 DeepSeek Harness 的前台 one-shot 路径：`delegate_task` 的提示段只在工具
-实际可见时注入，触发采用“收益高于协调成本”的定性判断；多个独立委派同轮并发，结果全部返回
-后 Supervisor 再继续。后台 continuable 路径必须等 Session 控制面和耐久状态完成后再暴露。
+因此当前 LUMORA 同时对齐前台 one-shot 和后台 continuable 路径：`delegate_task` 的提示段只在
+工具实际可见时注入，触发采用“收益高于协调成本”的定性判断。continuable 路径不创建常驻
+Worker，而是保存稳定 Session 身份、FIFO Inbox 与 Checkpoint，仅在有工作时按需创建 Activation。
 
 ## 2. Session、身份与上下文边界
 
-每次委派生成新的 `agentId` 和 `sessionId`。子 Session 的消息历史只包含一条自包含任务，不继承
-父会话正文或父 Agent 的工具轨迹；父 Agent 必须在委派提示中写清目标、范围、必要背景和预期输出。
+每次委派生成新的 `agentId` 和 `sessionId`。one-shot 子 Session 的消息历史只包含一条自包含任务；
+continuable 子 Session 首次也不继承父会话正文，但之后会从 Core Checkpoint 恢复自身 Transcript，
+并按 Inbox 顺序追加后续任务。父 Agent 必须在首次委派中写清目标、范围、必要背景和预期输出。
 
 身份字段和审批关联分离：
 
@@ -74,18 +81,29 @@ Run 持有到所有子 Agent 完成后再释放，子 Agent 不另建不可审�
 `delegate_task` 本身标记为只读、并发安全，因为它只建立 Session，不直接写文件或改变外部状态。
 它不是对子 Agent 后续副作用的提前授权；真正产生副作用的工具仍会独立进入权限链路。
 
-## 4. 递归委派与容量边界
+## 4. 递归委派、预算与写入边界
 
 默认最大委派深度为 3：Depth 1 和 Depth 2 的 Agent 可以继续委派，Depth 3 的工具表不再暴露
 `delegate_task`；即使模型提交了越界调用，Runtime 仍会返回 `delegation_depth_exceeded`。
 
-每个父 Run 还有一个共享的活动子 Agent 上限，默认沿用 `max_parallel_tool_calls`（当前为 10）。
-Runtime 使用非等待式配额：达到上限的新委派明确返回 `agent_concurrency_limit`，避免父 Agent
-占据配额并等待后代时形成递归死锁，也避免指数级创建 Session。
+每个父 Run 建立一个由 Supervisor 与全部后代共享的 `ExecutionBudgetLedger`。默认限制为总 Token
+1,000,000、模型请求 256、工具尝试 1,024、墙钟时间 2 小时和活动子 Agent 10；调用方可通过
+`promptContext.executionBudget` 按请求收紧。模型请求、上下文压缩、工具重试和递归委派都在真正
+执行前原子预留预算，超限返回 `budget_exhausted`，后代不能通过新 Session 绕过根预算。
 
-不同 Agent 的工具继续进入同一个 `ResourceLockManager`：文件读可共享，写入独占，Shell 形成
-工作区写屏障，完整覆盖会校验最近读取版本。当前机制可以支持受控写入，但还不是显式的多写者
-任务租约或补丁合并协议。
+活动 Agent 使用非等待式配额：达到上限的新委派明确返回 `agent_concurrency_limit`，并标记为
+`retryable=true`、`toolExecutionState=not_started`。这避免父 Agent 占据配额并等待后代时形成
+递归死锁，也为 DAG 的安全重试提供可判定状态。
+
+`writeScopes` 在 Agent 或 DAG 节点整个执行期建立进程内 `WriteIntentClaim`；未预声明的文件写工具
+还会根据真实参数动态声明短期范围，然后进入同一个 `ResourceLockManager`。声明范围支持精确路径
+和目录 `/**`，精确文件同时记录基线哈希。范围重叠时立即返回 `writer_conflict`、冲突写者和建议
+动作，由 Supervisor 缩小范围、调整依赖或等待前序完成；不进行死等或盲目补丁合并。完整文件覆盖
+继续校验“执行者最近读取版本”，兄弟 Agent 不再共享同一份观察身份。
+
+模型流和只读工具的瞬态失败采用指数退避与 jitter；每次工具调用携带稳定 `effectId`/
+`idempotencyKey`。只有只读工具且失败明确可重试时才自动重放；写工具出现异常后状态记为
+`unknown`，不会自动重试。
 
 父 Run 的暂停/取消信号向所有后代传播。子 Agent 不消费父 Run 的 Steer Inbox，防止任一子
 Session 抢走本应由 Supervisor 处理的用户引导。
@@ -100,6 +118,12 @@ Session 抢走本应由 Supervisor 处理的用户引导。
 | `agent_event` | 当前 Agent 的一个可见进度、工具、搜索或上下文步骤 |
 | `agent_completed` | Agent 已返回最终报告 |
 | `agent_failed` | Agent 失败、取消或触发容量边界 |
+| `agent_session_created` | 已建立可续接 Session 身份 |
+| `agent_inbox_enqueued` | 父 Agent 已向 FIFO Inbox 追加消息 |
+| `agent_activation_started` | Session 已按需启动一个 Activation |
+| `agent_activation_interrupted` | 当前 Activation 已中止，Session 与 Checkpoint 保留 |
+| `agent_reported` | 子 Agent 已向父 Agent 提交耐久报告 |
+| `agent_checkpointed` | 已保存消费游标和公开 Transcript，不保存隐藏推理或调用栈 |
 
 普通子工具事件包装为 `agent_event`，并带当前 Agent 身份和 `childSequence`。后代 Agent 的四类
 生命周期事件不再包装成父 Agent 的普通步骤，而是保留自己的 `agentId`、`parentAgentId` 和
@@ -108,9 +132,17 @@ Session 抢走本应由 Supervisor 处理的用户引导。
 每个 Agent 的累计模型用量作为一次 `usageDelta` 合入父 Run；后代用量先进入父 Agent 的累计值，
 再向上归并，避免根 Run 重复计费。完成事件同时记录输入、输出、总 Token、活动上下文和最终回答。
 
-Core 将原始事件写入 `conversation_run_event`，并把有界投影保存到 Assistant 消息 WorkLog。
-当前“独立 Session”指独立模型上下文和稳定 Session 身份；轨迹仍嵌套在父 Run 事件日志中，尚无
-独立 AgentSession 数据表或可冷恢复 Checkpoint。
+Core 将原始事件写入 `conversation_run_event`，并在同一事务中投影到 `agent_session`、
+`agent_inbox_message`、`agent_activation` 和 `agent_checkpoint`。Core 是耐久状态的单一事实来源，
+下一 Turn 将 Session 快照回灌给 Python；若进程退出时 Activation 仍为 running，会先纠正为
+interrupted，再由 Supervisor 决定是否发送新消息重新激活。WorkLog 只保存有界状态字段，不复制
+Checkpoint Transcript；Checkpoint 保存公开消息、工具调用/结果和 Inbox 游标，不保存 Python
+调用栈或隐藏思维链。
+
+显式 DAG 通过 `create_workflow`、`list_workflows`、`run_workflow` 和 `retry_workflow_node` 操作。
+节点包含依赖、优先级、deadline、安全重试策略、写入范围和 Evidence/Artifact 引用；调度器每个
+wave 选择 ready 且写范围互不重叠的节点并行执行。每次工具结果都携带完整最新快照，后续 Turn
+从已持久化的公开工具消息恢复，因此已完成节点不会在正常跨 Turn 续接时重复执行。
 
 ## 6. Desktop 交互
 
@@ -127,11 +159,15 @@ Supervisor 主执行日志隐藏底层 `delegate_task` 行和 Agent 内部工具
 - 按 `childSequence` 排序的可见执行轨迹；
 - 当前 Agent 进一步委派的 Agent 头像与独立 Session；
 - 返回父 Agent 的最终报告。
+- continuable Session 的 Activation、待处理 Inbox、Checkpoint 序号与重启恢复状态。
 
 点击后代头像会为该后代打开或激活自己的 Agent 页签，内容区保留返回父 Agent 页签的入口。这样
 父子 Session 可以并排保留和快速切换，孙级 Agent 也不会伪装成 Supervisor 的直属调用。运行中的
 Agent 页签实时更新，完成后仍可从历史 WorkLog 恢复。上下文、审阅和 Agent 页签共享同一套紧凑
 页签栏、宽度记忆和拖拽行为，但各自保留独立的内容状态。
+
+Desktop 对 continuable Session 只提供只读状态和报告展示，不提供“继续/中止”按钮。续接、追加
+消息和中止 Activation 均由 Supervisor 通过模型工具判断并执行；用户仍可使用任务级全局停止。
 
 ## 7. 当前安全边界与限制
 
@@ -141,36 +177,51 @@ Agent 页签实时更新，完成后仍可从历史 WorkLog 恢复。上下文�
 - 子输出继续受 ToolResultProcessor、Artifact 外置和 Core 工作记录长度限制。
 - 文件与 Shell 当前仍在主 Python 进程中以宿主用户权限执行。应用层权限、路径检查和危险命令
   硬拒绝不是 Windows OS 沙箱，不能抵御运行时自身被完全攻破。
-- Session 目前一次性运行，不能跨 Turn 主动追问、独立暂停后恢复，也不能在进程重启后从 Agent
-  级 Checkpoint 继续。
-- 当前没有后台 continuable 模式、Session Inbox 或 Activation；`delegate_task` 返回前父 Agent
-  会等待，因此提示词不得要求父 Agent 在子 Agent 驻留期间继续新的模型回合。
-- 现有资源锁解决执行期互斥和陈旧覆盖，不表达长期任务所有权、补丁合并或业务级冲突决策。
+- Checkpoint 恢复的是公开 Transcript、Inbox 游标和工具结果，不恢复 Python 调用栈、模型隐藏
+  推理或执行到一半的工具；重启中的 Activation 会标记为 interrupted，由 Supervisor 重新激活。
+- continuable 是耐久 Session 加按需 Activation，不是永远驻留的后台进程。当前没有空闲 TTL、
+  自动关闭策略或跨设备远程调度。
+- `report` 会耐久写回父任务，并可在当前或后续 Turn 由 `list` 读取；它不会在父模型已经结束回答后
+  强行插入新的隐藏模型回合。
+- 写入意图目前是单 Python 进程内的执行期所有权，不是跨进程分布式租约；它检测冲突并支持
+  重规划，但不自动合并补丁或解决业务语义冲突。
+- DAG 的最新已完成工具结果可跨 Turn 恢复；若进程恰在一个 wave 中途退出，尚未形成工具结果的
+  节点副作用仍需 Supervisor 核验。专用耐久 DAG 表和 mid-wave exactly-once 恢复尚未实现。
 
 ## 8. 后续路线图
 
-### Phase 2：可续接 Session 与控制面
+### Phase 2：可续接 Session 与控制面（已完成）
 
-- 增加显式的前台 one-shot 与后台 continuable 两种路由；后台启动在 Inbox 接受首条消息后返回
+- 已增加显式的前台 one-shot 与后台 continuable 两种路由；后台启动在 Inbox 接受首条消息后返回
   稳定 `agentId/sessionId`，完成通过独立 settlement notice 通知父 Agent。
-- 增加 `send`、`list`、`interrupt`、`report`，允许 Supervisor 追问、追加上下文、中止或接收
+- 已增加 `send`、`list`、`interrupt`、`report`，允许 Supervisor 追问、追加上下文、中止或接收
   子 Agent 主动报告；同一 Session 的消息进入 FIFO Inbox。
-- Core 增加 AgentSession、AgentCheckpoint、父子关系和未读状态查询，不再只依赖父 Run 嵌套
+- Core 已增加 AgentSession、AgentCheckpoint、父子关系和未读状态查询，不再只依赖父 Run 嵌套
   投影；子 Session 的完整 Transcript 是详情输出的事实来源。
 - 每个 continuable Session 同时最多一个 Activation。Activation 可空闲卸载和冷恢复，不能成为
   状态唯一来源；父 Session 结束前应先处理仍存活的后代 Activation。
-- Desktop 增加 Session 树、未读状态、手动中止和跨 Turn 恢复入口。
-- 明确 Session Inbox、空闲 TTL、内存预算、最大活跃 Activation 数和 Core 耐久状态的单一事实
-  来源。这里不预创建通用 Worker Pool，容量按需分配给活跃 Session。
+- Desktop 增加 Session 树、未读/Inbox、Activation、Checkpoint 和跨 Turn 恢复状态；不增加人工
+  继续/中止入口，控制权保留给 Supervisor。
+- Core 已作为 Session Inbox、Checkpoint 和 Activation 状态的单一事实来源；不预创建通用
+  Worker Pool，容量按需分配给活跃 Session。空闲 TTL、长期 Transcript 压缩和更细预算进入
+  后续增量。
 
-### Phase 3：显式 DAG、预算与高级多写者协作
+### Phase 3A：显式 DAG、预算与多写者冲突规划（已完成）
 
 - DAG 是 LUMORA 面向复杂长期任务的可选计划层，不替代普通模型驱动委派；简单父子协作继续只
   使用 Session 树，避免为每次委派引入节点建模成本。
-- 把依赖、优先级、deadline、重试策略和 Evidence/Artifact 引用建模为显式 DAG。
-- 增加 Run、Agent、模型请求和工具四层并发与 Token 预算，支持公平调度和局部降级。
-- 在现有资源锁之上增加路径级写入租约、基线哈希、补丁合并和冲突重规划。
-- Checkpoint 在进程重启后恢复未完成节点，不重新执行已经确认的副作用或证据。
+- 已把依赖、优先级、deadline、重试策略、写入范围和 Evidence/Artifact 引用建模为显式 DAG；
+  独立 ready 节点按 wave 并行，重叠写范围自动错峰。
+- 已增加根 Run 共享的 Token、模型请求、工具尝试、墙钟时间和活动 Agent 预算，预算耗尽结构化
+  失败并保留已完成结果。
+- 已增加稳定 Effect ID、失败分类和只读瞬态安全重试；未知副作用不自动重放。
+- 已在资源锁之上增加路径级写入意图、基线哈希、冲突写者诊断和重规划提示。
+- 已通过公开工具消息跨 Turn 恢复 DAG 最新快照，运行中节点只在状态可安全判定时自动重试。
+
+### Phase 3B：耐久 DAG 与高级协作
+
+- 为 mid-wave 恢复增加专用 Core DAG/节点表、原子 checkpoint 与副作用提交记录。
+- 增加跨进程写入租约、公平调度、长期任务配额，以及基于基线的补丁合并/人工冲突解决。
 
 ### Phase 4：Windows 受限 Worker 与 Capability Broker
 

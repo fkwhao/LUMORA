@@ -81,6 +81,9 @@ class DatabaseMigrationTest {
         );
 
         assertThat(businessTableCount).isEqualTo(11);
+        assertThat(agentControlPlaneTableCount()).isEqualTo(4);
+        assertThat(agentControlPlaneChangeSetCount()).isEqualTo(1);
+        assertThat(taskWorkspaceChangeSetCount()).isEqualTo(1);
         assertThat(foreignKeysEnabled).isEqualTo(1);
         assertThat(applicationChangeSetCount()).isEqualTo(23);
         assertThat(conversationMessageColumns()).contains(
@@ -97,7 +100,8 @@ class DatabaseMigrationTest {
                 .contains("model_id", "context_window", "max_output_tokens",
                         "reasoning_efforts");
         assertThat(agentTaskColumns()).contains(
-                "selected_model", "selected_reasoning_effort"
+                "selected_model", "selected_reasoning_effort",
+                "workspace_path"
         );
         assertThat(memoryItemColumns()).contains(
                 "importance", "usage_count", "last_used_at",
@@ -200,6 +204,47 @@ class DatabaseMigrationTest {
                     '023-conversation-token-usage-details'
                 )
                 AND AUTHOR = 'lumora'
+                """,
+                Integer.class
+        );
+    }
+
+    private Integer agentControlPlaneTableCount() {
+        return jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM sqlite_master
+                WHERE type = 'table'
+                  AND name IN (
+                      'agent_session',
+                      'agent_inbox_message',
+                      'agent_activation',
+                      'agent_checkpoint'
+                  )
+                """,
+                Integer.class
+        );
+    }
+
+    private Integer agentControlPlaneChangeSetCount() {
+        return jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM DATABASECHANGELOG
+                WHERE ID = '028-agent-session-control-plane'
+                  AND AUTHOR = 'lumora'
+                """,
+                Integer.class
+        );
+    }
+
+    private Integer taskWorkspaceChangeSetCount() {
+        return jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM DATABASECHANGELOG
+                WHERE ID = '029-task-workspace'
+                  AND AUTHOR = 'lumora'
                 """,
                 Integer.class
         );

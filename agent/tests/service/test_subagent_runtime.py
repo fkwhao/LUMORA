@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ from app.permission.config_store import PermissionConfigStore
 from app.permission.engine import PermissionEngine
 from app.permission.model import PermissionMode, PermissionPolicy
 from app.prompt.prompt_builder import PromptBuilder
+from app.subagent.continuable import ContinuableSessionManager
 from app.subagent.runtime import (
     SubagentRuntime,
     _SubagentRunControl,
@@ -143,7 +145,8 @@ def test_subagent_uses_isolated_messages_and_emits_observable_lifecycle(
     assert "write_file" in str(harness.prompt.tools)
     assert "shell_command" in str(harness.prompt.tools)
     assert "实际暴露的工具表" in harness.prompt.system_prompt
-    assert "前台 one-shot 调用" in harness.prompt.system_prompt
+    assert "mode=one_shot" in harness.prompt.system_prompt
+    assert "mode=continuable" in harness.prompt.system_prompt
     assert harness.context.correlation_id == "run-1"
     assert harness.context.session_id.startswith("run-1:agent:")
     assert harness.context.agent_id == emitted[0].metadata["agentId"]
@@ -178,7 +181,8 @@ def test_delegate_tool_is_control_plane_and_parallel_safe(tmp_path: Path) -> Non
     assert tool.is_read_only(payload) is True
     assert tool.is_concurrency_safe(payload) is True
     assert tool.validate_input(payload) is None
-    assert "前台 one-shot" in tool.description
+    assert "mode=one_shot" in tool.description
+    assert "mode=continuable" in tool.description
     assert "实际可见的工具" in tool.description
 
 
@@ -506,3 +510,181 @@ def test_tool_executor_forwards_child_events_while_tool_is_running(
         "agent_completed",
         "tool_completed",
     ]
+
+
+def test_continuable_session_uses_fifo_inbox_and_serial_activations(
+    tmp_path: Path,
+) -> None:
+    class SerialHarness(ChildHarness):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started: asyncio.Queue[int] = asyncio.Queue()
+            self.release: asyncio.Queue[None] = asyncio.Queue()
+            self.activation_messages: list[list[Any]] = []
+
+        async def stream(
+            self,
+            _settings: Any,
+            _prompt: Any,
+            messages: Any,
+            _reasoning_effort: Any,
+            _registry: Any,
+            *_args: Any,
+        ) -> AsyncIterator[RunEvent]:
+            activation = len(self.activation_messages) + 1
+            self.activation_messages.append(list(messages))
+            await self.started.put(activation)
+            await self.release.get()
+            yield RunEvent(type="text_delta", delta=f"报告 {activation}")
+            yield RunEvent(type="completed", model="model")
+
+    harness = SerialHarness()
+    runtime = SubagentRuntime(
+        harness=harness,  # type: ignore[arg-type]
+        settings=ModelConnectionSettings(
+            provider_name="test",
+            base_url="https://example.com/v1",
+            api_key="secret",
+            model="model",
+        ),
+        reasoning_effort=None,
+        source_registry=create_default_tool_registry(),
+        prompt_builder=PromptBuilder(),
+        project_instructions=(),
+        permission_engine=PermissionEngine(),
+        approval_broker=ApprovalBroker(),
+        permission_config_store=PermissionConfigStore(tmp_path / "home"),
+        permission_policy=PermissionPolicy(mode=PermissionMode.FULL_ACCESS),
+        run_control=None,
+    )
+    manager = ContinuableSessionManager(runtime)
+    runtime.bind_session_manager(manager)
+    events: list[RunEvent] = []
+
+    async def scenario() -> None:
+        async def emit(event: RunEvent) -> None:
+            events.append(event)
+
+        context = ToolContext(
+            workspace_path=tmp_path,
+            correlation_id="run-continuable",
+            task_id="task-1",
+            session_id="run-continuable",
+            agent_id="supervisor",
+            background_event=emit,
+        )
+        result = await manager.start(
+            context,
+            description="持续研究",
+            prompt="先检查入口",
+        )
+        assert result.is_error is False
+        assert harness.activation_messages == []
+        agent_id = str(result.metadata["agentId"])
+        assert await harness.started.get() == 1
+        await manager.send(context, agent_id, "再验证测试")
+        assert len(harness.activation_messages) == 1
+        await harness.release.put(None)
+        assert await harness.started.get() == 2
+        assert [
+            message.content for message in harness.activation_messages[1]
+            if message.role == "user"
+        ] == ["先检查入口", "再验证测试"]
+        await harness.release.put(None)
+        await manager.wait_for_activations()
+        listed = json.loads(manager.list(context).content)
+        assert listed[0]["status"] == "idle"
+        assert listed[0]["pendingInbox"] == 0
+        assert listed[0]["checkpointSequence"] == 4
+
+    asyncio.run(scenario())
+
+    assert [event.type for event in events].count("agent_activation_started") == 2
+    assert [event.type for event in events].count("agent_checkpointed") == 4
+    assert [
+        event.metadata["consumedInboxSequence"]
+        for event in events
+        if event.type == "agent_activation_started"
+    ] == [1, 2]
+
+
+def test_continuable_interrupt_and_report_preserve_session(
+    tmp_path: Path,
+) -> None:
+    class WaitingHarness(ChildHarness):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+
+        async def stream(self, *args: Any) -> AsyncIterator[RunEvent]:
+            self.started.set()
+            await asyncio.Event().wait()
+            if False:
+                yield RunEvent(type="completed")
+
+    harness = WaitingHarness()
+    runtime = SubagentRuntime(
+        harness=harness,  # type: ignore[arg-type]
+        settings=ModelConnectionSettings(
+            provider_name="test",
+            base_url="https://example.com/v1",
+            api_key="secret",
+            model="model",
+        ),
+        reasoning_effort=None,
+        source_registry=create_default_tool_registry(),
+        prompt_builder=PromptBuilder(),
+        project_instructions=(),
+        permission_engine=PermissionEngine(),
+        approval_broker=ApprovalBroker(),
+        permission_config_store=PermissionConfigStore(tmp_path / "home"),
+        permission_policy=PermissionPolicy(mode=PermissionMode.FULL_ACCESS),
+        run_control=None,
+    )
+    manager = ContinuableSessionManager(runtime)
+    events: list[RunEvent] = []
+
+    async def scenario() -> None:
+        async def emit(event: RunEvent) -> None:
+            events.append(event)
+
+        parent = ToolContext(
+            workspace_path=tmp_path,
+            correlation_id="run-interrupt",
+            session_id="run-interrupt",
+            agent_id="supervisor",
+            background_event=emit,
+        )
+        started = await manager.start(
+            parent, description="等待", prompt="持续等待"
+        )
+        await harness.started.wait()
+        agent_id = str(started.metadata["agentId"])
+        session_id = str(started.metadata["sessionId"])
+        report = await manager.report(
+            ToolContext(
+                workspace_path=tmp_path,
+                session_id=session_id,
+                agent_id=agent_id,
+                background_event=emit,
+            ),
+            "阶段完成",
+            False,
+        )
+        assert report.is_error is False
+        interrupted = await manager.interrupt(parent, agent_id, "改变方向")
+        assert interrupted.is_error is False
+        await manager.wait_for_activations()
+        listed = json.loads(manager.list(parent).content)
+        assert listed[0]["status"] == "interrupted"
+        assert listed[0]["latestReport"] == "阶段完成"
+
+    asyncio.run(scenario())
+
+    assert any(event.type == "agent_reported" for event in events)
+    assert any(event.type == "agent_activation_interrupted" for event in events)
+    assert any(
+        event.type == "agent_checkpointed"
+        and event.metadata["agentStatus"] == "interrupted"
+        for event in events
+    )

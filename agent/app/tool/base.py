@@ -4,9 +4,12 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from app.tool.resource_locks import ResourceAccess, ResourceObservationStore
+
+if TYPE_CHECKING:
+    from app.execution.budget import ExecutionBudgetLedger
 
 ToolInput = Mapping[str, Any]
 ToolExecutor = Callable[["ToolContext", ToolInput], "ToolResult | Awaitable[ToolResult]"]
@@ -54,9 +57,30 @@ class ToolContext:
         default=None,
         repr=False,
     )
+    background_event: Callable[[Any], Awaitable[None]] | None = field(
+        default=None,
+        repr=False,
+    )
     session_id: str = ""
     agent_id: str = "supervisor"
     delegation_depth: int = 0
+    execution_budget: "ExecutionBudgetLedger | None" = field(
+        default=None,
+        repr=False,
+    )
+
+    @property
+    def resource_owner_id(self) -> str:
+        """Return the narrowest stable identity for optimistic resource checks.
+
+        A task can contain multiple root Runs and child Agent Sessions.  Using the
+        task id alone lets one Agent's read observation authorize another Agent's
+        later full-file replacement.  Session ids are unique per writer and are
+        therefore the preferred ownership boundary.  Tests and compatibility
+        callers that do not create Sessions continue to fall back to task id.
+        """
+
+        return self.session_id or self.task_id or self.agent_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +104,8 @@ class Tool(Protocol):
     def category(self) -> ToolCategory: ...
 
     def is_read_only(self, input_data: ToolInput) -> bool: ...
+
+    def is_retry_safe(self, input_data: ToolInput) -> bool: ...
 
     def is_destructive(self, input_data: ToolInput) -> bool: ...
 
@@ -118,6 +144,7 @@ class FunctionTool:
     executor: ToolExecutor = field(repr=False)
     category: ToolCategory = ToolCategory.OTHER
     read_only: InputPredicate = False
+    retry_safe: InputPredicate | None = None
     destructive: InputPredicate = False
     concurrency_safe: InputPredicate = False
     concurrency_key_factory: (
@@ -138,6 +165,10 @@ class FunctionTool:
 
     def is_read_only(self, input_data: ToolInput) -> bool:
         return _resolve_predicate(self.read_only, input_data)
+
+    def is_retry_safe(self, input_data: ToolInput) -> bool:
+        predicate = self.read_only if self.retry_safe is None else self.retry_safe
+        return _resolve_predicate(predicate, input_data)
 
     def is_destructive(self, input_data: ToolInput) -> bool:
         return _resolve_predicate(self.destructive, input_data)
@@ -209,6 +240,7 @@ def function_tool(
     execute: ToolExecutor,
     category: ToolCategory = ToolCategory.OTHER,
     read_only: InputPredicate = False,
+    retry_safe: InputPredicate | None = None,
     destructive: InputPredicate = False,
     concurrency_safe: InputPredicate = False,
     concurrency_key: (
@@ -225,6 +257,7 @@ def function_tool(
         executor=execute,
         category=category,
         read_only=read_only,
+        retry_safe=retry_safe,
         destructive=destructive,
         concurrency_safe=concurrency_safe,
         concurrency_key_factory=concurrency_key,

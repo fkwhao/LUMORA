@@ -445,7 +445,7 @@ def _observe_file(context: ToolContext, path: Path, version: str) -> None:
     observations = context.resource_observations
     if observations is not None:
         observations.observe(
-            context.task_id,
+            context.resource_owner_id,
             file_resource_key(path),
             version,
         )
@@ -456,16 +456,17 @@ def _require_current_observation(
     path: Path,
     current_version: str,
 ) -> None:
-    if not context.task_id or context.resource_observations is None:
+    owner_id = context.resource_owner_id
+    if not owner_id or context.resource_observations is None:
         return
     expected = context.resource_observations.expected(
-        context.task_id,
+        owner_id,
         file_resource_key(path),
     )
     if expected is None:
         raise ValueError("覆盖已有文件前必须先读取该文件")
     if expected != current_version:
-        raise ValueError("文件已被其他任务修改，请重新读取后再试")
+        raise ValueError("文件已被其他任务修改，或被其他 Agent 修改，请重新读取后再试")
 
 
 def _atomic_write_text(

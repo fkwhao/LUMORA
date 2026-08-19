@@ -38,7 +38,16 @@ describe("project conversation sidebar", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "新对话" })).toBeVisible();
+    const newTaskDock = screen
+      .getByRole("button", { name: "新对话" })
+      .closest<HTMLElement>(".new-task-sticky");
+    const sidebarScroll = screen
+      .getByRole("complementary", { name: "主导航" })
+      .querySelector<HTMLElement>(".sidebar-scroll");
+    expect(newTaskDock).not.toBeNull();
+    expect(sidebarScroll).not.toBeNull();
+    expect(newTaskDock?.nextElementSibling).toBe(sidebarScroll);
+    expect(sidebarScroll).not.toContainElement(newTaskDock);
     expect(screen.getByText("项目")).toBeVisible();
     expect(screen.queryByText("无项目")).not.toBeInTheDocument();
 

@@ -22,6 +22,7 @@ public class TaskResponseConverter {
         response.setFailureReason(task.getFailureReason());
         response.setSelectedModel(task.getSelectedModel());
         response.setSelectedReasoningEffort(task.getSelectedReasoningEffort());
+        response.setWorkspacePath(task.getWorkspacePath());
         response.setCreatedAt(task.getCreatedAt());
         response.setUpdatedAt(task.getUpdatedAt());
         return response;

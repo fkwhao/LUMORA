@@ -34,6 +34,8 @@ public class AgentTask {
     private String selectedModel;
     @TableField("selected_reasoning_effort")
     private String selectedReasoningEffort;
+    @TableField("workspace_path")
+    private String workspacePath;
     @TableField(
             value = "created_at",
             typeHandler = SqliteInstantTypeHandler.class
@@ -68,6 +70,7 @@ public class AgentTask {
         this.failureReason = failureReason;
         this.selectedModel = "";
         this.selectedReasoningEffort = "";
+        this.workspacePath = "";
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
     }
@@ -142,6 +145,14 @@ public class AgentTask {
 
     public void setSelectedReasoningEffort(String selectedReasoningEffort) {
         this.selectedReasoningEffort = selectedReasoningEffort;
+    }
+
+    public String getWorkspacePath() {
+        return workspacePath;
+    }
+
+    public void setWorkspacePath(String workspacePath) {
+        this.workspacePath = workspacePath;
     }
 
     public Instant getCreatedAt() {

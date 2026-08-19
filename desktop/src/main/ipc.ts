@@ -3,6 +3,7 @@ import { ipcMain, type WebContents } from "electron";
 import type {
   ApprovalDecisionInput,
   TaskPreferencesInput,
+  TaskWorkspaceInput,
 } from "../shared/task-contract";
 import type { TaskGateway } from "./task-gateway";
 import {
@@ -10,6 +11,8 @@ import {
   validateGoal,
   validateTaskId,
   validateTaskPreferencesInput,
+  validateTaskWorkspaceInput,
+  validateWorkspacePath,
 } from "../shared/validation";
 
 const channels = {
@@ -17,6 +20,7 @@ const channels = {
   list: "tasks:list",
   get: "tasks:get",
   updatePreferences: "tasks:update-preferences",
+  updateWorkspace: "tasks:update-workspace",
   decideApproval: "tasks:decide-approval",
   subscribe: "tasks:subscribe",
   unsubscribe: "tasks:unsubscribe",
@@ -26,8 +30,15 @@ const channels = {
 export function registerTaskIpc(gateway: TaskGateway): () => void {
   const subscriptions = new Map<string, () => void>();
 
-  ipcMain.handle(channels.create, (_event, goal: unknown) =>
-    gateway.create(validateGoal(goal)),
+  ipcMain.handle(channels.create, (
+    _event,
+    goal: unknown,
+    workspacePath: unknown,
+  ) =>
+    gateway.create(
+      validateGoal(goal),
+      validateWorkspacePath(workspacePath),
+    ),
   );
   ipcMain.handle(channels.list, () => gateway.list());
   ipcMain.handle(channels.get, (_event, taskId: unknown) =>
@@ -37,6 +48,11 @@ export function registerTaskIpc(gateway: TaskGateway): () => void {
     channels.updatePreferences,
     (_event, input: TaskPreferencesInput) =>
       gateway.updatePreferences(validateTaskPreferencesInput(input)),
+  );
+  ipcMain.handle(
+    channels.updateWorkspace,
+    (_event, input: TaskWorkspaceInput) =>
+      gateway.updateWorkspace(validateTaskWorkspaceInput(input)),
   );
   ipcMain.handle(
     channels.decideApproval,
@@ -78,6 +94,7 @@ export function registerTaskIpc(gateway: TaskGateway): () => void {
     ipcMain.removeHandler(channels.list);
     ipcMain.removeHandler(channels.get);
     ipcMain.removeHandler(channels.updatePreferences);
+    ipcMain.removeHandler(channels.updateWorkspace);
     ipcMain.removeHandler(channels.decideApproval);
     ipcMain.removeAllListeners(channels.subscribe);
     ipcMain.removeAllListeners(channels.unsubscribe);

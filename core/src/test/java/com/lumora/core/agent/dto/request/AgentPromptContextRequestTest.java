@@ -2,6 +2,7 @@ package com.lumora.core.agent.dto.request;
 
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AgentPromptContextRequestTest {
@@ -16,5 +17,13 @@ class AgentPromptContextRequestTest {
                 );
 
         assertTrue(context.getAvailableTools().isEmpty());
+        assertEquals(
+                1_000_000,
+                context.getExecutionBudget().getMaxTotalTokens()
+        );
+        assertEquals(
+                10,
+                context.getExecutionBudget().getMaxActiveAgents()
+        );
     }
 }

@@ -140,6 +140,10 @@ describe("collapsed sidebar conversation workspace", () => {
         }
         return taskId === firstTask.taskId ? firstTask : secondTask;
       }),
+      updateWorkspace: vi.fn(async (input) => ({
+        ...(input.taskId === firstTask.taskId ? firstTask : secondTask),
+        workspacePath: input.workspacePath,
+      })),
       updatePreferences: vi.fn(async (input) => ({
         ...(input.taskId === firstTask.taskId ? firstTask : secondTask),
         selectedModel: input.model,

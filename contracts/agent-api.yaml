@@ -462,6 +462,80 @@ components:
           description: 当前请求可使用的远程 Streamable HTTP MCP Server；Python 不持久化。
           items:
             $ref: "#/components/schemas/McpServer"
+        agentSessions:
+          type: array
+          maxItems: 200
+          description: Core 持久化的 continuable 子 Agent Session 快照，用于恢复。
+          items:
+            $ref: "#/components/schemas/AgentSessionSnapshot"
+        executionBudget:
+          $ref: "#/components/schemas/ExecutionBudget"
+    ExecutionBudget:
+      type: object
+      additionalProperties: false
+      properties:
+        maxTotalTokens: { type: integer, minimum: 1, maximum: 100000000, default: 1000000 }
+        maxModelRequests: { type: integer, minimum: 1, maximum: 100000, default: 256 }
+        maxToolCalls: { type: integer, minimum: 1, maximum: 1000000, default: 1024 }
+        maxWallTimeMs: { type: integer, minimum: 1000, maximum: 604800000, default: 7200000 }
+        maxActiveAgents: { type: integer, minimum: 1, maximum: 100, default: 10 }
+    AgentInboxMessage:
+      type: object
+      additionalProperties: false
+      required: [messageId, sequence, senderAgentId, content, status]
+      properties:
+        messageId: { type: string, minLength: 1, maxLength: 160 }
+        sequence: { type: integer, minimum: 1 }
+        senderAgentId: { type: string, minLength: 1, maxLength: 160 }
+        content: { type: string, minLength: 1, maxLength: 100000 }
+        status: { type: string, enum: [pending, consumed] }
+    AgentCheckpoint:
+      type: object
+      additionalProperties: false
+      required: [sequence, consumedInboxSequence, transcript]
+      properties:
+        sequence: { type: integer, minimum: 0 }
+        consumedInboxSequence: { type: integer, minimum: 0 }
+        transcript:
+          type: array
+          maxItems: 10000
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+        summary: { type: string, maxLength: 100000 }
+    AgentSessionSnapshot:
+      type: object
+      additionalProperties: false
+      required:
+        - agentId
+        - sessionId
+        - parentAgentId
+        - parentSessionId
+        - label
+        - status
+        - mode
+        - delegationDepth
+        - inbox
+      properties:
+        agentId: { type: string, minLength: 1, maxLength: 160 }
+        sessionId: { type: string, minLength: 1, maxLength: 500 }
+        parentAgentId: { type: string, minLength: 1, maxLength: 160 }
+        parentSessionId: { type: string, minLength: 1, maxLength: 500 }
+        label: { type: string, minLength: 1, maxLength: 120 }
+        status:
+          type: string
+          enum: [idle, running, interrupted, closed, failed]
+        mode: { type: string, enum: [one_shot, continuable] }
+        delegationDepth: { type: integer, minimum: 1, maximum: 20 }
+        model: { type: string, maxLength: 160 }
+        unreadReportCount: { type: integer, minimum: 0 }
+        latestReport: { type: string, maxLength: 100000 }
+        inbox:
+          type: array
+          maxItems: 2000
+          items:
+            $ref: "#/components/schemas/AgentInboxMessage"
+        checkpoint:
+          $ref: "#/components/schemas/AgentCheckpoint"
     McpServer:
       type: object
       additionalProperties: false
@@ -769,6 +843,12 @@ components:
             - agent_event
             - agent_completed
             - agent_failed
+            - agent_session_created
+            - agent_inbox_enqueued
+            - agent_activation_started
+            - agent_activation_interrupted
+            - agent_reported
+            - agent_checkpointed
             - context_compaction_started
             - context_compaction_progress
             - context_compacted

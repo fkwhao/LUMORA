@@ -1,6 +1,7 @@
 import type {
   ApprovalDecisionInput,
   TaskPreferencesInput,
+  TaskWorkspaceInput,
 } from "./task-contract";
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/;
@@ -95,6 +96,30 @@ export function validateTaskPreferencesInput(
     taskId: validateTaskId(input.taskId),
     model,
     reasoningEffort,
+  };
+}
+
+export function validateWorkspacePath(input: unknown): string {
+  if (input === undefined || input === null) return "";
+  if (typeof input !== "string") {
+    throw new TypeError("工作区路径必须是字符串");
+  }
+  const workspacePath = input.trim();
+  if (workspacePath.length > 4_096) {
+    throw new Error("工作区路径不能超过 4096 个字符");
+  }
+  return workspacePath;
+}
+
+export function validateTaskWorkspaceInput(
+  input: unknown,
+): TaskWorkspaceInput {
+  if (!isPlainRecord(input)) {
+    throw new Error("任务工作区参数格式无效");
+  }
+  return {
+    taskId: validateTaskId(input.taskId),
+    workspacePath: validateWorkspacePath(input.workspacePath),
   };
 }
 

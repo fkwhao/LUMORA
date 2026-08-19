@@ -18,6 +18,11 @@ from app.dto.response.chat_completion_response import (
 )
 from app.dto.response.context_compaction_response import ContextCompactionResponse
 from app.exception.provider_errors import ModelProviderError
+from app.execution.budget import (
+    BudgetExceeded,
+    ExecutionBudgetLedger,
+    ExecutionBudgetLimits,
+)
 from app.harness.agent_harness import AgentHarness
 from app.harness.ports.model_provider import ModelProviderPort
 from app.harness.run_control import (
@@ -51,7 +56,9 @@ from app.prompt.prompt_context import PromptContext
 from app.provider.token_usage import add_token_usage, empty_token_usage
 from app.service.mcp_service import to_mcp_config
 from app.skill.catalog import SkillCatalog
+from app.subagent.continuable import ContinuableSessionManager
 from app.subagent.runtime import SubagentRuntime, create_delegate_task_tool
+from app.subagent.workflow import WorkflowManager
 from app.tool.base import ToolAttachment, ToolContext
 from app.tool.default_registry import create_default_tool_registry
 from app.tool.registry import ToolRegistry
@@ -187,6 +194,14 @@ class ChatService:
         runtime_registry = self._tool_registry
         mcp_leases: list[McpSessionLease] = []
         prelude_usage = empty_token_usage()
+        budget_request = request.prompt_context.execution_budget
+        execution_budget = ExecutionBudgetLedger(ExecutionBudgetLimits(
+            max_total_tokens=budget_request.max_total_tokens,
+            max_model_requests=budget_request.max_model_requests,
+            max_tool_calls=budget_request.max_tool_calls,
+            max_wall_time_ms=budget_request.max_wall_time_ms,
+            max_active_agents=budget_request.max_active_agents,
+        ))
         try:
             if self._selected_mcp_servers(request):
                 yield RunEvent(
@@ -230,11 +245,22 @@ class ChatService:
                 permission_config_store=self._permission_config_store,
                 permission_policy=base_permission_policy,
                 run_control=run_control,
-                max_active_agents=self._max_parallel_tool_calls,
+                max_active_agents=budget_request.max_active_agents,
+                execution_budget=execution_budget,
             )
+            session_manager = ContinuableSessionManager(
+                subagent_runtime,
+                tuple(request.prompt_context.agent_sessions),
+            )
+            subagent_runtime.bind_session_manager(session_manager)
             runtime_registry.register(
                 create_delegate_task_tool(subagent_runtime)
             )
+            for tool in session_manager.tools():
+                runtime_registry.register(tool)
+            workflow_manager = WorkflowManager(subagent_runtime)
+            for tool in workflow_manager.tools():
+                runtime_registry.register(tool)
             prompt_context = self._prompt_context(
                 request,
                 tool_registry=runtime_registry,
@@ -282,6 +308,7 @@ class ChatService:
                         model=settings.model,
                     )
                     try:
+                        execution_budget.reserve_model_request()
                         paused, compacted = await await_or_pause(
                             self._provider.compact_context(
                                 settings,
@@ -301,6 +328,17 @@ class ChatService:
                             )
                             return
                         assert compacted is not None
+                        execution_budget.settle_tokens(
+                            compacted.usage.total_tokens
+                        )
+                    except BudgetExceeded as error:
+                        yield RunEvent(
+                            type="failed",
+                            error_message=str(error),
+                            model=settings.model,
+                            metadata=error.metadata(),
+                        )
+                        return
                     except (httpx.HTTPError, TypeError, ValueError):
                         yield RunEvent(
                             type="context_compaction_failed",
@@ -351,20 +389,22 @@ class ChatService:
                         usage=_to_run_usage(prelude_usage),
                         active_context_tokens=plan.after_tokens,
                     )
-            tool_context = (
-                ToolContext(
-                    workspace_path=resolved_workspace or Path.cwd().resolve(),
-                    workspace_scoped=resolved_workspace is not None,
-                    correlation_id=run_id,
-                    task_id=request.prompt_context.task_id or run_id,
-                    session_id=run_id,
-                    agent_id="supervisor",
-                    artifact_store=self._artifact_store,
-                    attachments=self._tool_attachments(request),
-                )
-                if prompt.tools
-                else None
+            background_events: asyncio.Queue[RunEvent] = asyncio.Queue()
+            tool_context = ToolContext(
+                workspace_path=resolved_workspace or Path.cwd().resolve(),
+                workspace_scoped=resolved_workspace is not None,
+                correlation_id=run_id,
+                task_id=request.prompt_context.task_id or run_id,
+                session_id=run_id,
+                agent_id="supervisor",
+                artifact_store=self._artifact_store,
+                attachments=self._tool_attachments(request),
+                background_event=background_events.put,
+                execution_budget=execution_budget,
             )
+            workflow_manager.restore_from_messages(request.messages, tool_context)
+            if prompt.tools:
+                await session_manager.publish_recovery_events(tool_context)
             stream = self._resolve_agent_harness().stream(
                 settings,
                 prompt,
@@ -382,7 +422,11 @@ class ChatService:
                 active_summary,
                 run_control,
             )
-            async for event in stream:
+            async for event in _stream_with_background_events(
+                stream,
+                background_events,
+                session_manager,
+            ):
                 yield _with_prelude_usage(event, prelude_usage)
         except (httpx.HTTPError, OSError, TypeError, ValueError) as error:
             logger.warning(
@@ -498,7 +542,19 @@ class ChatService:
         attachment_tool_names = self._attachment_tool_names(request)
         registered_names = registry.names()
         request_local_names = tuple(
-            name for name in ("delegate_task",) if name in registered_names
+            name
+            for name in (
+                "delegate_task",
+                "send_agent_message",
+                "list_agent_sessions",
+                "interrupt_agent",
+                "report_to_parent",
+                "create_workflow",
+                "list_workflows",
+                "run_workflow",
+                "retry_workflow_node",
+            )
+            if name in registered_names
         )
         base_names = {
             *self._tool_registry.names(),
@@ -774,7 +830,11 @@ def _with_prelude_usage(
     event: RunEvent,
     prelude: TokenUsageResponse,
 ) -> RunEvent:
-    if event.usage is None or not _has_billable_usage(prelude):
+    if (
+        event.usage is None
+        or event.metadata.get("usageDelta") is True
+        or not _has_billable_usage(prelude)
+    ):
         return event
     usage = event.usage
     return replace(
@@ -815,3 +875,80 @@ def _has_billable_usage(usage: TokenUsageResponse) -> bool:
         usage.cache_read_tokens,
         usage.cache_write_tokens,
     ))
+
+
+async def _stream_with_background_events(
+    stream: AsyncIterator[RunEvent],
+    background_events: asyncio.Queue[RunEvent],
+    session_manager: ContinuableSessionManager,
+) -> AsyncIterator[RunEvent]:
+    """Merge root and Activation events, committing root completion last."""
+    iterator = stream.__aiter__()
+    main_task: asyncio.Task[RunEvent] | None = asyncio.create_task(
+        _next_run_event(iterator)
+    )
+    background_task: asyncio.Task[RunEvent] | None = asyncio.create_task(
+        background_events.get()
+    )
+    activation_task: asyncio.Task[None] | None = None
+    terminal_event: RunEvent | None = None
+    try:
+        while main_task is not None:
+            wait_for = {main_task}
+            if background_task is not None:
+                wait_for.add(background_task)
+            done, _pending = await asyncio.wait(
+                wait_for,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if background_task is not None and background_task in done:
+                yield background_task.result()
+                background_task = asyncio.create_task(background_events.get())
+            if main_task in done:
+                try:
+                    event = main_task.result()
+                except StopAsyncIteration:
+                    main_task = None
+                else:
+                    if event.type in {"completed", "failed", "paused"}:
+                        terminal_event = event
+                    else:
+                        yield event
+                    main_task = asyncio.create_task(_next_run_event(iterator))
+
+        activation_task = asyncio.create_task(
+            session_manager.shutdown()
+            if terminal_event is not None and terminal_event.type == "failed"
+            else session_manager.wait_for_activations()
+        )
+        while not activation_task.done():
+            if not background_events.empty():
+                yield background_events.get_nowait()
+                continue
+            if background_task is None:
+                background_task = asyncio.create_task(background_events.get())
+            done, _pending = await asyncio.wait(
+                {activation_task, background_task},  # type: ignore[arg-type]
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if background_task in done:
+                yield background_task.result()
+                background_task = asyncio.create_task(background_events.get())
+
+        await activation_task
+        if background_task is not None and background_task.done():
+            yield background_task.result()
+            background_task = None
+        while not background_events.empty():
+            yield background_events.get_nowait()
+        if terminal_event is not None:
+            yield terminal_event
+    finally:
+        for task in (main_task, background_task, activation_task):
+            if task is not None and not task.done():
+                task.cancel()
+        await session_manager.shutdown()
+
+
+async def _next_run_event(iterator: AsyncIterator[RunEvent]) -> RunEvent:
+    return await iterator.__anext__()

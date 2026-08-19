@@ -4,6 +4,11 @@ import uuid
 from dataclasses import replace
 
 from app.dto.request.chat_completion_request import ChatMessageRequest
+from app.execution.budget import BudgetExceeded, ExecutionBudgetLedger
+from app.execution.write_intents import (
+    WriterConflict,
+    declared_write_scopes,
+)
 from app.harness.agent_harness import AgentHarness
 from app.harness.run_control import RunControl
 from app.harness.run_event import RunEvent, RunUsage
@@ -32,6 +37,12 @@ _AGENT_LIFECYCLE_EVENT_TYPES = {
     "agent_event",
     "agent_completed",
     "agent_failed",
+    "agent_session_created",
+    "agent_inbox_enqueued",
+    "agent_activation_started",
+    "agent_activation_interrupted",
+    "agent_reported",
+    "agent_checkpointed",
 }
 _VISIBLE_CHILD_EVENT_TYPES = {
     "progress_message",
@@ -95,6 +106,7 @@ class SubagentRuntime:
         run_control: RunControl | None,
         max_delegation_depth: int = _DEFAULT_MAX_DELEGATION_DEPTH,
         max_active_agents: int = _DEFAULT_MAX_ACTIVE_AGENTS,
+        execution_budget: ExecutionBudgetLedger | None = None,
     ) -> None:
         self._harness = harness
         self._settings = settings
@@ -109,11 +121,17 @@ class SubagentRuntime:
         self._run_control = run_control
         self._max_delegation_depth = max(1, max_delegation_depth)
         self._max_active_agents = max(1, max_active_agents)
+        self._execution_budget = execution_budget
         self._allowed_tool_names: tuple[str, ...] | None = None
         self._mcp_tool_names: tuple[str, ...] = ()
         self._available_skills: tuple[SkillSummary, ...] = ()
         self._active_agents = 0
         self._active_agents_lock = asyncio.Lock()
+        self._session_manager = None
+
+    def bind_session_manager(self, manager) -> None:
+        """Bind the request-scoped continuable Session control plane."""
+        self._session_manager = manager
 
     def bind_allowed_tools(
         self,
@@ -136,6 +154,7 @@ class SubagentRuntime:
         *,
         description: str,
         prompt: str,
+        write_scopes: tuple[str, ...] = (),
     ) -> ToolResult:
         delegation_depth = context.delegation_depth + 1
         if delegation_depth > self._max_delegation_depth:
@@ -149,6 +168,17 @@ class SubagentRuntime:
         parent_run_id = context.correlation_id or context.task_id or "local"
         parent_session_id = context.session_id or parent_run_id
         session_id = f"{parent_session_id}:agent:{agent_id}"
+        try:
+            resolved_write_scopes = declared_write_scopes(
+                context.workspace_path,
+                write_scopes,
+            )
+        except ValueError as error:
+            return ToolResult(
+                str(error),
+                is_error=True,
+                metadata={"failureKind": "invalid_write_scope"},
+            )
         identity = {
             "agentId": agent_id,
             "sessionId": session_id,
@@ -156,8 +186,30 @@ class SubagentRuntime:
             "agentLabel": description,
             "agentRole": "worker",
             "delegationDepth": delegation_depth,
+            "writeScopes": [
+                scope.metadata() for scope in resolved_write_scopes
+            ],
         }
-        if not await self._reserve_agent():
+        try:
+            reserved_agent = await self._reserve_agent()
+        except BudgetExceeded as error:
+            metadata = {
+                **identity,
+                **error.metadata(),
+                "agentStatus": "failed",
+                "toolExecutionState": "not_started",
+            }
+            await self._emit(context, RunEvent(
+                type="agent_failed",
+                item_id=agent_id,
+                title=description,
+                output=str(error),
+                error_message=str(error),
+                model=self._settings.model,
+                metadata=metadata,
+            ))
+            return ToolResult(str(error), is_error=True, metadata=metadata)
+        if not reserved_agent:
             message = f"并行 Agent 已达到上限（{self._max_active_agents} 个）"
             await self._emit(context, RunEvent(
                 type="agent_failed",
@@ -170,6 +222,8 @@ class SubagentRuntime:
                     **identity,
                     "agentStatus": "failed",
                     "failureKind": "agent_concurrency_limit",
+                    "retryable": True,
+                    "toolExecutionState": "not_started",
                 },
             ))
             return ToolResult(
@@ -179,6 +233,8 @@ class SubagentRuntime:
                     **identity,
                     "agentStatus": "failed",
                     "failureKind": "agent_concurrency_limit",
+                    "retryable": True,
+                    "toolExecutionState": "not_started",
                 },
             )
 
@@ -187,7 +243,13 @@ class SubagentRuntime:
         latest_usage: RunUsage | None = None
         forwarded_events = 0
         child_sequence = 0
+        write_claim = None
         try:
+            write_claim = self._source_registry.write_intents.acquire(
+                session_id,
+                resolved_write_scopes,
+                owner_label=description,
+            )
             await self._emit(context, RunEvent(
                 type="agent_started",
                 item_id=agent_id,
@@ -289,10 +351,33 @@ class SubagentRuntime:
                 metadata={
                     **identity,
                     "agentStatus": "failed",
+                    "failureKind": "agent_failed",
+                    "retryable": False,
+                    "toolExecutionState": "unknown",
                     **_usage_metadata(latest_usage),
                 },
             ))
             raise
+        except WriterConflict as error:
+            duration_ms = int((time.perf_counter() - started_at) * 1000)
+            message = str(error)
+            metadata = {
+                **identity,
+                **error.metadata(),
+                "agentStatus": "failed",
+                "durationMs": duration_ms,
+            }
+            await self._emit(context, RunEvent(
+                type="agent_failed",
+                item_id=agent_id,
+                title=description,
+                output=message,
+                error_message=message,
+                duration_ms=duration_ms,
+                model=self._settings.model,
+                metadata=metadata,
+            ))
+            return ToolResult(message, is_error=True, metadata=metadata)
         except Exception as error:  # noqa: BLE001 - child session boundary
             duration_ms = int((time.perf_counter() - started_at) * 1000)
             message = str(error) or "子 Agent 执行失败"
@@ -318,10 +403,14 @@ class SubagentRuntime:
                     **identity,
                     "agentStatus": "failed",
                     "durationMs": duration_ms,
+                    "failureKind": "agent_failed",
+                    "retryable": False,
+                    "toolExecutionState": "unknown",
                     **_usage_metadata(latest_usage),
                 },
             )
         finally:
+            self._source_registry.write_intents.release(write_claim)
             await self._release_agent()
 
     def _build_prompt(
@@ -371,6 +460,8 @@ class SubagentRuntime:
         return registry
 
     async def _reserve_agent(self) -> bool:
+        if self._execution_budget is not None:
+            return self._execution_budget.try_acquire_agent()
         async with self._active_agents_lock:
             if self._active_agents >= self._max_active_agents:
                 return False
@@ -378,6 +469,9 @@ class SubagentRuntime:
             return True
 
     async def _release_agent(self) -> None:
+        if self._execution_budget is not None:
+            self._execution_budget.release_agent()
+            return
         async with self._active_agents_lock:
             self._active_agents = max(0, self._active_agents - 1)
 
@@ -437,18 +531,39 @@ class SubagentRuntime:
 
 def create_delegate_task_tool(runtime: SubagentRuntime):
     async def execute(context: ToolContext, input_data: ToolInput) -> ToolResult:
+        mode = str(input_data.get("mode") or "one_shot").strip()
+        write_scopes = tuple(
+            str(value).strip()
+            for value in input_data.get("writeScopes", ())
+            if isinstance(value, str) and value.strip()
+        )
+        if mode == "continuable":
+            if runtime._session_manager is None:
+                return ToolResult(
+                    "continuable Session 控制平面尚未初始化",
+                    is_error=True,
+                    metadata={"failureKind": "session_manager_unavailable"},
+                )
+            return await runtime._session_manager.start(
+                context,
+                description=str(input_data["description"]).strip(),
+                prompt=str(input_data["prompt"]).strip(),
+                write_scopes=write_scopes,
+            )
         return await runtime.run(
             context,
             description=str(input_data["description"]).strip(),
             prompt=str(input_data["prompt"]).strip(),
+            write_scopes=write_scopes,
         )
 
     return function_tool(
         name="delegate_task",
         description=(
-            "以前台 one-shot 方式启动一个独立 Session 的子 Agent，完成边界清晰且可独立交付"
-            "的任务。子 Agent 继承本次请求实际可见的工具和权限边界；调用会等待其最终报告。"
-            "多个互不依赖的任务可在同一轮并行调用，最终结果由当前 Agent 核验并综合。"
+            "启动一个独立 Session 的子 Agent。mode=one_shot 时调用会等待最终报告，适合"
+            "边界清晰的一次性任务；mode=continuable 时任务写入 Inbox 并立即返回，子 Agent"
+            "在后台 Activation 中执行，之后可用 send/list/interrupt 管理并通过 report 汇报。"
+            "子 Agent 继承本次请求实际可见的工具和权限边界。"
         ),
         input_schema={
             "type": "object",
@@ -465,6 +580,25 @@ def create_delegate_task_tool(runtime: SubagentRuntime):
                     "minLength": 1,
                     "maxLength": 20000,
                 },
+                "mode": {
+                    "type": "string",
+                    "enum": ["one_shot", "continuable"],
+                    "default": "one_shot",
+                    "description": "一次性交付或可继续唤醒的长期 Session。",
+                },
+                "writeScopes": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "description": (
+                        "可选写入意图。使用工作区相对精确路径，或目录末尾 /**；"
+                        "重叠写者会在执行前返回冲突以便重规划。"
+                    ),
+                    "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000,
+                    },
+                },
             },
             "required": ["description", "prompt"],
             "additionalProperties": False,
@@ -472,6 +606,7 @@ def create_delegate_task_tool(runtime: SubagentRuntime):
         execute=execute,
         category=ToolCategory.OTHER,
         read_only=True,
+        retry_safe=False,
         concurrency_safe=True,
         validate=_validate_delegate_input,
         title=lambda data: f"启动 Agent：{str(data.get('description') or '').strip()}",
@@ -483,6 +618,14 @@ def _validate_delegate_input(input_data: ToolInput) -> str | None:
         value = input_data.get(key)
         if not isinstance(value, str) or not value.strip():
             return f"{key} 必须是非空字符串"
+    mode = input_data.get("mode", "one_shot")
+    if mode not in {"one_shot", "continuable"}:
+        return "mode 必须是 one_shot 或 continuable"
+    write_scopes = input_data.get("writeScopes", [])
+    if not isinstance(write_scopes, list):
+        return "writeScopes 必须是字符串数组"
+    if any(not isinstance(value, str) or not value.strip() for value in write_scopes):
+        return "writeScopes 不能包含空值"
     return None
 
 

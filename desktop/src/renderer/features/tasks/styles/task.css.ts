@@ -48,8 +48,10 @@ const historyHydrationSweep = keyframes({
 });
 
 globalStyle(".task-layout", {
+  position: "relative",
   display: "grid",
-  gridTemplateRows: "auto minmax(0, 1fr)",
+  gridTemplateColumns: "minmax(0, 1fr)",
+  gridTemplateRows: "44px minmax(0, 1fr)",
   width: "100%",
   height: "100%",
   margin: "0",
@@ -61,12 +63,19 @@ globalStyle(".task-layout", {
 
 globalStyle(".task-header", {
   display: "flex",
+  width: "100%",
+  gridColumn: "1",
+  gridRow: "1",
   alignItems: "center",
   justifyContent: "space-between",
   minHeight: "44px",
+  height: "44px",
+  boxSizing: "border-box",
   gap: "20px",
-  padding: "5px 12px",
+  padding: "5px 52px 5px 12px",
   borderBottom: "1px solid var(--line)",
+  transition: "width 220ms cubic-bezier(0.22, 0.82, 0.24, 1)",
+  willChange: "width",
 });
 
 globalStyle(".task-title-row", {
@@ -210,14 +219,11 @@ globalStyle(".task-project-folder", {
   color: "var(--muted)",
 });
 
-globalStyle(".task-actions > .review-toggle.active", {
-  color: "var(--ink)",
-  borderColor: "var(--line-strong)",
-  background: "var(--surface-soft)",
-});
-
 globalStyle(".task-stage", {
   display: "flex",
+  width: "100%",
+  gridColumn: "1",
+  gridRow: "2",
   minWidth: "0",
   minHeight: "0",
   overflow: "hidden",
@@ -225,6 +231,12 @@ globalStyle(".task-stage", {
   borderRadius: "0",
   background: "var(--aui-background, var(--surface))",
   boxShadow: "none",
+  transition: "width 220ms cubic-bezier(0.22, 0.82, 0.24, 1)",
+  willChange: "width",
+});
+
+globalStyle(".task-layout.has-right-sidebar .task-header, .task-layout.has-right-sidebar .task-stage", {
+  width: "calc(100% - var(--context-pane-width))",
 });
 
 globalStyle(".question-rail", {
@@ -2109,7 +2121,7 @@ globalStyle(".agent-call-item > button", {
   display: "grid",
   width: "100%",
   minWidth: "0",
-  gridTemplateColumns: "26px minmax(0, 1fr) auto",
+  gridTemplateColumns: "22px minmax(0, 1fr) auto",
   alignItems: "center",
   gap: "9px",
   padding: "4px 2px",
@@ -2132,31 +2144,19 @@ globalStyle(".agent-call-item > button:disabled", {
 });
 
 globalStyle(".agent-call-avatar, .subagent-pane-avatar", {
-  position: "relative",
-  display: "grid",
+  display: "block",
   width: "26px",
   height: "26px",
-  placeItems: "center",
-  color: "#087f68",
-  border: "1px solid color-mix(in srgb, #0a9b7a 34%, var(--line))",
+  boxSizing: "border-box",
+  border: "2px solid var(--surface)",
   borderRadius: "50%",
-  background: "color-mix(in srgb, #0a9b7a 10%, var(--surface))",
-  boxShadow: "inset 0 0 0 2px var(--surface)",
+  background: "var(--agent-accent)",
+  boxShadow: "0 0 0 1px color-mix(in srgb, var(--agent-accent) 52%, var(--line))",
 });
 
-globalStyle('.agent-call-item[data-status="running"] .agent-call-avatar::after, .subagent-pane-avatar[data-status="running"]::after', {
-  position: "absolute",
-  inset: "-3px",
-  border: "1px solid color-mix(in srgb, #0a9b7a 58%, transparent)",
-  borderRadius: "50%",
-  content: "\"\"",
-  animation: `${agentAvatarPulse} 1.8s ease-out infinite`,
-});
-
-globalStyle('.agent-call-item[data-status="failed"] .agent-call-avatar, .subagent-pane-avatar[data-status="failed"]', {
-  color: "#b9470b",
-  borderColor: "color-mix(in srgb, #c95110 42%, var(--line))",
-  background: "color-mix(in srgb, #c95110 8%, var(--surface))",
+globalStyle(".agent-call-avatar", {
+  width: "22px",
+  height: "22px",
 });
 
 globalStyle(".agent-call-item > button > span:nth-child(2)", {
@@ -2814,33 +2814,53 @@ globalStyle(".review-pane-content", {
 });
 
 globalStyle(".conversation-usage-pane", {
-  position: "relative",
+  position: "absolute",
+  zIndex: "20",
+  top: "0",
+  right: "0",
+  bottom: "0",
   display: "grid",
   flex: "0 0 auto",
-  width: "0",
+  width: "var(--context-pane-width)",
   minWidth: "0",
   minHeight: "0",
-  gridTemplateRows: "40px minmax(0, 1fr)",
+  gridTemplateRows: "44px minmax(0, 1fr)",
   overflow: "visible",
-  borderLeft: "1px solid transparent",
+  borderLeft: "1px solid var(--line)",
   background: "var(--surface)",
+  backfaceVisibility: "hidden",
   containerName: "contextPane",
   containerType: "inline-size",
-  opacity: "0",
-  transform: "translateX(22px)",
-  willChange: "width, transform, opacity",
-  transition:
-    "width 380ms cubic-bezier(0.22, 1, 0.36, 1), transform 360ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease, border-color 200ms ease",
+  transform: "translate3d(100%, 0, 0)",
+  willChange: "transform",
+  transition: "transform 220ms cubic-bezier(0.22, 0.82, 0.24, 1)",
+});
+
+globalStyle(".right-sidebar-toolbar", {
+  display: "block",
+  minWidth: "0",
+  paddingRight: "42px",
+  boxSizing: "border-box",
+  borderBottom: "1px solid var(--line)",
+  background: "var(--surface)",
+});
+
+globalStyle(".right-sidebar-tabs-shell", {
+  position: "relative",
+  minWidth: "0",
+  overflow: "hidden",
 });
 
 globalStyle(".right-sidebar-tabbar", {
   display: "flex",
+  height: "43px",
   minWidth: "0",
   alignItems: "stretch",
+  padding: "0 3px",
   overflowX: "auto",
   overflowY: "hidden",
-  borderBottom: "1px solid var(--line)",
   background: "var(--surface)",
+  overscrollBehaviorX: "contain",
   scrollbarWidth: "none",
 });
 
@@ -2851,33 +2871,25 @@ globalStyle(".right-sidebar-tabbar::-webkit-scrollbar", {
 globalStyle(".right-sidebar-tab", {
   position: "relative",
   display: "flex",
-  minWidth: "76px",
-  maxWidth: "184px",
-  flex: "0 1 auto",
+  width: "max-content",
+  minWidth: "92px",
+  maxWidth: "190px",
+  height: "34px",
+  flex: "0 0 auto",
+  alignSelf: "center",
   alignItems: "stretch",
+  margin: "0 2px",
   color: "var(--muted)",
-  borderRight: "1px solid color-mix(in srgb, var(--line) 72%, transparent)",
+  border: "1px solid transparent",
+  borderRadius: "9px",
   background: "transparent",
-});
-
-globalStyle(".right-sidebar-tab::after", {
-  position: "absolute",
-  right: "8px",
-  bottom: "0",
-  left: "8px",
-  height: "2px",
-  borderRadius: "2px 2px 0 0",
-  background: "transparent",
-  content: '""',
+  overflow: "hidden",
 });
 
 globalStyle(".right-sidebar-tab.is-active", {
   color: "var(--ink)",
+  borderColor: "color-mix(in srgb, var(--line) 74%, transparent)",
   background: "color-mix(in srgb, var(--surface-soft) 55%, transparent)",
-});
-
-globalStyle(".right-sidebar-tab.is-active::after", {
-  background: "color-mix(in srgb, var(--blue) 78%, var(--ink))",
 });
 
 globalStyle(".right-sidebar-tab-select", {
@@ -2903,6 +2915,13 @@ globalStyle(".right-sidebar-tab-select > span:last-child", {
   whiteSpace: "nowrap",
 });
 
+globalStyle(".right-sidebar-tab.has-long-label .right-sidebar-tab-select > span:last-child", {
+  paddingRight: "12px",
+  textOverflow: "clip",
+  WebkitMaskImage: "linear-gradient(to right, #000 0, #000 calc(100% - 16px), transparent 100%)",
+  maskImage: "linear-gradient(to right, #000 0, #000 calc(100% - 16px), transparent 100%)",
+});
+
 globalStyle(".right-sidebar-tab-select > svg", {
   flex: "0 0 auto",
 });
@@ -2917,7 +2936,7 @@ globalStyle(".right-sidebar-tab .subagent-pane-avatar", {
   width: "17px",
   height: "17px",
   flex: "0 0 auto",
-  boxShadow: "none",
+  borderWidth: "1.5px",
 });
 
 globalStyle(".right-sidebar-tab-close", {
@@ -2939,6 +2958,39 @@ globalStyle(".right-sidebar-tab-close:hover", {
   opacity: "1",
 });
 
+globalStyle(".task-sidebar-visibility-toggle", {
+  position: "absolute",
+  zIndex: "30",
+  top: "0",
+  right: "0",
+  display: "grid",
+  width: "42px",
+  height: "43px",
+  padding: "0",
+  placeItems: "center",
+  color: "var(--subtle)",
+  border: "0",
+  background: "transparent",
+  cursor: "pointer",
+  transition: "color 120ms ease",
+});
+
+globalStyle(".task-sidebar-visibility-toggle svg", {
+  opacity: "0.72",
+  filter: "brightness(0.96)",
+  transition: "opacity 120ms ease, filter 120ms ease",
+});
+
+globalStyle(".task-sidebar-visibility-toggle:hover", {
+  color: "var(--ink)",
+  background: "transparent",
+});
+
+globalStyle(".task-sidebar-visibility-toggle:hover svg", {
+  opacity: "1",
+  filter: "brightness(1.18)",
+});
+
 globalStyle(".right-sidebar-content, .right-sidebar-tab-panel", {
   width: "100%",
   height: "100%",
@@ -2951,7 +3003,56 @@ globalStyle(".right-sidebar-scroll-content", {
   height: "100%",
   minHeight: "0",
   overscrollBehavior: "contain",
+  scrollbarGutter: "stable",
+  scrollbarWidth: "thin",
+  scrollbarColor:
+    "color-mix(in srgb, var(--muted) 34%, transparent) transparent",
 });
+
+globalStyle(
+  ".right-sidebar-scroll-content::-webkit-scrollbar,\n.review-diff::-webkit-scrollbar",
+  {
+    width: "10px",
+    height: "10px",
+  },
+);
+
+globalStyle(
+  ".right-sidebar-scroll-content::-webkit-scrollbar-track,\n.review-diff::-webkit-scrollbar-track",
+  { background: "transparent" },
+);
+
+globalStyle(
+  ".right-sidebar-scroll-content::-webkit-scrollbar-thumb,\n.review-diff::-webkit-scrollbar-thumb",
+  {
+    minHeight: "44px",
+    border: "3px solid transparent",
+    borderRadius: "999px",
+    background:
+      "color-mix(in srgb, var(--muted) 38%, transparent) padding-box",
+  },
+);
+
+globalStyle(
+  ".right-sidebar-scroll-content::-webkit-scrollbar-thumb:hover,\n.review-diff::-webkit-scrollbar-thumb:hover",
+  {
+    background:
+      "color-mix(in srgb, var(--muted) 58%, transparent) padding-box",
+  },
+);
+
+globalStyle(
+  ".right-sidebar-scroll-content::-webkit-scrollbar-thumb:active,\n.review-diff::-webkit-scrollbar-thumb:active",
+  {
+    background:
+      "color-mix(in srgb, var(--blue) 62%, var(--muted)) padding-box",
+  },
+);
+
+globalStyle(
+  ".right-sidebar-scroll-content::-webkit-scrollbar-corner,\n.review-diff::-webkit-scrollbar-corner",
+  { background: "transparent" },
+);
 
 globalStyle(".conversation-usage-scroll.subagent-session-scroll", {
   display: "flex",
@@ -3250,7 +3351,7 @@ globalStyle(".subagent-answer", {
 
 globalStyle(".subagent-answer .markdown-body, .subagent-answer > p", {
   margin: "0",
-  color: "#272c33",
+  color: "var(--ink)",
   fontSize: "12.5px",
   lineHeight: "1.78",
 });
@@ -3373,30 +3474,19 @@ globalStyle(".aui-composer-root .composer-add-panel button small", {
 });
 
 globalStyle(".conversation-usage-pane.is-open", {
-  width: "var(--context-pane-width)",
   overflow: "visible",
-  borderLeftColor: "var(--line)",
-  opacity: "1",
-  transform: "translateX(0)",
-  transition:
-    "width 240ms cubic-bezier(0.22, 1, 0.36, 1), transform 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 150ms ease, border-color 150ms ease",
+  transform: "translate3d(0, 0, 0)",
 });
 
 globalStyle(".conversation-usage-pane:not(.is-open) > :not(.context-pane-resize-handle)", {
   visibility: "hidden",
   pointerEvents: "none",
-  opacity: "0",
-  transition: "visibility 0s linear 240ms, opacity 120ms ease",
+  transition: "visibility 0s linear 220ms",
 });
 
 globalStyle(".conversation-usage-pane.is-open > :not(.context-pane-resize-handle)", {
   visibility: "visible",
-  opacity: "1",
-  transition: "opacity 150ms ease 25ms",
-});
-
-globalStyle(".conversation-usage-pane.is-open > .conversation-usage-scroll", {
-  transition: "visibility 0s linear 65ms, opacity 145ms ease 65ms",
+  transition: "none",
 });
 
 globalStyle(".context-pane-resize-handle", {
@@ -3412,13 +3502,7 @@ globalStyle(".context-pane-resize-handle", {
 });
 
 globalStyle(".conversation-usage-pane:not(.is-open) .context-pane-resize-handle", {
-  position: "fixed",
-  zIndex: "10",
-  top: "82px",
-  right: "0",
-  bottom: "0",
-  left: "auto",
-  width: "7px",
+  left: "-8px",
   cursor: "w-resize",
   pointerEvents: "auto",
 });
@@ -3451,10 +3535,10 @@ globalStyle("body.resizing-context-pane .conversation-usage-pane", {
   transition: "none",
 });
 
-globalStyle("body.resizing-context-pane .conversation-usage-pane:not(.is-open)", {
-  transition:
-    "width 380ms cubic-bezier(0.22, 1, 0.36, 1), transform 360ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease, border-color 200ms ease",
-});
+globalStyle(
+  "body.resizing-context-pane .task-header,\nbody.resizing-context-pane .task-stage",
+  { transition: "none" },
+);
 
 globalStyle(
   "body.opening-context-pane-by-drag .conversation-usage-pane.is-open > .right-sidebar-content",
@@ -3956,12 +4040,48 @@ globalStyle(".review-file-list", {
 });
 
 globalStyle('[data-slot="aui_thread-viewport"]', {
+  overscrollBehaviorY: "contain",
+  scrollbarGutter: "stable",
+  scrollbarWidth: "thin",
+  scrollbarColor:
+    "color-mix(in srgb, var(--muted) 34%, transparent) transparent",
   transition: "opacity 90ms cubic-bezier(0.2, 0.75, 0.25, 1)",
   "@media": {
     "(prefers-reduced-motion: reduce)": {
       transition: "none",
     },
   },
+});
+
+globalStyle('[data-slot="aui_thread-viewport"]::-webkit-scrollbar', {
+  width: "12px",
+  height: "12px",
+});
+
+globalStyle('[data-slot="aui_thread-viewport"]::-webkit-scrollbar-track', {
+  background: "transparent",
+});
+
+globalStyle('[data-slot="aui_thread-viewport"]::-webkit-scrollbar-thumb', {
+  minHeight: "52px",
+  border: "4px solid transparent",
+  borderRadius: "999px",
+  background:
+    "color-mix(in srgb, var(--muted) 38%, transparent) padding-box",
+});
+
+globalStyle('[data-slot="aui_thread-viewport"]::-webkit-scrollbar-thumb:hover', {
+  background:
+    "color-mix(in srgb, var(--muted) 58%, transparent) padding-box",
+});
+
+globalStyle('[data-slot="aui_thread-viewport"]::-webkit-scrollbar-thumb:active', {
+  background:
+    "color-mix(in srgb, var(--blue) 62%, var(--muted)) padding-box",
+});
+
+globalStyle('[data-slot="aui_thread-viewport"]::-webkit-scrollbar-corner', {
+  background: "transparent",
 });
 
 globalStyle(".review-file-list::-webkit-scrollbar", {
@@ -4031,6 +4151,11 @@ globalStyle(".review-diff", {
   minHeight: "0",
   padding: "12px 0 28px",
   overflow: "auto",
+  overscrollBehavior: "contain",
+  scrollbarGutter: "stable",
+  scrollbarWidth: "thin",
+  scrollbarColor:
+    "color-mix(in srgb, var(--muted) 34%, transparent) transparent",
   background: "color-mix(in srgb, var(--surface-soft) 28%, transparent)",
 });
 

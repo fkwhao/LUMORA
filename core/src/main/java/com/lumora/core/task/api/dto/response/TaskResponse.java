@@ -14,6 +14,7 @@ public class TaskResponse {
     private String failureReason;
     private String selectedModel;
     private String selectedReasoningEffort;
+    private String workspacePath;
     private List<TaskPlanStepResponse> planSteps = List.of();
     private Instant createdAt;
     private Instant updatedAt;
@@ -91,6 +92,14 @@ public class TaskResponse {
 
     public void setSelectedReasoningEffort(String selectedReasoningEffort) {
         this.selectedReasoningEffort = selectedReasoningEffort;
+    }
+
+    public String getWorkspacePath() {
+        return workspacePath;
+    }
+
+    public void setWorkspacePath(String workspacePath) {
+        this.workspacePath = workspacePath;
     }
 
     public List<TaskPlanStepResponse> getPlanSteps() {

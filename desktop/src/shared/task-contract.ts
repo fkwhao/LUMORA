@@ -50,6 +50,7 @@ export interface TaskSnapshot {
   errorMessage?: string;
   selectedModel?: string;
   selectedReasoningEffort?: string;
+  workspacePath?: string;
 }
 
 export interface TaskSummary {
@@ -57,6 +58,7 @@ export interface TaskSummary {
   goal: string;
   status: TaskStatus;
   updatedAt?: string;
+  workspacePath?: string;
 }
 
 export interface TaskEvent {
@@ -82,12 +84,18 @@ export interface TaskPreferencesInput {
   reasoningEffort: string;
 }
 
+export interface TaskWorkspaceInput {
+  taskId: string;
+  workspacePath: string;
+}
+
 // 这是 Renderer 能看到的完整能力面，不能加入通用 invoke 或任意 channel。
 export interface LumoraTaskApi {
-  create(goal: string): Promise<TaskSnapshot>;
+  create(goal: string, workspacePath?: string): Promise<TaskSnapshot>;
   list(): Promise<TaskSummary[]>;
   get(taskId: string): Promise<TaskSnapshot>;
   updatePreferences(input: TaskPreferencesInput): Promise<TaskSnapshot>;
+  updateWorkspace(input: TaskWorkspaceInput): Promise<TaskSnapshot>;
   subscribe(
     taskId: string,
     onEvent: (event: TaskEvent) => void,

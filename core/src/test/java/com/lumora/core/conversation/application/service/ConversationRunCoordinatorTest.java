@@ -13,6 +13,7 @@ import com.lumora.core.conversation.domain.model.ConversationRunTrigger;
 import com.lumora.core.conversation.domain.model.ConversationInputStatus;
 import com.lumora.core.conversation.domain.model.ConversationInputTarget;
 import com.lumora.core.task.application.service.TaskService;
+import com.lumora.core.task.domain.entity.AgentTask;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -36,6 +37,74 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ConversationRunCoordinatorTest {
+
+    @Test
+    void usesThePersistedTaskWorkspaceBeforeRunHistory() {
+        ConversationService conversationService = mock(
+                ConversationService.class
+        );
+        ConversationRunStore runStore = mock(ConversationRunStore.class);
+        Map<String, ConversationRun> runs = new LinkedHashMap<>();
+        stubRunStore(runStore, runs);
+        TaskService taskService = mock(TaskService.class);
+        AgentTask task = mock(AgentTask.class);
+        when(task.getWorkspacePath()).thenReturn("F:\\project\\database");
+        when(taskService.getTask("task-1")).thenReturn(task);
+        ConversationRunCoordinator coordinator = new ConversationRunCoordinator(
+                conversationService,
+                runStore,
+                mock(ConversationInputStore.class),
+                mock(ConversationRunEventStreamRegistry.class),
+                mock(ConversationRunEventJournal.class),
+                taskService,
+                Clock.fixed(
+                        Instant.parse("2026-08-15T00:00:00Z"),
+                        ZoneOffset.UTC
+                ),
+                1
+        );
+
+        ConversationRun run = coordinator.startMessage(
+                "task-1", "继续读取文件", null, null,
+                null, null, "correlation-1"
+        );
+
+        assertThat(run.getWorkspacePath())
+                .isEqualTo("F:\\project\\database");
+        verify(runStore, never()).findLatestWorkspacePathForTask("task-1");
+    }
+
+    @Test
+    void restoresTheLastWorkspaceWhenANewRunOmitsIt() {
+        ConversationService conversationService = mock(
+                ConversationService.class
+        );
+        ConversationRunStore runStore = mock(ConversationRunStore.class);
+        Map<String, ConversationRun> runs = new LinkedHashMap<>();
+        stubRunStore(runStore, runs);
+        when(runStore.findLatestWorkspacePathForTask("task-1"))
+                .thenReturn("F:\\project\\test");
+        ConversationRunCoordinator coordinator = new ConversationRunCoordinator(
+                conversationService,
+                runStore,
+                mock(ConversationInputStore.class),
+                mock(ConversationRunEventStreamRegistry.class),
+                mock(ConversationRunEventJournal.class),
+                mock(TaskService.class),
+                Clock.fixed(
+                        Instant.parse("2026-08-15T00:00:00Z"),
+                        ZoneOffset.UTC
+                ),
+                1
+        );
+
+        ConversationRun run = coordinator.startMessage(
+                "task-1", "读取 ProductRepository.java", null, null,
+                null, null, "correlation-1"
+        );
+
+        assertThat(run.getWorkspacePath()).isEqualTo("F:\\project\\test");
+    }
 
     @Test
     void keepsAPausedSteerQueuedUntilTheRunResumes() {

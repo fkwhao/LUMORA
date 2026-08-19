@@ -1,10 +1,12 @@
-import { Bot, FileDiff, X } from "lucide-react";
+import { FileDiff, X } from "lucide-react";
 import {
+  useEffect,
   useRef,
   type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
   type ReactNode,
+  type WheelEvent,
 } from "react";
 
 import type { WorkLogItemStatus } from "../../../../shared/model-contract";
@@ -18,12 +20,14 @@ import {
   shouldExpandContextPaneOnDrag,
 } from "../../layout/context-pane-preferences";
 import type { RightSidebarTabId } from "../state/right-sidebar-tabs";
+import { AgentIdentityAvatar } from "./AgentIdentityAvatar";
 
 export interface TaskRightSidebarTab {
   id: RightSidebarTabId;
   label: string;
   kind: "context" | "review" | "agent";
   status?: WorkLogItemStatus;
+  agentId?: string;
   usagePercent?: number;
 }
 
@@ -47,6 +51,7 @@ interface DragState {
   rememberedWidth: number;
   startedOpen: boolean;
   open: boolean;
+  resizeFrame?: number;
 }
 
 export function TaskRightSidebar({
@@ -62,8 +67,38 @@ export function TaskRightSidebar({
   onWidthCommit,
 }: TaskRightSidebarProps) {
   const paneRef = useRef<HTMLElement>(null);
+  const tabsRef = useRef<HTMLDivElement>(null);
   const dragStart = useRef<DragState | undefined>(undefined);
   const style = { "--context-pane-width": `${width}px` } as CSSProperties;
+
+  useEffect(() => {
+    if (!activeTabId) return;
+    const activeTab = paneRef.current?.querySelector<HTMLElement>(
+      `#right-sidebar-tab-${safeId(activeTabId)}`,
+    );
+    activeTab?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [activeTabId, tabs.length]);
+
+  function applyTransientWidth(nextWidth: number) {
+    paneRef.current?.style.setProperty(
+      "--context-pane-width",
+      `${nextWidth}px`,
+    );
+    paneRef.current?.parentElement?.style.setProperty(
+      "--context-pane-width",
+      `${nextWidth}px`,
+    );
+  }
+
+  function scrollTabs(event: WheelEvent<HTMLDivElement>) {
+    const viewport = event.currentTarget;
+    if (
+      viewport.scrollWidth <= viewport.clientWidth
+      || Math.abs(event.deltaX) >= Math.abs(event.deltaY)
+    ) return;
+    event.preventDefault();
+    viewport.scrollLeft += event.deltaY;
+  }
 
   function startResize(event: PointerEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -89,8 +124,15 @@ export function TaskRightSidebar({
       Math.max(0, Math.round(drag.width + drag.x - event.clientX)),
     );
     drag.currentWidth = nextWidth;
-    paneRef.current?.style.setProperty("--context-pane-width", `${nextWidth}px`);
     event.currentTarget.setAttribute("aria-valuenow", String(nextWidth));
+    if (drag.resizeFrame === undefined) {
+      drag.resizeFrame = window.requestAnimationFrame(() => {
+        drag.resizeFrame = undefined;
+        if (dragStart.current === drag) {
+          applyTransientWidth(drag.currentWidth);
+        }
+      });
+    }
     const nextOpen = drag.startedOpen
       ? !shouldCollapseContextPaneOnDrag(nextWidth)
       : shouldExpandContextPaneOnDrag(nextWidth);
@@ -106,14 +148,22 @@ export function TaskRightSidebar({
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
       event.currentTarget.releasePointerCapture?.(event.pointerId);
     }
-    document.body.classList.remove("resizing-context-pane");
-    document.body.classList.remove("opening-context-pane-by-drag");
-    if (!drag) return;
+    if (!drag) {
+      document.body.classList.remove("resizing-context-pane");
+      document.body.classList.remove("opening-context-pane-by-drag");
+      return;
+    }
+    if (drag.resizeFrame !== undefined) {
+      window.cancelAnimationFrame(drag.resizeFrame);
+    }
     const settledWidth = drag.open
       ? clampContextPaneWidth(drag.currentWidth)
       : drag.startedOpen
         ? MIN_CONTEXT_PANE_WIDTH
         : drag.rememberedWidth;
+    applyTransientWidth(settledWidth);
+    document.body.classList.remove("resizing-context-pane");
+    document.body.classList.remove("opening-context-pane-by-drag");
     onOpenChange(drag.open);
     onWidthChange(settledWidth);
     onWidthCommit(settledWidth);
@@ -161,41 +211,52 @@ export function TaskRightSidebar({
         onPointerCancel={stopResize}
       />
 
-      <div className="right-sidebar-tabbar" role="tablist" aria-label="任务详情页签">
-        {tabs.map((tab) => {
-          const selected = tab.id === activeTabId;
-          const key = safeId(tab.id);
-          return (
-            <div
-              className={`right-sidebar-tab${selected ? " is-active" : ""}`}
-              data-kind={tab.kind}
-              key={tab.id}
-            >
-              <button
-                className="right-sidebar-tab-select"
-                id={`right-sidebar-tab-${key}`}
-                type="button"
-                role="tab"
-                aria-controls={`right-sidebar-panel-${key}`}
-                aria-selected={selected}
-                title={tab.label}
-                onClick={() => onSelectTab(tab.id)}
-              >
-                <TabIcon tab={tab} />
-                <span>{tab.label}</span>
-              </button>
-              <button
-                className="right-sidebar-tab-close"
-                type="button"
-                aria-label={`关闭${tab.label}页签`}
-                title="关闭页签"
-                onClick={() => onCloseTab(tab.id)}
-              >
-                <X size={12} />
-              </button>
-            </div>
-          );
-        })}
+      <div className="right-sidebar-toolbar">
+        <div className="right-sidebar-tabs-shell">
+          <div
+            ref={tabsRef}
+            className="right-sidebar-tabbar"
+            role="tablist"
+            aria-label="任务详情页签"
+            onWheel={scrollTabs}
+          >
+            {tabs.map((tab) => {
+              const selected = tab.id === activeTabId;
+              const key = safeId(tab.id);
+              const longLabel = Array.from(tab.label).length > 12;
+              return (
+                <div
+                  className={`right-sidebar-tab${selected ? " is-active" : ""}${longLabel ? " has-long-label" : ""}`}
+                  data-kind={tab.kind}
+                  key={tab.id}
+                >
+                  <button
+                    className="right-sidebar-tab-select"
+                    id={`right-sidebar-tab-${key}`}
+                    type="button"
+                    role="tab"
+                    aria-controls={`right-sidebar-panel-${key}`}
+                    aria-selected={selected}
+                    title={tab.label}
+                    onClick={() => onSelectTab(tab.id)}
+                  >
+                    <TabIcon tab={tab} />
+                    <span>{tab.label}</span>
+                  </button>
+                  <button
+                    className="right-sidebar-tab-close"
+                    type="button"
+                    aria-label={`关闭${tab.label}页签`}
+                    title="关闭页签"
+                    onClick={() => onCloseTab(tab.id)}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       <div className="right-sidebar-content">
@@ -226,9 +287,10 @@ function TabIcon({ tab }: { tab: TaskRightSidebarTab }) {
   }
   if (tab.kind === "review") return <FileDiff size={13} aria-hidden="true" />;
   return (
-    <span className="subagent-pane-avatar" data-status={tab.status} aria-hidden="true">
-      <Bot size={11} />
-    </span>
+    <AgentIdentityAvatar
+      agentId={tab.agentId || tab.id}
+      className="subagent-pane-avatar"
+    />
   );
 }
 

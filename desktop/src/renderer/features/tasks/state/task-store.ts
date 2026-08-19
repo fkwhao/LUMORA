@@ -203,6 +203,60 @@ function waitForHistoryRenderFrame() {
   });
 }
 
+async function synchronizeTaskProjectPaths(
+  api: LumoraTaskApi,
+  tasks: TaskSummary[],
+): Promise<{
+  tasks: TaskSummary[];
+  taskProjectPaths: Record<string, string>;
+}> {
+  const legacyPaths = loadTaskProjectPaths();
+  const synchronizedTasks = [...tasks];
+  const taskIndexes = new Map(
+    synchronizedTasks.map((task, index) => [task.taskId, index]),
+  );
+  const taskProjectPaths = Object.fromEntries(
+    synchronizedTasks
+      .map((task) => [task.taskId, task.workspacePath?.trim()] as const)
+      .filter((entry): entry is readonly [string, string] => Boolean(entry[1])),
+  );
+  const remainingLegacyPaths: Record<string, string> = {};
+
+  for (const [taskId, rawWorkspacePath] of Object.entries(legacyPaths)) {
+    const workspacePath = rawWorkspacePath.trim();
+    const taskIndex = taskIndexes.get(taskId);
+    if (!workspacePath || taskIndex === undefined) continue;
+    const task = synchronizedTasks[taskIndex]!;
+    if (task.workspacePath?.trim()) continue;
+    try {
+      const updated = await api.updateWorkspace({ taskId, workspacePath });
+      synchronizedTasks[taskIndex] = {
+        ...task,
+        workspacePath: updated.workspacePath ?? workspacePath,
+      };
+      taskProjectPaths[taskId] = updated.workspacePath ?? workspacePath;
+    } catch {
+      // Keep failed migrations visible and retry on the next application load.
+      remainingLegacyPaths[taskId] = workspacePath;
+      taskProjectPaths[taskId] = workspacePath;
+    }
+  }
+  saveTaskProjectPaths(remainingLegacyPaths);
+  return { tasks: synchronizedTasks, taskProjectPaths };
+}
+
+function withTaskWorkspace(
+  paths: Record<string, string>,
+  task: Pick<TaskSnapshot, "taskId" | "workspacePath">,
+): Record<string, string> {
+  if (task.workspacePath === undefined) return paths;
+  const next = { ...paths };
+  const workspacePath = task.workspacePath.trim();
+  if (workspacePath) next[task.taskId] = workspacePath;
+  else delete next[task.taskId];
+  return next;
+}
+
 export function createTaskStore(
   api: LumoraTaskApi,
   modelApi?: LumoraModelApi,
@@ -251,10 +305,18 @@ export function createTaskStore(
       set({ isLoadingHistory: true });
       try {
         const deletedTaskIdSet = new Set(get().deletedTaskIds);
-        const recentTasks = (await api.list()).filter(
+        const synchronized = await synchronizeTaskProjectPaths(
+          api,
+          await api.list(),
+        );
+        const recentTasks = synchronized.tasks.filter(
           (task) => !deletedTaskIdSet.has(task.taskId),
         );
-        set({ recentTasks, isLoadingHistory: false });
+        set({
+          recentTasks,
+          taskProjectPaths: synchronized.taskProjectPaths,
+          isLoadingHistory: false,
+        });
       } catch (error) {
         set({
           isLoadingHistory: false,
@@ -490,6 +552,10 @@ export function createTaskStore(
             : restoredCache?.lastChatDurationMs,
           pendingToolApproval: restoredApproval,
           isDecidingToolApproval: false,
+          taskProjectPaths: withTaskWorkspace(
+            get().taskProjectPaths,
+            task,
+          ),
         });
         if (runIsProcessing && activeRun && modelApi) {
           clearChatEventBatcher(false);
@@ -542,7 +608,7 @@ export function createTaskStore(
 
       set({ isCreating: true, error: undefined });
       try {
-        const task = await api.create(normalizedGoal);
+        const task = await api.create(normalizedGoal, projectPath);
         unsubscribe?.();
         unsubscribe = api.subscribe(task.taskId, (event) => {
           applyEvent(event, get, set);
@@ -570,20 +636,22 @@ export function createTaskStore(
               goal: task.goal,
               status: task.status,
               updatedAt: task.updatedAt,
+              workspacePath: task.workspacePath ?? projectPath,
             },
             ...get().recentTasks.filter(
               (item) => item.taskId !== task.taskId,
             ),
           ],
         });
-        if (projectPath) {
-          const taskProjectPaths = {
-            ...get().taskProjectPaths,
-            [task.taskId]: projectPath,
-          };
-          saveTaskProjectPaths(taskProjectPaths);
-          set({ taskProjectPaths });
-        }
+        set({
+          taskProjectPaths: withTaskWorkspace(
+            get().taskProjectPaths,
+            {
+              taskId: task.taskId,
+              workspacePath: task.workspacePath ?? projectPath,
+            },
+          ),
+        });
         saveArchivedTaskIds(get().archivedTaskIds);
         saveDeletedTaskIds(get().deletedTaskIds);
         await get().sendMessage(normalizedGoal, {
@@ -668,7 +736,8 @@ export function createTaskStore(
           {
             ...options,
             workspacePath:
-              options?.workspacePath ?? get().taskProjectPaths[task.taskId],
+              options?.workspacePath ?? task.workspacePath
+              ?? get().taskProjectPaths[task.taskId],
           },
         );
         unsubscribeChat = ownSubscription;
@@ -718,7 +787,8 @@ export function createTaskStore(
         target,
         ...options,
         workspacePath:
-          options?.workspacePath ?? get().taskProjectPaths[taskId],
+          options?.workspacePath ?? get().activeTask?.workspacePath
+          ?? get().taskProjectPaths[taskId],
       });
       const pendingInputs = await modelApi.listInputs(taskId);
       if (get().activeTask?.taskId === taskId) set({ pendingInputs });
@@ -1105,7 +1175,8 @@ export function createTaskStore(
           {
             ...options,
             workspacePath:
-              options?.workspacePath ?? get().taskProjectPaths[task.taskId],
+              options?.workspacePath ?? task.workspacePath
+              ?? get().taskProjectPaths[task.taskId],
           },
         );
         unsubscribeChat = ownSubscription;
@@ -1236,7 +1307,6 @@ export function createTaskStore(
       saveDeletedTaskIds(deletedTaskIds);
       const taskProjectPaths = { ...get().taskProjectPaths };
       delete taskProjectPaths[taskId];
-      saveTaskProjectPaths(taskProjectPaths);
       set({
         archivedTaskIds,
         deletedTaskIds,
@@ -1262,7 +1332,6 @@ export function createTaskStore(
           ([taskId]) => !archivedTaskIdSet.has(taskId),
         ),
       );
-      saveTaskProjectPaths(taskProjectPaths);
       set({
         archivedTaskIds: [],
         deletedTaskIds,

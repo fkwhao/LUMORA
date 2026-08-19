@@ -43,6 +43,10 @@ describe("visible task flow", () => {
       create: vi.fn(async () => createdTask),
       list: vi.fn(async () => []),
       get: vi.fn(async () => createdTask),
+      updateWorkspace: vi.fn(async (input) => ({
+        ...createdTask,
+        workspacePath: input.workspacePath,
+      })),
       updatePreferences: vi.fn(async (input) => ({
         ...createdTask,
         selectedModel: input.model,
@@ -107,6 +111,20 @@ describe("visible task flow", () => {
     expect(screen.queryByText("分析目录内容")).not.toBeInTheDocument();
     expect(screen.queryByText("整理文件")).not.toBeInTheDocument();
     expect(screen.queryByText("执行活动")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "审阅文件变更" }),
+    ).not.toBeInTheDocument();
+    const taskSidebarToggle = screen.getByRole("button", {
+      name: "显示侧边栏",
+    });
+    fireEvent.click(taskSidebarToggle);
+    expect(
+      screen.getByRole("button", { name: "隐藏侧边栏" }),
+    ).toBe(taskSidebarToggle);
+    fireEvent.click(taskSidebarToggle);
+    expect(
+      screen.getByRole("button", { name: "显示侧边栏" }),
+    ).toBe(taskSidebarToggle);
     const contextUsageButton = screen.getByRole("button", { name: "上下文已用" });
     expect(contextUsageButton).toHaveAttribute(
       "aria-describedby",
@@ -192,19 +210,14 @@ describe("visible task flow", () => {
       screen.queryByText("设置要持续追求的目标"),
     ).not.toBeInTheDocument();
     fireEvent.click(contextUsageButton);
-    fireEvent.click(screen.getByRole("button", { name: "审阅文件变更" }));
-    expect(
-      screen.getByRole("complementary", { name: "任务详情侧栏" }),
-    ).toBeVisible();
-    const contextTab = screen.getByRole("tab", { name: "上下文" });
-    const reviewTab = screen.getByRole("tab", { name: "审阅" });
-    expect(reviewTab).toHaveAttribute("aria-selected", "true");
-    fireEvent.click(contextTab);
-    expect(contextTab).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText("缓存命中率")).toBeVisible();
-    fireEvent.click(reviewTab);
-    fireEvent.click(screen.getByRole("button", { name: "关闭审阅页签" }));
-    expect(contextTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "上下文" }))
+      .toHaveAttribute("aria-selected", "true");
+    fireEvent.click(taskSidebarToggle);
+    expect(contextResizeHandle.closest("aside")).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByRole("button", { name: "显示侧边栏" }))
+      .toBe(taskSidebarToggle);
+    fireEvent.click(taskSidebarToggle);
+    expect(contextResizeHandle.closest("aside")).toHaveAttribute("aria-hidden", "false");
     fireEvent.click(screen.getByRole("button", { name: "关闭上下文页签" }));
     expect(contextResizeHandle.closest("aside")).toHaveAttribute("aria-hidden", "true");
     expect(

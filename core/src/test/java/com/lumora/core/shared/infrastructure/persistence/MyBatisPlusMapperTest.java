@@ -65,6 +65,7 @@ class MyBatisPlusMapperTest {
                     failure_reason TEXT NOT NULL,
                     selected_model TEXT NOT NULL DEFAULT '',
                     selected_reasoning_effort TEXT NOT NULL DEFAULT '',
+                    workspace_path TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
@@ -109,6 +110,7 @@ class MyBatisPlusMapperTest {
         assertThat(stored.getStatus()).isEqualTo(TaskStatus.RUNNING);
         assertThat(stored.getCreatedAt()).isEqualTo(CREATED_AT);
         assertThat(stored.getLastEventSequence()).isEqualTo(7L);
+        assertThat(stored.getWorkspacePath()).isEqualTo("F:\\project\\test");
 
         stored.setStatus(TaskStatus.COMPLETED);
         stored.setResultSummary("已完成");
@@ -253,7 +255,7 @@ class MyBatisPlusMapperTest {
     }
 
     private static AgentTask task(String taskId) {
-        return new AgentTask(
+        AgentTask task = new AgentTask(
                 taskId,
                 "整理下载目录",
                 TaskStatus.RUNNING,
@@ -264,5 +266,7 @@ class MyBatisPlusMapperTest {
                 CREATED_AT,
                 CREATED_AT
         );
+        task.setWorkspacePath("F:\\project\\test");
+        return task;
     }
 }

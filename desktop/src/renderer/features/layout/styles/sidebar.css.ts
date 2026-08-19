@@ -163,17 +163,25 @@ globalStyle(".new-task-button:hover", {
 
 globalStyle(".sidebar-scroll", {
   position: "relative",
+  zIndex: "1",
+  width: "calc(100% + 10px)",
   flex: "1 1 auto",
   minHeight: "0",
-  marginTop: "10px",
+  boxSizing: "border-box",
+  marginRight: "-10px",
+  paddingRight: "10px",
+  paddingTop: "10px",
   overflowX: "hidden",
   overflowY: "auto",
   overscrollBehavior: "contain",
-  scrollbarGutter: "auto",
+  scrollbarGutter: "stable",
+  scrollbarWidth: "thin",
+  scrollbarColor:
+    "color-mix(in srgb, var(--muted) 30%, transparent) transparent",
 });
 
 globalStyle(".sidebar-scroll::-webkit-scrollbar", {
-  width: "6px",
+  width: "10px",
 });
 
 globalStyle(".sidebar-scroll::-webkit-scrollbar-track", {
@@ -181,14 +189,23 @@ globalStyle(".sidebar-scroll::-webkit-scrollbar-track", {
 });
 
 globalStyle(".sidebar-scroll::-webkit-scrollbar-thumb", {
+  minHeight: "40px",
+  border: "3px solid transparent",
   borderRadius: "999px",
-  background: "color-mix(in srgb, var(--muted) 30%, transparent)",
+  background:
+    "color-mix(in srgb, var(--muted) 34%, transparent) padding-box",
+});
+
+globalStyle(".sidebar-scroll::-webkit-scrollbar-thumb:hover", {
+  background:
+    "color-mix(in srgb, var(--muted) 52%, transparent) padding-box",
 });
 
 globalStyle(".new-task-sticky", {
-  position: "sticky",
-  top: "0",
+  position: "relative",
   zIndex: "4",
+  flex: "0 0 auto",
+  marginTop: "10px",
   paddingBottom: "6px",
   background: "var(--canvas)",
   transform: "translateZ(0)",
@@ -196,7 +213,7 @@ globalStyle(".new-task-sticky", {
 
 globalStyle(".new-task-sticky::after", {
   position: "absolute",
-  right: "0",
+  right: "-10px",
   bottom: "-10px",
   left: "0",
   height: "10px",
@@ -209,7 +226,7 @@ globalStyle(".new-task-sticky::after", {
 globalStyle(".primary-nav", {
   display: "grid",
   gap: "2px",
-  marginTop: "8px",
+  marginTop: "0",
   paddingBottom: "14px",
 });
 

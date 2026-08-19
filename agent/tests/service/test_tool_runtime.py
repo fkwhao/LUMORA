@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 import pytest
+
 from app.tool.base import ToolContext
 from app.tool.default_registry import create_default_tool_registry
 from app.tool.filesystem_tools import _atomic_write_text, _file_version
@@ -253,6 +254,51 @@ def test_full_file_write_rejects_a_stale_cross_task_observation(
         )
     )
     assert target.read_text(encoding="utf-8") == "first refreshed"
+
+
+def test_full_file_write_isolates_observations_between_sibling_agents(
+    tmp_path: Path,
+) -> None:
+    registry = create_default_tool_registry()
+    target = tmp_path / "shared-by-agents.txt"
+    target.write_text("initial", encoding="utf-8")
+    first_context = ToolContext(
+        workspace_path=tmp_path.resolve(),
+        task_id="shared-task",
+        session_id="shared-task:agent:first",
+        agent_id="first",
+    )
+    second_context = ToolContext(
+        workspace_path=tmp_path.resolve(),
+        task_id="shared-task",
+        session_id="shared-task:agent:second",
+        agent_id="second",
+    )
+
+    asyncio.run(
+        registry.execute("read_file", first_context, {"path": target.name})
+    )
+    asyncio.run(
+        registry.execute("read_file", second_context, {"path": target.name})
+    )
+    asyncio.run(
+        registry.execute(
+            "write_file",
+            second_context,
+            {"path": target.name, "content": "second"},
+        )
+    )
+
+    with pytest.raises(ValueError, match="其他 Agent 修改"):
+        asyncio.run(
+            registry.execute(
+                "write_file",
+                first_context,
+                {"path": target.name, "content": "stale first"},
+            )
+        )
+
+    assert target.read_text(encoding="utf-8") == "second"
 
 
 def test_full_file_overwrite_requires_a_prior_task_observation(

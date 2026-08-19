@@ -1,5 +1,6 @@
 package com.lumora.core.agent.model;
 
+import com.lumora.core.conversation.domain.model.AgentSessionSnapshot;
 import com.lumora.core.conversation.domain.model.ChatMessage;
 import com.lumora.core.mcp.domain.model.McpServerRuntimeConfiguration;
 import com.lumora.core.memory.domain.model.MemoryContextItem;
@@ -21,12 +22,33 @@ public record AgentChatStreamRequest(
         String taskId,
         String conversationSummary,
         List<MemoryContextItem> memoryCandidates,
-        List<McpServerRuntimeConfiguration> mcpServers
+        List<McpServerRuntimeConfiguration> mcpServers,
+        List<AgentSessionSnapshot> agentSessions
 ) {
+    public AgentChatStreamRequest(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String correlationId,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<MemoryContextItem> memoryCandidates,
+            List<McpServerRuntimeConfiguration> mcpServers
+    ) {
+        this(messages, connection, correlationId, reasoningEffort,
+                memorySummary, workspacePath, permissionMode, taskId,
+                conversationSummary, memoryCandidates, mcpServers, List.of());
+    }
+
     public AgentChatStreamRequest {
         messages = messages == null ? List.of() : List.copyOf(messages);
         memoryCandidates = memoryCandidates == null
                 ? List.of() : List.copyOf(memoryCandidates);
         mcpServers = mcpServers == null ? List.of() : List.copyOf(mcpServers);
+        agentSessions = agentSessions == null
+                ? List.of() : List.copyOf(agentSessions);
     }
 }

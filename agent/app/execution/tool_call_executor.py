@@ -7,7 +7,16 @@ from collections.abc import AsyncIterator, Awaitable
 from dataclasses import replace
 from typing import Any, Literal, TypeVar
 
+import httpx
+
+from app.execution.budget import BudgetExceeded
+from app.execution.retry import (
+    RetryPolicy,
+    classify_tool_exception,
+    tool_effect_id,
+)
 from app.execution.tool_result_processor import ToolResultProcessor
+from app.execution.write_intents import WriterConflict
 from app.harness.contracts import ProviderToolCall
 from app.harness.run_control import RunControl, await_or_pause
 from app.harness.run_event import RunEvent, RunUsage
@@ -46,6 +55,7 @@ class ToolCallExecutor:
         approval_reviewer: ApprovalReviewer | None = None,
         blocked_call_signatures: set[str] | None = None,
         run_control: RunControl | None = None,
+        retry_policy: RetryPolicy | None = None,
     ) -> None:
         self._registry = registry
         self._permission_engine = permission_engine
@@ -59,6 +69,7 @@ class ToolCallExecutor:
             else set()
         )
         self._run_control = run_control
+        self._retry_policy = retry_policy or RetryPolicy()
 
     def is_concurrency_safe(self, call: ProviderToolCall) -> bool:
         """Classify one model call without performing I/O or mutation."""
@@ -87,6 +98,41 @@ class ToolCallExecutor:
     ) -> AsyncIterator[tuple[RunEvent, str]]:
         item_id = str(uuid.uuid4())
         title = call.name
+        attempt = 0
+        read_only = False
+        retry_safe = False
+        effect_id = ""
+        budget = tool_context.execution_budget
+        if budget is not None:
+            try:
+                budget.reserve_tool_call()
+            except BudgetExceeded as error:
+                result_text = json.dumps(
+                    {
+                        "ok": False,
+                        "content": str(error),
+                        "errorCode": "budget_exhausted",
+                        "retryable": False,
+                        "nextAction": "停止启动新的工具调用并总结已完成的工作。",
+                    },
+                    ensure_ascii=False,
+                )
+                yield RunEvent(
+                    type="tool_failed",
+                    item_id=item_id,
+                    tool_call_id=call.call_id,
+                    tool_name=call.name,
+                    title=title,
+                    arguments={},
+                    output=str(error),
+                    error_message=str(error),
+                    metadata={
+                        **error.metadata(),
+                        "toolExecutionState": "not_started",
+                    },
+                    model=model,
+                ), result_text
+                return
         try:
             arguments = json.loads(call.arguments_json or "{}")
             if not isinstance(arguments, dict):
@@ -109,6 +155,15 @@ class ToolCallExecutor:
         try:
             tool, arguments = self._registry.validate(call.name, arguments)
             title = tool.display_title(arguments)
+            read_only = tool.is_read_only(arguments)
+            retry_safe = tool.is_retry_safe(arguments)
+            effect_id = tool_effect_id(
+                correlation_id=tool_context.correlation_id,
+                session_id=tool_context.session_id,
+                call_id=call.call_id,
+                tool_name=call.name,
+                arguments=arguments,
+            )
             policy_workspace = (
                 tool_context.workspace_path
                 if tool_context.workspace_scoped
@@ -157,6 +212,8 @@ class ToolCallExecutor:
                 "reversible": evaluation.reversible,
                 "workspacePath": workspace_metadata,
                 "callSignature": _tool_call_digest(call_signature),
+                "effectId": effect_id,
+                "idempotencyKey": effect_id,
             }
             if evaluation.decision is PermissionDecision.DENY:
                 self._blocked_call_signatures.add(call_signature)
@@ -521,6 +578,7 @@ class ToolCallExecutor:
                 )
                 return
 
+            attempt = 1
             yield RunEvent(
                 type="tool_started",
                 item_id=item_id,
@@ -528,7 +586,12 @@ class ToolCallExecutor:
                 tool_name=call.name,
                 title=title,
                 arguments=arguments,
-                metadata=permission_metadata,
+                metadata={
+                    **permission_metadata,
+                    "attempt": attempt,
+                    "maxAttempts": self._retry_policy.max_attempts,
+                    "toolExecutionState": "started",
+                },
                 model=model,
             ), ""
             emitted_events: asyncio.Queue[RunEvent] = asyncio.Queue()
@@ -536,34 +599,105 @@ class ToolCallExecutor:
                 execution_context,
                 emit_event=emitted_events.put,
             )
-            execution_task = asyncio.create_task(self._registry.execute(
-                call.name,
-                execution_context,
-                arguments,
-            ))
-            try:
-                while not execution_task.done():
-                    event_task = asyncio.create_task(emitted_events.get())
-                    done, _pending = await asyncio.wait(
-                        {execution_task, event_task},
-                        return_when=asyncio.FIRST_COMPLETED,
+            while True:
+                execution_task = asyncio.create_task(self._registry.execute(
+                    call.name,
+                    execution_context,
+                    arguments,
+                ))
+                try:
+                    while not execution_task.done():
+                        event_task = asyncio.create_task(emitted_events.get())
+                        done, _pending = await asyncio.wait(
+                            {execution_task, event_task},
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                        if event_task in done:
+                            yield event_task.result(), ""
+                        else:
+                            event_task.cancel()
+                            await asyncio.gather(event_task, return_exceptions=True)
+                    while not emitted_events.empty():
+                        yield emitted_events.get_nowait(), ""
+                    result = await execution_task
+                except BaseException as error:
+                    if not execution_task.done():
+                        execution_task.cancel()
+                        await asyncio.gather(
+                            execution_task,
+                            return_exceptions=True,
+                        )
+                    classification = classify_tool_exception(
+                        error,
+                        read_only=retry_safe,
                     )
-                    if event_task in done:
-                        yield event_task.result(), ""
-                    else:
-                        event_task.cancel()
-                        await asyncio.gather(event_task, return_exceptions=True)
-                while not emitted_events.empty():
-                    yield emitted_events.get_nowait(), ""
-                result = await execution_task
-            except BaseException:
-                if not execution_task.done():
-                    execution_task.cancel()
-                    await asyncio.gather(
-                        execution_task,
-                        return_exceptions=True,
-                    )
-                raise
+                    if (
+                        not classification.retryable
+                        or attempt >= self._retry_policy.max_attempts
+                    ):
+                        raise
+                    attempt += 1
+                    if budget is not None:
+                        budget.reserve_tool_call()
+                    yield RunEvent(
+                        type="progress_message",
+                        item_id=f"{item_id}:retry:{attempt}",
+                        title=f"重试工具：{title}",
+                        delta=(
+                            f"瞬时错误，正在进行第 {attempt}/"
+                            f"{self._retry_policy.max_attempts} 次尝试"
+                        ),
+                        metadata={
+                            **permission_metadata,
+                            "category": "tool_retry",
+                            "failureKind": classification.kind,
+                            "retryable": True,
+                            "attempt": attempt,
+                            "maxAttempts": self._retry_policy.max_attempts,
+                            "toolExecutionState": classification.execution_state,
+                        },
+                        model=model,
+                    ), ""
+                    delay = self._retry_policy.delay_seconds(attempt - 1)
+                    if delay:
+                        await asyncio.sleep(delay)
+                    continue
+                if (
+                    result.is_error
+                    and result.metadata.get("retryable") is True
+                    and retry_safe
+                    and attempt < self._retry_policy.max_attempts
+                ):
+                    attempt += 1
+                    if budget is not None:
+                        budget.reserve_tool_call()
+                    yield RunEvent(
+                        type="progress_message",
+                        item_id=f"{item_id}:retry:{attempt}",
+                        title=f"重试工具：{title}",
+                        delta=(
+                            f"工具返回可重试错误，正在进行第 {attempt}/"
+                            f"{self._retry_policy.max_attempts} 次尝试"
+                        ),
+                        metadata={
+                            **permission_metadata,
+                            "category": "tool_retry",
+                            "failureKind": str(
+                                result.metadata.get("failureKind")
+                                or "retryable_tool_result"
+                            ),
+                            "retryable": True,
+                            "attempt": attempt,
+                            "maxAttempts": self._retry_policy.max_attempts,
+                            "toolExecutionState": "completed",
+                        },
+                        model=model,
+                    ), ""
+                    delay = self._retry_policy.delay_seconds(attempt - 1)
+                    if delay:
+                        await asyncio.sleep(delay)
+                    continue
+                break
             if not defer_result_processing:
                 result = self._result_processor.process(
                     call.name,
@@ -595,7 +729,22 @@ class ToolCallExecutor:
                 output=result.content,
                 duration_ms=duration_ms,
                 exit_code=exit_code,
-                metadata={**permission_metadata, **dict(result.metadata)},
+                metadata={
+                    **permission_metadata,
+                    **dict(result.metadata),
+                    "attempt": attempt,
+                    "maxAttempts": self._retry_policy.max_attempts,
+                    "retryable": bool(result.metadata.get("retryable", False)),
+                    "toolExecutionState": (
+                        str(result.metadata.get("toolExecutionState"))
+                        if result.metadata.get("toolExecutionState")
+                        else (
+                            "completed"
+                            if read_only
+                            else ("unknown" if result.is_error else "committed")
+                        )
+                    ),
+                },
                 error_message=result.content if result.is_error else "",
                 model=model,
             ), result_text
@@ -625,7 +774,77 @@ class ToolCallExecutor:
                 },
                 model=model,
             ), result_text
-        except (OSError, TimeoutError, TypeError, UnicodeError, ValueError) as error:
+        except BudgetExceeded as error:
+            result_text = json.dumps(
+                {
+                    "ok": False,
+                    "content": str(error),
+                    "errorCode": "budget_exhausted",
+                    "retryable": False,
+                    "nextAction": "停止重试并总结已完成的工作。",
+                },
+                ensure_ascii=False,
+            )
+            yield RunEvent(
+                type="tool_failed",
+                item_id=item_id,
+                tool_call_id=call.call_id,
+                tool_name=call.name,
+                title=title,
+                arguments=arguments,
+                output=str(error),
+                error_message=str(error),
+                metadata={
+                    **error.metadata(),
+                    "effectId": effect_id,
+                    "idempotencyKey": effect_id,
+                    "attempt": max(1, attempt),
+                    "maxAttempts": self._retry_policy.max_attempts,
+                    "toolExecutionState": "not_started",
+                },
+                model=model,
+            ), result_text
+        except WriterConflict as error:
+            result_text = json.dumps(
+                {
+                    "ok": False,
+                    "content": str(error),
+                    "errorCode": "writer_conflict",
+                    "retryable": False,
+                    "nextAction": error.metadata()["nextAction"],
+                },
+                ensure_ascii=False,
+            )
+            yield RunEvent(
+                type="tool_failed",
+                item_id=item_id,
+                tool_call_id=call.call_id,
+                tool_name=call.name,
+                title=title,
+                arguments=arguments,
+                output=str(error),
+                error_message=str(error),
+                metadata={
+                    **error.metadata(),
+                    "effectId": effect_id,
+                    "idempotencyKey": effect_id,
+                    "attempt": max(1, attempt),
+                    "maxAttempts": self._retry_policy.max_attempts,
+                },
+                model=model,
+            ), result_text
+        except (
+            OSError,
+            TimeoutError,
+            TypeError,
+            UnicodeError,
+            ValueError,
+            httpx.TransportError,
+        ) as error:
+            classification = classify_tool_exception(
+                error,
+                read_only=retry_safe,
+            )
             result_text = f"工具执行失败：{error}"
             yield RunEvent(
                 type="tool_failed",
@@ -636,6 +855,15 @@ class ToolCallExecutor:
                 arguments=arguments,
                 output=result_text,
                 error_message=str(error),
+                metadata={
+                    "failureKind": classification.kind,
+                    "retryable": classification.retryable,
+                    "toolExecutionState": classification.execution_state,
+                    "effectId": effect_id,
+                    "idempotencyKey": effect_id,
+                    "attempt": max(1, attempt),
+                    "maxAttempts": self._retry_policy.max_attempts,
+                },
                 model=model,
             ), result_text
 

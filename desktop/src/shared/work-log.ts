@@ -19,7 +19,13 @@ export function workLogItemFromEvent(
     event.type === "agent_started" ||
     event.type === "agent_event" ||
     event.type === "agent_completed" ||
-    event.type === "agent_failed"
+    event.type === "agent_failed" ||
+    event.type === "agent_session_created" ||
+    event.type === "agent_inbox_enqueued" ||
+    event.type === "agent_activation_started" ||
+    event.type === "agent_activation_interrupted" ||
+    event.type === "agent_reported" ||
+    event.type === "agent_checkpointed"
   ) {
     const childEventType = event.metadata?.childEventType;
     const childFailed =
@@ -36,7 +42,12 @@ export function workLogItemFromEvent(
       status:
         event.type === "agent_failed" || childFailed
           ? "failed"
-          : event.type === "agent_completed" || childCompleted
+          : event.type === "agent_completed" ||
+              event.type === "agent_session_created" ||
+              event.type === "agent_activation_interrupted" ||
+              (event.type === "agent_checkpointed" &&
+                event.metadata?.agentStatus !== "running") ||
+              childCompleted
             ? "completed"
             : "running",
       content: event.delta,
@@ -49,7 +60,7 @@ export function workLogItemFromEvent(
       exitCode: event.exitCode,
       errorMessage: event.errorMessage,
       model: event.model,
-      metadata: event.metadata,
+      metadata: sessionMetadata(event),
     };
   }
   if (
@@ -152,6 +163,19 @@ export function workLogItemFromEvent(
     errorMessage: event.errorMessage,
     metadata: event.metadata,
   };
+}
+
+function sessionMetadata(
+  event: ChatStreamEvent,
+): Record<string, unknown> {
+  const metadata: Record<string, unknown> = {
+    sessionEventType: event.type,
+  };
+  for (const [key, value] of Object.entries(event.metadata ?? {})) {
+    if (key === "transcript") continue;
+    metadata[key] = value;
+  }
+  return metadata;
 }
 
 export function workLogFromEvents(events: ChatStreamEvent[]): WorkLogItem[] {

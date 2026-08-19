@@ -98,6 +98,10 @@ function createApi(): LumoraTaskApi {
     create: vi.fn(),
     list: vi.fn(async () => tasks),
     get: vi.fn(async (taskId) => snapshot(taskId)),
+    updateWorkspace: vi.fn(async (input) => ({
+      ...snapshot(input.taskId),
+      workspacePath: input.workspacePath,
+    })),
     updatePreferences: vi.fn(async (input) => ({
       ...snapshot(input.taskId),
       selectedModel: input.model,

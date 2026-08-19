@@ -103,4 +103,23 @@ describe("SubagentSessionPane", () => {
     expect(screen.getByRole("button", { name: "复制子 Agent 回复" }))
       .toBeDisabled();
   });
+
+  it("shows continuable runtime state without manual control buttons", () => {
+    renderPane({
+      ...COMPLETED_SESSION,
+      mode: "continuable",
+      activationStatus: "interrupted",
+      pendingInboxCount: 2,
+      checkpointSequence: 3,
+      recovered: true,
+    });
+
+    expect(screen.getByText("Session 可续接")).toBeVisible();
+    expect(screen.getByText("Activation 已中止，可续接")).toBeVisible();
+    expect(screen.getByText("Inbox 2 待处理")).toBeVisible();
+    expect(screen.getByText("Checkpoint #3")).toBeVisible();
+    expect(screen.getByText("可恢复")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /继续|中止/ }))
+      .not.toBeInTheDocument();
+  });
 });

@@ -1,7 +1,5 @@
 package com.lumora.core.task.application.service;
 
-import com.lumora.core.task.application.service.impl.TaskServiceImpl;
-
 import com.lumora.core.agent.client.AgentRuntimeClient;
 import com.lumora.core.agent.model.AgentPlanStep;
 import com.lumora.core.task.domain.model.TaskIdGenerator;
@@ -11,8 +9,8 @@ import com.lumora.core.task.domain.model.TaskStatus;
 import com.lumora.core.task.domain.exception.IllegalTaskTransitionException;
 import com.lumora.core.task.infrastructure.persistence.TaskMapper;
 import com.lumora.core.task.infrastructure.persistence.TaskPlanStepMapper;
-import com.lumora.core.task.application.service.impl.TaskServiceImpl;
 import com.lumora.core.task.application.service.TaskService;
+import com.lumora.core.task.application.service.impl.TaskServiceImpl;
 import com.lumora.core.task.domain.model.TaskDetails;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -87,6 +85,7 @@ class TaskServiceTest {
     void createsAndPersistsATask() {
         TaskDetails details = service.createTask(
                 "  整理下载目录  ",
+                "  F:\\project\\test  ",
                 CORRELATION_ID
         );
         AgentTask task = details.getTask();
@@ -95,6 +94,7 @@ class TaskServiceTest {
         assertThat(task.getGoal()).isEqualTo("整理下载目录");
         assertThat(task.getStatus()).isEqualTo(TaskStatus.PLANNING);
         assertThat(task.getActiveStep()).isEqualTo("扫描下载目录");
+        assertThat(task.getWorkspacePath()).isEqualTo("F:\\project\\test");
         assertThat(mapper.selectById(TASK_ID)).isSameAs(task);
         verify(agentRuntimeClient).planTask(
                 TASK_ID,
@@ -120,6 +120,25 @@ class TaskServiceTest {
                                 true
                         )
                 );
+    }
+
+    @Test
+    void updatesThePersistedWorkspaceWithoutChangingTaskIdentity() {
+        AgentTask task = service.createTask(
+                "整理下载目录",
+                CORRELATION_ID
+        ).getTask();
+
+        AgentTask updated = service.updateWorkspacePath(
+                TASK_ID,
+                "  F:\\project\\LUMORA  "
+        );
+
+        assertThat(updated).isSameAs(task);
+        assertThat(updated.getTaskId()).isEqualTo(TASK_ID);
+        assertThat(updated.getWorkspacePath())
+                .isEqualTo("F:\\project\\LUMORA");
+        assertThat(mapper.selectById(TASK_ID)).isSameAs(updated);
     }
 
     @Test

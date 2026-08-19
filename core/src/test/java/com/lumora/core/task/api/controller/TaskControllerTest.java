@@ -1,9 +1,6 @@
 package com.lumora.core.task.api.controller;
 
 import com.lumora.core.task.api.converter.TaskResponseConverter;
-
-import com.lumora.core.task.api.controller.TaskController;
-import com.lumora.core.task.api.converter.TaskResponseConverter;
 import com.lumora.core.task.domain.entity.AgentTask;
 import com.lumora.core.task.domain.entity.TaskPlanStep;
 import com.lumora.core.task.domain.model.TaskStatus;
@@ -21,6 +18,7 @@ import java.util.List;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup;
@@ -33,22 +31,56 @@ class TaskControllerTest {
     @Test
     void createsATaskWithAResponseDto() throws Exception {
         TaskService service = org.mockito.Mockito.mock(TaskService.class);
-        when(service.createTask("整理下载目录", CORRELATION_ID))
+        when(service.createTask(
+                "整理下载目录",
+                "F:\\project\\test",
+                CORRELATION_ID
+        ))
                 .thenReturn(taskDetails());
         MockMvc mockMvc = mockMvc(service);
 
         mockMvc.perform(post("/api/v1/tasks")
                         .header("X-Correlation-Id", CORRELATION_ID)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"goal\":\"整理下载目录\"}"))
+                        .content("""
+                                {
+                                  "goal": "整理下载目录",
+                                  "workspacePath": "F:\\\\project\\\\test"
+                                }
+                                """))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.taskId").value(TASK_ID))
+                .andExpect(jsonPath("$.workspacePath")
+                        .value("F:\\project\\test"))
                 .andExpect(jsonPath("$.status").value("PLANNING"))
                 .andExpect(jsonPath("$.planSteps[0].stepId").value("scan"))
                 .andExpect(jsonPath("$.planSteps[0].title")
                         .value("扫描下载目录"))
                 .andExpect(jsonPath("$.planSteps[1].requiresApproval")
                         .value(true));
+    }
+
+    @Test
+    void updatesATaskWorkspace() throws Exception {
+        TaskService service = org.mockito.Mockito.mock(TaskService.class);
+        AgentTask updated = taskDetails().getTask();
+        updated.setWorkspacePath("F:\\project\\LUMORA");
+        when(service.updateWorkspacePath(
+                TASK_ID,
+                "F:\\project\\LUMORA"
+        )).thenReturn(updated);
+        MockMvc mockMvc = mockMvc(service);
+
+        mockMvc.perform(put("/api/v1/tasks/{taskId}/workspace", TASK_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "workspacePath": "F:\\\\project\\\\LUMORA"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.workspacePath")
+                        .value("F:\\project\\LUMORA"));
     }
 
     @Test
@@ -125,6 +157,7 @@ class TaskControllerTest {
                 now,
                 now
         );
+        task.setWorkspacePath("F:\\project\\test");
         return new TaskDetails(
                 task,
                 List.of(

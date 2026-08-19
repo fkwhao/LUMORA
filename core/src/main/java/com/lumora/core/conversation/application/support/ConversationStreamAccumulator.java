@@ -45,6 +45,12 @@ public class ConversationStreamAccumulator {
                 || event.getType() == ChatStreamEventType.AGENT_EVENT
                 || event.getType() == ChatStreamEventType.AGENT_COMPLETED
                 || event.getType() == ChatStreamEventType.AGENT_FAILED
+                || event.getType() == ChatStreamEventType.AGENT_SESSION_CREATED
+                || event.getType() == ChatStreamEventType.AGENT_INBOX_ENQUEUED
+                || event.getType() == ChatStreamEventType.AGENT_ACTIVATION_STARTED
+                || event.getType() == ChatStreamEventType.AGENT_ACTIVATION_INTERRUPTED
+                || event.getType() == ChatStreamEventType.AGENT_REPORTED
+                || event.getType() == ChatStreamEventType.AGENT_CHECKPOINTED
                 || event.getType() == ChatStreamEventType.TOOL_STARTED
                 || event.getType() == ChatStreamEventType.TOOL_COMPLETED
                 || event.getType() == ChatStreamEventType.TOOL_FAILED

@@ -22,7 +22,15 @@ public interface TaskService {
      * @return 新任务及其计划步骤
      * @throws IllegalArgumentException 请求参数无效
      */
-    TaskDetails createTask(String goal, String correlationId);
+    default TaskDetails createTask(String goal, String correlationId) {
+        return createTask(goal, "", correlationId);
+    }
+
+    TaskDetails createTask(
+            String goal,
+            String workspacePath,
+            String correlationId
+    );
 
     /**
      * 查询任务和按顺序排列的计划步骤。
@@ -60,6 +68,8 @@ public interface TaskService {
             String model,
             String reasoningEffort
     );
+
+    AgentTask updateWorkspacePath(String taskId, String workspacePath);
 
     /**
      * 按领域状态机流转任务状态。

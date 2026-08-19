@@ -12,6 +12,7 @@ import type {
   TaskSnapshot,
 } from "../../src/shared/task-contract";
 import { createTaskStore } from "../../src/renderer/features/tasks/task-store";
+import { TASK_PROJECT_PATHS_STORAGE_KEY } from "../../src/renderer/constants/storage";
 
 const createdTask: TaskSnapshot = {
   taskId: "task-1",
@@ -37,6 +38,91 @@ const createdTask: TaskSnapshot = {
 };
 
 describe("task store", () => {
+  it("migrates legacy task project mappings into Core persistence", async () => {
+    localStorage.clear();
+    localStorage.setItem(
+      TASK_PROJECT_PATHS_STORAGE_KEY,
+      JSON.stringify({ [createdTask.taskId]: "F:\\project\\test" }),
+    );
+    const api = createApi();
+    vi.mocked(api.list).mockResolvedValue([
+      {
+        taskId: createdTask.taskId,
+        goal: createdTask.goal,
+        status: createdTask.status,
+        workspacePath: "",
+      },
+    ]);
+    const store = createTaskStore(api);
+
+    await store.getState().loadRecentTasks();
+
+    expect(api.updateWorkspace).toHaveBeenCalledWith({
+      taskId: createdTask.taskId,
+      workspacePath: "F:\\project\\test",
+    });
+    expect(store.getState().recentTasks[0]?.workspacePath)
+      .toBe("F:\\project\\test");
+    expect(store.getState().taskProjectPaths).toEqual({
+      [createdTask.taskId]: "F:\\project\\test",
+    });
+    expect(localStorage.getItem(TASK_PROJECT_PATHS_STORAGE_KEY)).toBe("{}");
+    localStorage.clear();
+  });
+
+  it("treats the database workspace as authoritative over stale local data", async () => {
+    localStorage.clear();
+    localStorage.setItem(
+      TASK_PROJECT_PATHS_STORAGE_KEY,
+      JSON.stringify({ [createdTask.taskId]: "F:\\project\\stale" }),
+    );
+    const api = createApi();
+    vi.mocked(api.list).mockResolvedValue([
+      {
+        taskId: createdTask.taskId,
+        goal: createdTask.goal,
+        status: createdTask.status,
+        workspacePath: "F:\\project\\database",
+      },
+    ]);
+    const store = createTaskStore(api);
+
+    await store.getState().loadRecentTasks();
+
+    expect(api.updateWorkspace).not.toHaveBeenCalled();
+    expect(store.getState().taskProjectPaths).toEqual({
+      [createdTask.taskId]: "F:\\project\\database",
+    });
+    expect(localStorage.getItem(TASK_PROJECT_PATHS_STORAGE_KEY)).toBe("{}");
+    localStorage.clear();
+  });
+
+  it("persists the selected workspace when a task is created", async () => {
+    localStorage.clear();
+    const api = createApi();
+    vi.mocked(api.create).mockImplementation(async (goal, workspacePath) => ({
+      ...createdTask,
+      goal,
+      workspacePath,
+    }));
+    const store = createTaskStore(api);
+
+    await store.getState().createTask(
+      "整理下载目录",
+      "F:\\project\\test",
+    );
+
+    expect(api.create).toHaveBeenCalledWith(
+      "整理下载目录",
+      "F:\\project\\test",
+    );
+    expect(store.getState().taskProjectPaths).toEqual({
+      [createdTask.taskId]: "F:\\project\\test",
+    });
+    expect(localStorage.getItem(TASK_PROJECT_PATHS_STORAGE_KEY)).toBeNull();
+    localStorage.clear();
+  });
+
   it("rejects an empty goal before calling the process boundary", async () => {
     const api = createApi();
     const store = createTaskStore(api);
@@ -1143,6 +1229,11 @@ function createApi(): LumoraTaskApi {
     create: vi.fn(async () => createdTask),
     list: vi.fn(async () => []),
     get: vi.fn(async () => createdTask),
+    updateWorkspace: vi.fn(async (input) => ({
+      ...createdTask,
+      taskId: input.taskId,
+      workspacePath: input.workspacePath,
+    })),
     updatePreferences: vi.fn(async (input) => ({
       ...createdTask,
       selectedModel: input.model,

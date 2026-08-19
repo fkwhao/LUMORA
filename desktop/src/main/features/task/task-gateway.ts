@@ -6,14 +6,16 @@ import type {
   TaskSnapshot,
   TaskSummary,
   TaskPreferencesInput,
+  TaskWorkspaceInput,
 } from "../../../shared/task-contract";
 import { validateApprovalDecisionInput } from "../../../shared/validation";
 
 export interface TaskGateway {
-  create(goal: string): Promise<TaskSnapshot>;
+  create(goal: string, workspacePath?: string): Promise<TaskSnapshot>;
   list(): Promise<TaskSummary[]>;
   get(taskId: string): Promise<TaskSnapshot>;
   updatePreferences(input: TaskPreferencesInput): Promise<TaskSnapshot>;
+  updateWorkspace(input: TaskWorkspaceInput): Promise<TaskSnapshot>;
   subscribe(taskId: string, listener: (event: TaskEvent) => void): () => void;
   decideApproval(input: ApprovalDecisionInput): Promise<TaskSnapshot>;
   dispose(): void;
@@ -28,7 +30,7 @@ export class DemoTaskGateway implements TaskGateway {
   private readonly listeners = new Map<string, Set<(event: TaskEvent) => void>>();
   private readonly timers = new Map<string, NodeJS.Timeout[]>();
 
-  async create(goal: string): Promise<TaskSnapshot> {
+  async create(goal: string, workspacePath = ""): Promise<TaskSnapshot> {
     const taskId = randomUUID();
     const task: TaskSnapshot = {
       taskId,
@@ -51,6 +53,7 @@ export class DemoTaskGateway implements TaskGateway {
           requiresApproval: true,
         },
       ],
+      workspacePath,
     };
     this.tasks.set(taskId, task);
 
@@ -100,12 +103,20 @@ export class DemoTaskGateway implements TaskGateway {
     return updated;
   }
 
+  async updateWorkspace(input: TaskWorkspaceInput): Promise<TaskSnapshot> {
+    const task = this.requireTask(input.taskId);
+    const updated = { ...task, workspacePath: input.workspacePath };
+    this.tasks.set(input.taskId, updated);
+    return updated;
+  }
+
   async list(): Promise<TaskSummary[]> {
     return [...this.tasks.values()].map((task) => ({
       taskId: task.taskId,
       goal: task.goal,
       status: task.status,
       updatedAt: task.updatedAt,
+      workspacePath: task.workspacePath,
     }));
   }
 

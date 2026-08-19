@@ -147,18 +147,18 @@ export function AppSidebar({
         </button>
       </div>
 
-      <div className="sidebar-scroll">
-        <div className="new-task-sticky">
-          <button
-            className={`new-task-button${activeView === "home" ? " active" : ""}`}
-            type="button"
-            onClick={onNewTask}
-          >
-            <SquarePen size={17} strokeWidth={1.9} />
-            <span>新对话</span>
-          </button>
-        </div>
+      <div className="new-task-sticky">
+        <button
+          className={`new-task-button${activeView === "home" ? " active" : ""}`}
+          type="button"
+          onClick={onNewTask}
+        >
+          <SquarePen size={17} strokeWidth={1.9} />
+          <span>新对话</span>
+        </button>
+      </div>
 
+      <div className="sidebar-scroll">
         <nav className="primary-nav" aria-label="主要功能">
           <NavItem
             icon={Clock3}

@@ -41,6 +41,8 @@ def test_prompt_context_contract_contains_only_runtime_facts() -> None:
         "permissionMode",
         "permissionRules",
         "mcpServers",
+        "agentSessions",
+        "executionBudget",
     }
 
     memory_schema = contract["components"]["schemas"]["MemoryContext"]

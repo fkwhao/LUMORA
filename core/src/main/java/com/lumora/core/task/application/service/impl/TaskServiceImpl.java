@@ -37,7 +37,11 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     @Transactional
-    public TaskDetails createTask(String goal, String correlationId) {
+    public TaskDetails createTask(
+            String goal,
+            String workspacePath,
+            String correlationId
+    ) {
         // 1. 校验请求并提前生成任务 ID，供 Java 与 Python 全链路关联。
         String normalizedGoal = requireText(goal, "任务目标");
         String normalizedCorrelationId = requireText(
@@ -63,6 +67,7 @@ public class TaskServiceImpl implements TaskService {
                 agentPlan.getFirst(),
                 clock.instant()
         );
+        task.setWorkspacePath(normalizeWorkspacePath(workspacePath));
         taskMapper.insert(task);
         List<TaskPlanStep> planSteps = persistPlan(taskId, agentPlan);
         return new TaskDetails(task, planSteps);
@@ -142,6 +147,18 @@ public class TaskServiceImpl implements TaskService {
                 reasoningEffort == null ? "" : reasoningEffort.trim()
         );
         task.setUpdatedAt(clock.instant());
+        taskMapper.updateById(task);
+        return task;
+    }
+
+    @Override
+    @Transactional
+    public AgentTask updateWorkspacePath(
+            String taskId,
+            String workspacePath
+    ) {
+        AgentTask task = getTask(taskId);
+        task.setWorkspacePath(normalizeWorkspacePath(workspacePath));
         taskMapper.updateById(task);
         return task;
     }
@@ -229,5 +246,15 @@ public class TaskServiceImpl implements TaskService {
             throw new IllegalArgumentException(label + "不能为空");
         }
         return value.trim();
+    }
+
+    private String normalizeWorkspacePath(String value) {
+        String normalized = value == null ? "" : value.trim();
+        if (normalized.length() > 4096) {
+            throw new IllegalArgumentException(
+                    "工作区路径不能超过 4096 个字符"
+            );
+        }
+        return normalized;
     }
 }

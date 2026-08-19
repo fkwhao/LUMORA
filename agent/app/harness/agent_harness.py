@@ -4,6 +4,7 @@ from pathlib import Path
 
 from app.context.planner import ContextPlanner
 from app.dto.request.chat_completion_request import ChatMessageRequest
+from app.execution.budget import BudgetExceeded
 from app.execution.tool_result_processor import ToolResultProcessor
 from app.harness.agent_loop import AgentLoopRunner
 from app.harness.contracts import PromptSupplier
@@ -68,6 +69,17 @@ class AgentHarness:
                         delta=steer.content,
                         model=settings.model,
                     )
+            budget = (
+                tool_context.execution_budget
+                if tool_context is not None
+                else None
+            )
+            if budget is not None:
+                try:
+                    budget.reserve_model_request()
+                except BudgetExceeded as error:
+                    yield _budget_failed_event(error, settings.model)
+                    return
             stream = self._provider.stream(
                 settings,
                 prompt,
@@ -95,6 +107,15 @@ class AgentHarness:
                 if event.type != "completed":
                     yield event
                     continue
+                if budget is not None and carried_usage is not None:
+                    try:
+                        budget.settle_tokens(carried_usage.total_tokens)
+                    except BudgetExceeded as error:
+                        yield _budget_failed_event(
+                            error,
+                            event.model or settings.model,
+                        )
+                        return
                 pending_steers = (
                     run_control.close_and_claim_steers()
                     if run_control is not None
@@ -165,6 +186,15 @@ def _paused_event(model: str) -> RunEvent:
         type="paused",
         model=model,
         metadata={"turnStatus": "aborted", "pauseReason": "user"},
+    )
+
+
+def _budget_failed_event(error: BudgetExceeded, model: str) -> RunEvent:
+    return RunEvent(
+        type="failed",
+        error_message=str(error),
+        model=model,
+        metadata=error.metadata(),
     )
 
 

@@ -1,12 +1,11 @@
 package com.lumora.core.task.api.controller;
 
-import com.lumora.core.task.api.converter.TaskResponseConverter;
-
 import com.lumora.core.shared.api.constant.ApiPathConstants;
 import com.lumora.core.shared.api.constant.HttpContractConstants;
 import com.lumora.core.task.api.converter.TaskResponseConverter;
 import com.lumora.core.task.api.dto.request.CreateTaskRequest;
 import com.lumora.core.task.api.dto.request.UpdateTaskPreferencesRequest;
+import com.lumora.core.task.api.dto.request.UpdateTaskWorkspaceRequest;
 import com.lumora.core.task.api.dto.response.TaskResponse;
 import com.lumora.core.task.application.service.TaskService;
 import com.lumora.core.task.domain.model.TaskDetails;
@@ -44,6 +43,7 @@ public class TaskController {
     ) {
         TaskDetails task = taskService.createTask(
                 request.getGoal(),
+                request.getWorkspacePath(),
                 correlationId
         );
         return ResponseEntity
@@ -73,6 +73,19 @@ public class TaskController {
                         taskId,
                         request.getModel(),
                         request.getReasoningEffort()
+                )
+        );
+    }
+
+    @PutMapping(ApiPathConstants.TASK_WORKSPACE)
+    public TaskResponse updateTaskWorkspace(
+            @PathVariable String taskId,
+            @Valid @RequestBody UpdateTaskWorkspaceRequest request
+    ) {
+        return responseConverter.fromTask(
+                taskService.updateWorkspacePath(
+                        taskId,
+                        request.getWorkspacePath()
                 )
         );
     }

@@ -5,6 +5,7 @@ import type {
   LumoraApi,
   TaskEvent,
   TaskPreferencesInput,
+  TaskWorkspaceInput,
 } from "../shared/task-contract";
 import type {
   ChatMessage,
@@ -26,6 +27,8 @@ import {
   validateMessageId,
   validateTaskId,
   validateTaskPreferencesInput,
+  validateTaskWorkspaceInput,
+  validateWorkspacePath,
 } from "../shared/validation";
 import type { ResolvedAppearanceTheme } from "../shared/window-contract";
 import type { SaveMcpServerInput } from "../shared/mcp-contract";
@@ -70,13 +73,22 @@ const api: LumoraApi = {
       ipcRenderer.invoke("attachments:read-image-preview", attachment),
   },
   tasks: {
-    create: (goal) => ipcRenderer.invoke("tasks:create", validateGoal(goal)),
+    create: (goal, workspacePath) => ipcRenderer.invoke(
+      "tasks:create",
+      validateGoal(goal),
+      validateWorkspacePath(workspacePath),
+    ),
     list: () => ipcRenderer.invoke("tasks:list"),
     get: (taskId) => ipcRenderer.invoke("tasks:get", validateTaskId(taskId)),
     updatePreferences: (input: TaskPreferencesInput) =>
       ipcRenderer.invoke(
         "tasks:update-preferences",
         validateTaskPreferencesInput(input),
+      ),
+    updateWorkspace: (input: TaskWorkspaceInput) =>
+      ipcRenderer.invoke(
+        "tasks:update-workspace",
+        validateTaskWorkspaceInput(input),
       ),
     subscribe: (untrustedTaskId, onEvent) => {
       const taskId = validateTaskId(untrustedTaskId);

@@ -10,12 +10,15 @@ import type {
   TaskSnapshot,
   TaskSummary,
   TaskPreferencesInput,
+  TaskWorkspaceInput,
 } from "../../../shared/task-contract";
 import {
   validateApprovalDecisionInput,
   validateGoal,
   validateTaskId,
   validateTaskPreferencesInput,
+  validateTaskWorkspaceInput,
+  validateWorkspacePath,
 } from "../../../shared/validation";
 
 type JavaError = {
@@ -36,13 +39,16 @@ export class RestTaskGateway implements TaskGateway {
     this.eventStream = new JavaEventStream(connection, fetchImpl);
   }
 
-  create(goal: string): Promise<TaskSnapshot> {
+  create(goal: string, workspacePath?: string): Promise<TaskSnapshot> {
     return this.request("/api/v1/tasks", {
       method: "POST",
       headers: {
         "X-Correlation-Id": randomUUID(),
       },
-      body: JSON.stringify({ goal: validateGoal(goal) }),
+      body: JSON.stringify({
+        goal: validateGoal(goal),
+        workspacePath: validateWorkspacePath(workspacePath),
+      }),
     });
   }
 
@@ -63,6 +69,14 @@ export class RestTaskGateway implements TaskGateway {
         model: preferences.model,
         reasoningEffort: preferences.reasoningEffort,
       }),
+    });
+  }
+
+  updateWorkspace(input: TaskWorkspaceInput): Promise<TaskSnapshot> {
+    const workspace = validateTaskWorkspaceInput(input);
+    return this.request(`/api/v1/tasks/${workspace.taskId}/workspace`, {
+      method: "PUT",
+      body: JSON.stringify({ workspacePath: workspace.workspacePath }),
     });
   }
 

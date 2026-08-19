@@ -19,6 +19,8 @@ public class AgentPromptContextRequest {
     private final String taskId;
     private final String conversationSummary;
     private final List<AgentMcpServerRequest> mcpServers;
+    private final List<AgentSessionSnapshotRequest> agentSessions;
+    private final AgentExecutionBudgetRequest executionBudget;
 
     public AgentPromptContextRequest(
             String workspacePath,
@@ -88,6 +90,51 @@ public class AgentPromptContextRequest {
             List<AgentMemoryContextRequest> memoryCandidates,
             List<AgentMcpServerRequest> mcpServers
     ) {
+        this(workspacePath, projectInstructions, availableTools,
+                memorySummary, permissionMode, taskId, conversationSummary,
+                memoryCandidates, mcpServers, List.of());
+    }
+
+    public AgentPromptContextRequest(
+            String workspacePath,
+            List<String> projectInstructions,
+            List<String> availableTools,
+            String memorySummary,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<AgentMemoryContextRequest> memoryCandidates,
+            List<AgentMcpServerRequest> mcpServers,
+            List<AgentSessionSnapshotRequest> agentSessions
+    ) {
+        this(
+                workspacePath,
+                projectInstructions,
+                availableTools,
+                memorySummary,
+                permissionMode,
+                taskId,
+                conversationSummary,
+                memoryCandidates,
+                mcpServers,
+                agentSessions,
+                AgentExecutionBudgetRequest.defaults()
+        );
+    }
+
+    public AgentPromptContextRequest(
+            String workspacePath,
+            List<String> projectInstructions,
+            List<String> availableTools,
+            String memorySummary,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<AgentMemoryContextRequest> memoryCandidates,
+            List<AgentMcpServerRequest> mcpServers,
+            List<AgentSessionSnapshotRequest> agentSessions,
+            AgentExecutionBudgetRequest executionBudget
+    ) {
         this.workspacePath = workspacePath;
         this.projectInstructions = List.copyOf(projectInstructions);
         this.availableTools = List.copyOf(availableTools);
@@ -97,6 +144,10 @@ public class AgentPromptContextRequest {
         this.taskId = taskId;
         this.conversationSummary = conversationSummary;
         this.mcpServers = List.copyOf(mcpServers);
+        this.agentSessions = List.copyOf(agentSessions);
+        this.executionBudget = executionBudget == null
+                ? AgentExecutionBudgetRequest.defaults()
+                : executionBudget;
     }
 
     public static AgentPromptContextRequest defaultContext() {
@@ -182,6 +233,21 @@ public class AgentPromptContextRequest {
             List<AgentMemoryContextRequest> memoryCandidates,
             List<AgentMcpServerRequest> mcpServers
     ) {
+        return forWorkspace(memorySummary, workspacePath, permissionMode,
+                taskId, conversationSummary, memoryCandidates, mcpServers,
+                List.of());
+    }
+
+    public static AgentPromptContextRequest forWorkspace(
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<AgentMemoryContextRequest> memoryCandidates,
+            List<AgentMcpServerRequest> mcpServers,
+            List<AgentSessionSnapshotRequest> agentSessions
+    ) {
         AgentPromptContextRequest base = forWorkspace(
                 memorySummary, workspacePath, permissionMode
         );
@@ -194,7 +260,8 @@ public class AgentPromptContextRequest {
                 taskId,
                 conversationSummary,
                 memoryCandidates,
-                mcpServers
+                mcpServers,
+                agentSessions
         );
     }
 
@@ -227,6 +294,14 @@ public class AgentPromptContextRequest {
     public String getConversationSummary() { return conversationSummary; }
 
     public List<AgentMcpServerRequest> getMcpServers() { return mcpServers; }
+
+    public List<AgentSessionSnapshotRequest> getAgentSessions() {
+        return agentSessions;
+    }
+
+    public AgentExecutionBudgetRequest getExecutionBudget() {
+        return executionBudget;
+    }
 
     private static String normalizePermissionMode(String value) {
         String normalized = value == null || value.isBlank()

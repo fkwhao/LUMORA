@@ -75,7 +75,7 @@ export function saveTaskProjectPaths(paths: Record<string, string>): void {
       JSON.stringify(paths),
     );
   } catch {
-    // 项目映射只用于本地组织，写入失败不影响任务主体。
+    // 这里只保存尚未迁入 Core 的旧映射，写入失败不影响数据库任务。
   }
 }
 

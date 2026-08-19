@@ -4,6 +4,10 @@ from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from typing import Any
 
+from app.execution.write_intents import (
+    WriteIntentManager,
+    scopes_from_resource_accesses,
+)
 from app.tool.base import Tool, ToolContext, ToolInput, ToolResult
 from app.tool.resource_locks import (
     ResourceAccess,
@@ -26,12 +30,14 @@ class ToolRegistry:
         *,
         resource_locks: ResourceLockManager | None = None,
         resource_observations: ResourceObservationStore | None = None,
+        write_intents: WriteIntentManager | None = None,
     ) -> None:
         self._tools: dict[str, Tool] = {}
         self._resource_locks = resource_locks or ResourceLockManager()
         self._resource_observations = (
             resource_observations or ResourceObservationStore()
         )
+        self._write_intents = write_intents or WriteIntentManager()
         for tool in tools:
             self.register(tool)
 
@@ -60,6 +66,7 @@ class ToolRegistry:
             self._tools.values(),
             resource_locks=self._resource_locks,
             resource_observations=self._resource_observations,
+            write_intents=self._write_intents,
         )
 
     def select(self, names: Iterable[str]) -> "ToolRegistry":
@@ -73,7 +80,12 @@ class ToolRegistry:
             ),
             resource_locks=self._resource_locks,
             resource_observations=self._resource_observations,
+            write_intents=self._write_intents,
         )
+
+    @property
+    def write_intents(self) -> WriteIntentManager:
+        return self._write_intents
 
     def model_definitions(
         self,
@@ -135,21 +147,32 @@ class ToolRegistry:
             )
 
         wait_started = time.perf_counter()
-        if not accesses:
-            resource_wait_ms = 0
-            resource_contended = False
-            resource_contended_keys: tuple[str, ...] = ()
-            result = await tool.execute(runtime_context, normalized_input)
-        else:
-            async with self._resource_locks.hold(accesses) as lock_report:
-                resource_wait_ms = round(
-                    (time.perf_counter() - wait_started) * 1000
-                )
-                resource_contended = lock_report.contended
-                resource_contended_keys = lock_report.contended_keys
-                if runtime_context.cancelled():
-                    raise asyncio.CancelledError
+        write_scopes = scopes_from_resource_accesses(accesses)
+        owner_id = (
+            runtime_context.resource_owner_id
+            or runtime_context.correlation_id
+            or "local"
+        )
+        with self._write_intents.hold(
+            owner_id,
+            write_scopes,
+            owner_label=runtime_context.agent_id or owner_id,
+        ):
+            if not accesses:
+                resource_wait_ms = 0
+                resource_contended = False
+                resource_contended_keys: tuple[str, ...] = ()
                 result = await tool.execute(runtime_context, normalized_input)
+            else:
+                async with self._resource_locks.hold(accesses) as lock_report:
+                    resource_wait_ms = round(
+                        (time.perf_counter() - wait_started) * 1000
+                    )
+                    resource_contended = lock_report.contended
+                    resource_contended_keys = lock_report.contended_keys
+                    if runtime_context.cancelled():
+                        raise asyncio.CancelledError
+                    result = await tool.execute(runtime_context, normalized_input)
         duration_ms = max(1, round((time.perf_counter() - started) * 1000))
         metadata = {
             **dict(result.metadata),

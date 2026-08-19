@@ -15,6 +15,7 @@ import com.lumora.core.conversation.domain.model.ConversationInputTarget;
 import com.lumora.core.conversation.domain.model.MessageAttachment;
 import com.lumora.core.conversation.application.support.MessageAttachmentJson;
 import com.lumora.core.task.application.service.TaskService;
+import com.lumora.core.task.domain.entity.AgentTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -212,7 +213,7 @@ public class ConversationRunCoordinator {
         ));
         input.setModel(valueOrEmpty(model));
         input.setReasoningEffort(valueOrEmpty(reasoningEffort));
-        input.setWorkspacePath(valueOrEmpty(workspacePath));
+        input.setWorkspacePath(resolveWorkspacePath(taskId, workspacePath));
         input.setPermissionMode(valueOrDefault(
                 permissionMode, "request_approval"
         ));
@@ -313,7 +314,9 @@ public class ConversationRunCoordinator {
             input.setReasoningEffort(valueOrEmpty(reasoningEffort));
         }
         if (workspacePath != null) {
-            input.setWorkspacePath(valueOrEmpty(workspacePath));
+            input.setWorkspacePath(resolveWorkspacePath(
+                    taskId, workspacePath
+            ));
         }
         if (permissionMode != null) {
             input.setPermissionMode(valueOrDefault(
@@ -558,7 +561,7 @@ public class ConversationRunCoordinator {
         run.setAttachmentsJson(MessageAttachmentJson.encode(attachments));
         run.setModel(valueOrEmpty(model));
         run.setReasoningEffort(valueOrEmpty(reasoningEffort));
-        run.setWorkspacePath(valueOrEmpty(workspacePath));
+        run.setWorkspacePath(resolveWorkspacePath(taskId, workspacePath));
         run.setPermissionMode(valueOrEmpty(permissionMode));
         run.setLastEventSequence(0L);
         run.setReplayFromSequence(0L);
@@ -644,7 +647,9 @@ public class ConversationRunCoordinator {
         run.setAttachmentsJson(input.getAttachmentsJson());
         run.setModel(input.getModel());
         run.setReasoningEffort(input.getReasoningEffort());
-        run.setWorkspacePath(input.getWorkspacePath());
+        run.setWorkspacePath(resolveWorkspacePath(
+                taskId, input.getWorkspacePath()
+        ));
         run.setPermissionMode(input.getPermissionMode());
         run.setLastEventSequence(0L);
         run.setReplayFromSequence(0L);
@@ -931,6 +936,24 @@ public class ConversationRunCoordinator {
 
     private String valueOrEmpty(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private String resolveWorkspacePath(
+            String taskId,
+            String requestedWorkspacePath
+    ) {
+        if (requestedWorkspacePath != null
+                && !requestedWorkspacePath.isBlank()) {
+            return requestedWorkspacePath.trim();
+        }
+        AgentTask task = taskService.getTask(taskId);
+        if (task != null && task.getWorkspacePath() != null
+                && !task.getWorkspacePath().isBlank()) {
+            return task.getWorkspacePath().trim();
+        }
+        return valueOrEmpty(
+                runStore.findLatestWorkspacePathForTask(taskId)
+        );
     }
 
     private String valueOrDefault(String value, String fallback) {

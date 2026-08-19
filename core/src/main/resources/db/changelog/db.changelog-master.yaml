@@ -244,3 +244,21 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 028-agent-session-control-plane
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V28__agent_session_control_plane.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false
+  - changeSet:
+      id: 029-task-workspace
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V29__task_workspace.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

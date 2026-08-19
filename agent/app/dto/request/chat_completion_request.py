@@ -87,6 +87,61 @@ class ChatMessageRequest(BaseModel):
         return message
 
 
+class AgentInboxMessageRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    message_id: str = Field(alias="messageId", min_length=1, max_length=160)
+    sequence: int = Field(ge=1)
+    sender_agent_id: str = Field(
+        alias="senderAgentId", min_length=1, max_length=160
+    )
+    content: str = Field(min_length=1, max_length=100_000)
+    status: Literal["pending", "consumed"] = "pending"
+
+
+class AgentCheckpointRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    sequence: int = Field(ge=0)
+    consumed_inbox_sequence: int = Field(
+        default=0, alias="consumedInboxSequence", ge=0
+    )
+    transcript: list[ChatMessageRequest] = Field(
+        default_factory=list, max_length=10_000
+    )
+    summary: str | None = Field(default=None, max_length=100_000)
+
+
+class AgentSessionSnapshotRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    agent_id: str = Field(alias="agentId", min_length=1, max_length=160)
+    session_id: str = Field(alias="sessionId", min_length=1, max_length=500)
+    parent_agent_id: str = Field(
+        alias="parentAgentId", min_length=1, max_length=160
+    )
+    parent_session_id: str = Field(
+        alias="parentSessionId", min_length=1, max_length=500
+    )
+    label: str = Field(min_length=1, max_length=120)
+    status: Literal[
+        "idle", "running", "interrupted", "closed", "failed"
+    ] = "idle"
+    mode: Literal["one_shot", "continuable"] = "continuable"
+    delegation_depth: int = Field(alias="delegationDepth", ge=1, le=20)
+    model: str = Field(default="", max_length=160)
+    unread_report_count: int = Field(
+        default=0, alias="unreadReportCount", ge=0
+    )
+    latest_report: str | None = Field(
+        default=None, alias="latestReport", max_length=100_000
+    )
+    inbox: list[AgentInboxMessageRequest] = Field(
+        default_factory=list, max_length=2_000
+    )
+    checkpoint: AgentCheckpointRequest | None = None
+
+
 class ModelConnectionRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -192,6 +247,41 @@ class McpServerRequest(BaseModel):
         return self
 
 
+class ExecutionBudgetRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    max_total_tokens: int = Field(
+        default=1_000_000,
+        alias="maxTotalTokens",
+        ge=1,
+        le=100_000_000,
+    )
+    max_model_requests: int = Field(
+        default=256,
+        alias="maxModelRequests",
+        ge=1,
+        le=100_000,
+    )
+    max_tool_calls: int = Field(
+        default=1_024,
+        alias="maxToolCalls",
+        ge=1,
+        le=1_000_000,
+    )
+    max_wall_time_ms: int = Field(
+        default=7_200_000,
+        alias="maxWallTimeMs",
+        ge=1_000,
+        le=604_800_000,
+    )
+    max_active_agents: int = Field(
+        default=10,
+        alias="maxActiveAgents",
+        ge=1,
+        le=100,
+    )
+
+
 class PromptContextRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -238,6 +328,15 @@ class PromptContextRequest(BaseModel):
         default_factory=list,
         alias="mcpServers",
         max_length=20,
+    )
+    agent_sessions: list[AgentSessionSnapshotRequest] = Field(
+        default_factory=list,
+        alias="agentSessions",
+        max_length=200,
+    )
+    execution_budget: ExecutionBudgetRequest = Field(
+        default_factory=ExecutionBudgetRequest,
+        alias="executionBudget",
     )
 
 

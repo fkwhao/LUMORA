@@ -9,6 +9,7 @@ import {
   useReducer,
   useRef,
   useState,
+  type CSSProperties,
 } from "react";
 import {
   ActionBarPrimitive,
@@ -40,7 +41,6 @@ import {
   Copy,
   Download,
   File,
-  FileDiff,
   Folder,
   FolderClosed,
   Hand,
@@ -48,6 +48,7 @@ import {
   Minimize2,
   MoreHorizontal,
   PackageOpen,
+  PanelRight,
   Pencil,
   Play,
   Plus,
@@ -299,8 +300,6 @@ export const TaskPage = memo(function TaskPage({
   }, [messages]);
   const contextTabActive = rightSidebar.visible
     && rightSidebar.activeTabId === "context";
-  const reviewTabActive = rightSidebar.visible
-    && rightSidebar.activeTabId === "review";
   const openContextTab = useCallback(() => {
     dispatchRightSidebar({ type: "open", tabId: "context" });
   }, []);
@@ -1303,10 +1302,12 @@ export const TaskPage = memo(function TaskPage({
         label: session?.label || "子 Agent",
         kind: "agent",
         status: session?.status,
+        agentId: session?.agentId || tabId.slice("agent:".length),
       };
     }),
     [contextPercent, rightSidebar.tabs, subagentSessions],
   );
+  const rightSidebarOpen = rightSidebar.visible && rightSidebar.tabs.length > 0;
 
   const messageRenderContext = useMemo<TaskMessageRenderContextValue>(
     () => ({
@@ -1343,7 +1344,8 @@ export const TaskPage = memo(function TaskPage({
     <AssistantRuntimeProvider runtime={runtime}>
       <TaskMessageRenderContext.Provider value={messageRenderContext}>
       <main
-        className={`task-layout${composerMotion ? ` composer-enter-${composerMotion}` : ""}`}
+        className={`task-layout${rightSidebarOpen ? " has-right-sidebar" : ""}${composerMotion ? ` composer-enter-${composerMotion}` : ""}`}
+        style={{ "--context-pane-width": `${contextPaneWidth}px` } as CSSProperties}
       >
       <header className="task-header">
         <div className="task-title-row">
@@ -1356,16 +1358,6 @@ export const TaskPage = memo(function TaskPage({
         </div>
 
         <div className="task-actions" ref={taskActionsRef}>
-          <button
-            className={`review-toggle${reviewTabActive ? " active" : ""}`}
-            type="button"
-            aria-label="审阅文件变更"
-            aria-expanded={reviewTabActive}
-            onClick={() => dispatchRightSidebar({ type: "open", tabId: "review" })}
-          >
-            <FileDiff size={15} />
-            审阅
-          </button>
           <button
             className="icon-button"
             type="button"
@@ -2606,9 +2598,10 @@ export const TaskPage = memo(function TaskPage({
             </aside>
           </div>
         )}
+      </div>
 
         <TaskRightSidebar
-          open={rightSidebar.visible && rightSidebar.tabs.length > 0}
+          open={rightSidebarOpen}
           width={contextPaneWidth}
           tabs={rightSidebarTabs}
           activeTabId={rightSidebar.activeTabId}
@@ -2653,7 +2646,18 @@ export const TaskPage = memo(function TaskPage({
             />
           )}
         </TaskRightSidebar>
-      </div>
+        <button
+          className="task-sidebar-visibility-toggle"
+          type="button"
+          aria-label={rightSidebarOpen ? "隐藏侧边栏" : "显示侧边栏"}
+          title={rightSidebarOpen ? "隐藏侧边栏" : "显示侧边栏"}
+          aria-expanded={rightSidebarOpen}
+          onClick={() =>
+            dispatchRightSidebar({ type: rightSidebarOpen ? "hide" : "show" })
+          }
+        >
+          <PanelRight size={17} strokeWidth={1.7} />
+        </button>
       </main>
       </TaskMessageRenderContext.Provider>
     </AssistantRuntimeProvider>

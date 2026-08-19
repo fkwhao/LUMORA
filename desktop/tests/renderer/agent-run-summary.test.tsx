@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentRunSummary } from "../../src/renderer/features/tasks/AgentRunSummary";
+import { AgentIdentityAvatar } from "../../src/renderer/features/tasks/components/AgentIdentityAvatar";
 
 afterEach(() => {
   cleanup();
@@ -9,6 +10,27 @@ afterEach(() => {
 });
 
 describe("AgentRunSummary", () => {
+  it("gives each Agent a stable solid color without text or status", () => {
+    const { container } = render(
+      <div>
+        <AgentIdentityAvatar agentId="agent-1" />
+        <AgentIdentityAvatar agentId="agent-2" />
+        <AgentIdentityAvatar agentId="agent-1" />
+      </div>,
+    );
+
+    const avatars = Array.from(
+      container.querySelectorAll<HTMLElement>(".agent-identity-avatar"),
+    );
+    const [architecture, testing, architectureAgain] = avatars;
+    expect(architecture).toHaveAttribute("data-agent-tone");
+    expect(architecture!.dataset.agentTone).not.toBe(testing!.dataset.agentTone);
+    expect(architecture!.dataset.agentTone).toBe(architectureAgain!.dataset.agentTone);
+    expect(architecture).toBeEmptyDOMElement();
+    expect(testing).toBeEmptyDOMElement();
+    expect(architecture).not.toHaveAttribute("data-status");
+  });
+
   it("renders a child Agent as a clickable avatar and hides nested trace rows", () => {
     const onOpenAgent = vi.fn();
     render(
