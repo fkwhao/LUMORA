@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 import {
+  Bot,
   ChevronDown,
   ChevronRight,
   FilePenLine,
@@ -33,6 +34,7 @@ interface AgentRunSummaryProps {
   stopped?: boolean;
   onReviewChange?(item: WorkLogItem): void;
   onOpenArtifact?(artifactId: string): void;
+  onOpenAgent?(agentId: string): void;
 }
 
 interface WorkPhase {
@@ -57,6 +59,7 @@ export const AgentRunSummary = memo(function AgentRunSummary({
   stopped = false,
   onReviewChange,
   onOpenArtifact,
+  onOpenAgent,
 }: AgentRunSummaryProps) {
   const [expanded, setExpanded] = useState(running && !answerStarted);
   const [liveClock, setLiveClock] = useState<LiveClock>(() => {
@@ -141,6 +144,7 @@ export const AgentRunSummary = memo(function AgentRunSummary({
               key={phase.phaseId}
               onReviewChange={onReviewChange}
               onOpenArtifact={onOpenArtifact}
+              onOpenAgent={onOpenAgent}
               phase={phase}
             />
           ))}
@@ -155,11 +159,13 @@ function WorkPhaseEntry({
   active,
   onReviewChange,
   onOpenArtifact,
+  onOpenAgent,
 }: {
   phase: WorkPhase;
   active: boolean;
   onReviewChange?: (item: WorkLogItem) => void;
   onOpenArtifact?: (artifactId: string) => void;
+  onOpenAgent?: (agentId: string) => void;
 }) {
   const running = active || phase.items.some((item) => item.status === "running");
 
@@ -177,6 +183,7 @@ function WorkPhaseEntry({
               items={phase.items}
               onReviewChange={onReviewChange}
               onOpenArtifact={onOpenArtifact}
+              onOpenAgent={onOpenAgent}
               running={running}
             />
           </div>
@@ -191,20 +198,25 @@ function ToolGroupEntry({
   running,
   onReviewChange,
   onOpenArtifact,
+  onOpenAgent,
 }: {
   items: WorkLogItem[];
   running: boolean;
   onReviewChange?: (item: WorkLogItem) => void;
   onOpenArtifact?: (artifactId: string) => void;
+  onOpenAgent?: (agentId: string) => void;
 }) {
   const searchOnly = items.length > 0 && items.every(
     (item) => item.kind === "search",
   );
-  const [expanded, setExpanded] = useState(running && searchOnly);
+  const hasAgent = items.some((item) => item.kind === "agent");
+  const [expanded, setExpanded] = useState(
+    running && (searchOnly || hasAgent),
+  );
 
   useEffect(() => {
-    if (running && searchOnly) setExpanded(true);
-  }, [running, searchOnly]);
+    if (running && (searchOnly || hasAgent)) setExpanded(true);
+  }, [hasAgent, running, searchOnly]);
 
   return (
     <section className={`tool-group${expanded ? " expanded" : ""}`}>
@@ -225,6 +237,12 @@ function ToolGroupEntry({
         <div className="tool-call-list-inner">
           {items.map((item) => item.kind === "search" ? (
             <WebSearch item={item} key={item.itemId} />
+          ) : item.kind === "agent" ? (
+            <AgentCallItem
+              item={item}
+              key={item.itemId}
+              onOpenAgent={onOpenAgent}
+            />
           ) : (
             <ToolCallItem
               item={item}
@@ -236,6 +254,44 @@ function ToolGroupEntry({
         </div>
       </div>
     </section>
+  );
+}
+
+function AgentCallItem({
+  item,
+  onOpenAgent,
+}: {
+  item: WorkLogItem;
+  onOpenAgent?: (agentId: string) => void;
+}) {
+  const agentId = stringMetadata(item, "agentId");
+  const label = stringMetadata(item, "agentLabel") || item.title || "子 Agent";
+  const statusLabel = item.status === "running"
+    ? "执行中"
+    : item.status === "failed"
+      ? "执行失败"
+      : item.durationMs
+        ? formatDuration(item.durationMs)
+        : "已完成";
+
+  return (
+    <article className="agent-call-item" data-status={item.status}>
+      <button
+        type="button"
+        disabled={!agentId || !onOpenAgent}
+        onClick={() => agentId && onOpenAgent?.(agentId)}
+        aria-label={`查看 ${label} 的执行过程`}
+      >
+        <span className="agent-call-avatar" aria-hidden="true">
+          <Bot size={14} />
+        </span>
+        <span className={item.status === "running" ? "shimmer-text" : ""}>
+          <strong>{label}</strong>
+          <small>{statusLabel}</small>
+        </span>
+        <ChevronRight size={13} />
+      </button>
+    </article>
   );
 }
 
@@ -342,6 +398,17 @@ function buildWorkPhases(items: WorkLogItem[]): WorkPhase[] {
   let current: WorkPhase | undefined;
   for (const item of items) {
     if (isPlanWorkLogItem(item)) continue;
+    if (item.toolName === "delegate_task") continue;
+    if (item.kind === "agent" && stringMetadata(item, "childEventType")) {
+      continue;
+    }
+    if (
+      item.kind === "agent" &&
+      stringMetadata(item, "parentAgentId") &&
+      stringMetadata(item, "parentAgentId") !== "supervisor"
+    ) {
+      continue;
+    }
     if (item.kind === "progress") {
       current = {
         phaseId: item.itemId,
@@ -377,6 +444,7 @@ function phaseTitle(content?: string): string {
 }
 
 function fallbackPhaseTitle(item: WorkLogItem): string {
+  if (item.kind === "agent") return "正在协同子 Agent";
   if (item.kind === "search") return "正在搜索网络资料";
   if (item.kind === "context") return "整理上下文";
   if (item.toolName === "read_file" || item.toolName === "search_in_file") {
@@ -469,13 +537,21 @@ function toolCallLabel(item: WorkLogItem, detail: string) {
 
 function toolGroupLabel(items: WorkLogItem[]): string {
   const actionable = items.filter(
-    (item) => item.kind === "tool" || item.kind === "approval" || item.kind === "search",
+    (item) =>
+      item.kind === "tool" ||
+      item.kind === "approval" ||
+      item.kind === "search" ||
+      item.kind === "agent",
   );
   const commands = actionable
     .map((item) => stringArgument(item, "command"))
     .filter(Boolean);
   const pathItems = actionable.filter((item) => stringArgument(item, "path"));
   const toolNames = new Set(actionable.map((item) => item.toolName));
+
+  if (actionable.some((item) => item.kind === "agent")) {
+    return actionable.length > 1 ? "协同多个 Agent" : "协同 Agent";
+  }
 
   if (actionable.length > 0 && actionable.every((item) => item.kind === "search")) {
     return "搜索网络资料";

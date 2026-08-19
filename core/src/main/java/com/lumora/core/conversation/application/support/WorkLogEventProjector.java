@@ -65,7 +65,22 @@ public final class WorkLogEventProjector {
             "toolExecutionState",
             "executionLocation",
             "callSignature",
-            "sources"
+            "sources",
+            "agentId",
+            "sessionId",
+            "parentAgentId",
+            "agentLabel",
+            "agentRole",
+            "agentStatus",
+            "delegationDepth",
+            "childEventType",
+            "childSequence",
+            "visibleEventCount",
+            "promptTokens",
+            "completionTokens",
+            "totalTokens",
+            "activeContextTokens",
+            "usageCategory"
     );
 
     private WorkLogEventProjector() {

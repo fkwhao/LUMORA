@@ -50,6 +50,13 @@ class ToolContext:
         repr=False,
     )
     cancelled: Callable[[], bool] = field(default=lambda: False, repr=False)
+    emit_event: Callable[[Any], Awaitable[None]] | None = field(
+        default=None,
+        repr=False,
+    )
+    session_id: str = ""
+    agent_id: str = "supervisor"
+    delegation_depth: int = 0
 
 
 @dataclass(frozen=True, slots=True)

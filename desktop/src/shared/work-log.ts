@@ -16,6 +16,43 @@ export function workLogItemFromEvent(
     };
   }
   if (
+    event.type === "agent_started" ||
+    event.type === "agent_event" ||
+    event.type === "agent_completed" ||
+    event.type === "agent_failed"
+  ) {
+    const childEventType = event.metadata?.childEventType;
+    const childFailed =
+      childEventType === "tool_failed" ||
+      childEventType === "web_search_failed" ||
+      childEventType === "context_compaction_failed";
+    const childCompleted =
+      childEventType === "tool_completed" ||
+      childEventType === "web_search_completed" ||
+      childEventType === "context_compacted";
+    return {
+      itemId: event.itemId || event.toolCallId || createId(),
+      kind: "agent",
+      status:
+        event.type === "agent_failed" || childFailed
+          ? "failed"
+          : event.type === "agent_completed" || childCompleted
+            ? "completed"
+            : "running",
+      content: event.delta,
+      toolCallId: event.toolCallId,
+      toolName: event.toolName,
+      title: event.title,
+      arguments: event.arguments,
+      output: event.output,
+      durationMs: event.durationMs,
+      exitCode: event.exitCode,
+      errorMessage: event.errorMessage,
+      model: event.model,
+      metadata: event.metadata,
+    };
+  }
+  if (
     event.type === "approval_review_started" ||
     event.type === "approval_review_completed"
   ) {

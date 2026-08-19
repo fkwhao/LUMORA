@@ -6,7 +6,8 @@ export const SIDEBAR_COLLAPSE_DRAG_THRESHOLD = 204;
 // 统计区在 455px 及以下切换为单列；456px 是刚好保持双列的宽度。
 export const DEFAULT_CONTEXT_PANE_WIDTH = 456;
 export const MIN_CONTEXT_PANE_WIDTH = 360;
-export const MAX_CONTEXT_PANE_WIDTH = 456;
+// 默认仍保持紧凑双列；用户可向左拖拽到默认宽度的 150%。
+export const MAX_CONTEXT_PANE_WIDTH = 684;
 export const CONTEXT_PANE_COLLAPSE_DRAG_THRESHOLD =
   MIN_CONTEXT_PANE_WIDTH - 120;
 export const CONTEXT_PANE_EXPAND_DRAG_THRESHOLD = 72;

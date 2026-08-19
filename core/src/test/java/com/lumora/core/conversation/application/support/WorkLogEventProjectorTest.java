@@ -83,4 +83,43 @@ class WorkLogEventProjectorTest {
         assertThat(projected.getOutput()).contains("non-force push");
         assertThat(projected.getDurationMs()).isEqualTo(420L);
     }
+
+    @Test
+    void retainsAgentSessionIdentityButDropsInternalMetadata() {
+        ChatStreamEvent event = new ChatStreamEvent(
+                ChatStreamEventType.AGENT_COMPLETED,
+                "",
+                "model",
+                null,
+                "",
+                "agent-1",
+                "",
+                "",
+                "架构检查",
+                Map.of(),
+                "已完成",
+                120L,
+                null,
+                Map.of(
+                        "agentId", "agent-1",
+                        "sessionId", "run-1:agent:agent-1",
+                        "parentAgentId", "supervisor",
+                        "agentLabel", "架构检查",
+                        "agentStatus", "completed",
+                        "totalTokens", 42,
+                        "internalSecret", "hidden"
+                )
+        );
+
+        ChatStreamEvent projected = WorkLogEventProjector.project(event);
+
+        assertThat(projected.getMetadata()).containsOnly(
+                entry("agentId", "agent-1"),
+                entry("sessionId", "run-1:agent:agent-1"),
+                entry("parentAgentId", "supervisor"),
+                entry("agentLabel", "架构检查"),
+                entry("agentStatus", "completed"),
+                entry("totalTokens", 42)
+        );
+    }
 }

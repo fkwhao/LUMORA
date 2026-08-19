@@ -1,27 +1,6 @@
-import {
-  Braces,
-  Download,
-  Gauge,
-  MessageSquareText,
-  X,
-} from "lucide-react";
-import {
-  useRef,
-  type CSSProperties,
-  type KeyboardEvent,
-  type PointerEvent,
-} from "react";
+import { Braces, Download, Gauge, MessageSquareText } from "lucide-react";
 
 import type { ChatMessage } from "../../../../shared/model-contract";
-import {
-  MAX_CONTEXT_PANE_WIDTH,
-  MIN_CONTEXT_PANE_WIDTH,
-} from "../../../constants/layout";
-import {
-  clampContextPaneWidth,
-  shouldCollapseContextPaneOnDrag,
-  shouldExpandContextPaneOnDrag,
-} from "../../layout/context-pane-preferences";
 import {
   aggregateMessageUsage,
   cacheHitRate,
@@ -31,8 +10,6 @@ import {
 import { resolveContextBreakdown } from "../state/context-usage";
 
 interface ConversationUsagePaneProps {
-  open: boolean;
-  width: number;
   messages: ChatMessage[];
   conversationTitle: string;
   provider: string;
@@ -43,25 +20,10 @@ interface ConversationUsagePaneProps {
   estimated: boolean;
   createdAt?: string;
   updatedAt?: string;
-  onClose(): void;
   onExport(): void;
-  onOpenChange(open: boolean): void;
-  onWidthChange(width: number): void;
-  onWidthCommit(width: number): void;
-}
-
-interface DragState {
-  x: number;
-  width: number;
-  currentWidth: number;
-  rememberedWidth: number;
-  startedOpen: boolean;
-  open: boolean;
 }
 
 export function ConversationUsagePane({
-  open,
-  width,
   messages,
   conversationTitle,
   provider,
@@ -72,14 +34,8 @@ export function ConversationUsagePane({
   estimated,
   createdAt,
   updatedAt,
-  onClose,
   onExport,
-  onOpenChange,
-  onWidthChange,
-  onWidthCommit,
 }: ConversationUsagePaneProps) {
-  const paneRef = useRef<HTMLElement>(null);
-  const dragStart = useRef<DragState | undefined>(undefined);
   const usage = aggregateMessageUsage(messages);
   const hitRate = cacheHitRate(usage);
   const userMessages = messages.filter((message) => message.role === "user").length;
@@ -89,129 +45,9 @@ export function ConversationUsagePane({
     .map((message) => message.createdAt)
     .filter((value): value is string => Boolean(value));
   const breakdown = resolveContextBreakdown(messages);
-  const style = { "--context-pane-width": `${width}px` } as CSSProperties;
-
-  function startResize(event: PointerEvent<HTMLDivElement>) {
-    event.preventDefault();
-    const startWidth = open ? width : 0;
-    dragStart.current = {
-      x: event.clientX,
-      width: startWidth,
-      currentWidth: startWidth,
-      rememberedWidth: width,
-      startedOpen: open,
-      open,
-    };
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    document.body.classList.add("resizing-context-pane");
-    if (!open) {
-      document.body.classList.add("opening-context-pane-by-drag");
-    }
-  }
-
-  function resize(event: PointerEvent<HTMLDivElement>) {
-    if (!dragStart.current) return;
-    const nextWidth = Math.min(
-      MAX_CONTEXT_PANE_WIDTH,
-      Math.max(
-        0,
-        Math.round(
-          dragStart.current.width + dragStart.current.x - event.clientX,
-        ),
-      ),
-    );
-    dragStart.current.currentWidth = nextWidth;
-    paneRef.current?.style.setProperty(
-      "--context-pane-width",
-      `${nextWidth}px`,
-    );
-    event.currentTarget.setAttribute("aria-valuenow", String(nextWidth));
-    const nextOpen = dragStart.current.startedOpen
-      ? !shouldCollapseContextPaneOnDrag(nextWidth)
-      : shouldExpandContextPaneOnDrag(nextWidth);
-    if (nextOpen !== dragStart.current.open) {
-      dragStart.current.open = nextOpen;
-      paneRef.current?.classList.toggle("is-open", nextOpen);
-      paneRef.current?.setAttribute("aria-hidden", String(!nextOpen));
-    }
-  }
-
-  function stopResize(event: PointerEvent<HTMLDivElement>) {
-    const drag = dragStart.current;
-    dragStart.current = undefined;
-    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
-      event.currentTarget.releasePointerCapture?.(event.pointerId);
-    }
-    document.body.classList.remove("resizing-context-pane");
-    document.body.classList.remove("opening-context-pane-by-drag");
-    if (!drag) return;
-    const settledWidth = drag.open
-      ? clampContextPaneWidth(drag.currentWidth)
-      : drag.startedOpen
-        ? MIN_CONTEXT_PANE_WIDTH
-        : drag.rememberedWidth;
-    onOpenChange(drag.open);
-    onWidthChange(settledWidth);
-    onWidthCommit(settledWidth);
-  }
-
-  function resizeWithKeyboard(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    event.preventDefault();
-    if (!open) {
-      if (event.key === "ArrowLeft") onOpenChange(true);
-      return;
-    }
-    if (event.key === "ArrowRight" && width <= MIN_CONTEXT_PANE_WIDTH) {
-      onOpenChange(false);
-      return;
-    }
-    const nextWidth = clampContextPaneWidth(
-      width + (event.key === "ArrowLeft" ? 24 : -24),
-    );
-    onWidthChange(nextWidth);
-    onWidthCommit(nextWidth);
-  }
 
   return (
-    <aside
-      ref={paneRef}
-      className={`conversation-usage-pane${open ? " is-open" : ""}`}
-      style={style}
-      aria-label="当前会话 Token 信息"
-      aria-hidden={!open}
-    >
-      <div
-        className="context-pane-resize-handle"
-        role="separator"
-        aria-label="调整上下文侧边栏宽度"
-        aria-orientation="vertical"
-        aria-valuemin={MIN_CONTEXT_PANE_WIDTH}
-        aria-valuemax={MAX_CONTEXT_PANE_WIDTH}
-        aria-valuenow={width}
-        tabIndex={open ? 0 : -1}
-        onKeyDown={resizeWithKeyboard}
-        onPointerDown={startResize}
-        onPointerMove={resize}
-        onPointerUp={stopResize}
-        onPointerCancel={stopResize}
-      />
-
-      <header className="context-pane-header">
-        <div className="context-pane-tab">
-          <span
-            className="context-pane-mini-ring"
-            style={{ "--usage": contextPercent } as CSSProperties}
-            aria-hidden="true"
-          />
-          <strong>上下文</strong>
-          <button type="button" aria-label="关闭上下文统计" onClick={onClose}>
-            <X />
-          </button>
-        </div>
-      </header>
-
-      <div className="conversation-usage-scroll">
+      <div className="conversation-usage-scroll right-sidebar-scroll-content">
         <section className="context-stat-grid" aria-label="会话统计">
           <UsageFact label="会话" value={conversationTitle} />
           <UsageFact label="消息数" value={messages.length.toLocaleString("zh-CN")} />
@@ -298,7 +134,6 @@ export function ConversationUsagePane({
           </div>
         </section>
       </div>
-    </aside>
   );
 }
 

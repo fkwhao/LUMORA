@@ -79,6 +79,10 @@ export function applyChatEvent(
   }
   if (
     event.type === "progress_message" ||
+    event.type === "agent_started" ||
+    event.type === "agent_event" ||
+    event.type === "agent_completed" ||
+    event.type === "agent_failed" ||
     event.type === "tool_started" ||
     event.type === "tool_completed" ||
     event.type === "tool_failed" ||

@@ -24,11 +24,8 @@ describe("DiffReviewPane", () => {
             previewAvailable: true,
           },
         ]}
-        onClose={vi.fn()}
         onSelectChange={onSelectChange}
-        onWidthChange={vi.fn()}
         selectedChangeId="change-1"
-        width={460}
       />,
     );
 

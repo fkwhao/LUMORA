@@ -765,6 +765,10 @@ components:
             - reasoning_delta
             - protocol_message
             - progress_message
+            - agent_started
+            - agent_event
+            - agent_completed
+            - agent_failed
             - context_compaction_started
             - context_compaction_progress
             - context_compacted

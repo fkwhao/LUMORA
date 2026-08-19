@@ -100,7 +100,7 @@ export interface ExecutionPlanStep {
 
 export interface WorkLogItem {
   itemId: string;
-  kind: "progress" | "tool" | "context" | "approval" | "search";
+  kind: "progress" | "tool" | "context" | "approval" | "search" | "agent";
   status: WorkLogItemStatus;
   content?: string;
   toolCallId?: string;
@@ -111,6 +111,7 @@ export interface WorkLogItem {
   durationMs?: number;
   exitCode?: number;
   errorMessage?: string;
+  model?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -183,6 +184,10 @@ export type ChatStreamEventType =
   | "reasoning_delta"
   | "protocol_message"
   | "progress_message"
+  | "agent_started"
+  | "agent_event"
+  | "agent_completed"
+  | "agent_failed"
   | "tool_started"
   | "tool_completed"
   | "tool_failed"

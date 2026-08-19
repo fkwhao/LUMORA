@@ -57,6 +57,34 @@ class PromptBuilderTest(unittest.TestCase):
         self.assertIn("连接只表示能力可用，不表示本轮需要调用", prompt)
         self.assertNotIn("  - mcp__remote__echo", prompt)
 
+    def test_delegate_guidance_is_tied_to_tool_visibility(self) -> None:
+        with_delegate = PromptBuilder().build(PromptContext(
+            available_tools=("read_file", "delegate_task"),
+            tool_definitions=({
+                "type": "function",
+                "function": {
+                    "name": "delegate_task",
+                    "parameters": {"type": "object"},
+                },
+            },),
+        ))
+        without_delegate = PromptBuilder().build(PromptContext(
+            available_tools=("read_file", "delegate_task"),
+        ))
+
+        self.assertIn(
+            "tool.delegate_task.guidance",
+            [segment.key for segment in with_delegate.segments],
+        )
+        self.assertIn("不使用固定的复杂度分数", with_delegate.system_prompt)
+        self.assertIn("前台 one-shot 调用", with_delegate.system_prompt)
+        self.assertIn("多个互不依赖的任务应在同一模型回合一起调用", with_delegate.system_prompt)
+        self.assertNotIn(
+            "tool.delegate_task.guidance",
+            [segment.key for segment in without_delegate.segments],
+        )
+        self.assertNotIn("Supervisor 委派策略", without_delegate.system_prompt)
+
     def test_routes_memory_and_tools_to_api_fields(self) -> None:
         assembly = PromptBuilder().build(
             PromptContext(

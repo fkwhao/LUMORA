@@ -9,6 +9,62 @@ afterEach(() => {
 });
 
 describe("AgentRunSummary", () => {
+  it("renders a child Agent as a clickable avatar and hides nested trace rows", () => {
+    const onOpenAgent = vi.fn();
+    render(
+      <AgentRunSummary
+        running
+        onOpenAgent={onOpenAgent}
+        workLog={[
+          {
+            itemId: "agent-1",
+            kind: "agent",
+            status: "running",
+            title: "架构检查",
+            metadata: {
+              agentId: "agent-1",
+              agentLabel: "架构检查",
+              parentAgentId: "supervisor",
+            },
+          },
+          {
+            itemId: "agent-1:tool-1",
+            kind: "agent",
+            status: "running",
+            toolName: "read_file",
+            title: "读取 architecture.md",
+            metadata: {
+              agentId: "agent-1",
+              childEventType: "tool_started",
+            },
+          },
+          {
+            itemId: "agent-2",
+            kind: "agent",
+            status: "running",
+            title: "继续检查测试",
+            metadata: {
+              agentId: "agent-2",
+              agentLabel: "继续检查测试",
+              parentAgentId: "agent-1",
+            },
+          },
+        ]}
+      />,
+    );
+
+    const avatarCall = screen.getByRole("button", {
+      name: "查看 架构检查 的执行过程",
+    });
+    expect(avatarCall.querySelector(".agent-call-avatar")).toBeInTheDocument();
+    expect(screen.queryByText("读取 architecture.md")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "查看 继续检查测试 的执行过程" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(avatarCall);
+    expect(onOpenAgent).toHaveBeenCalledWith("agent-1");
+  });
+
   it("reveals a semantic phase and its shell script on demand", () => {
     render(
       <AgentRunSummary

@@ -238,12 +238,18 @@ def test_remote_mcp_is_available_without_workspace(monkeypatch: Any) -> None:
 
     asyncio.run(_drain(service.stream(request, "correlation")))
 
-    assert harness.registry.names() == ("mcp__remote__echo",)
+    assert harness.registry.names() == (
+        "mcp__remote__echo",
+        "delegate_task",
+    )
     assert harness.tool_context is not None
     assert harness.tool_context.workspace_scoped is False
     assert [tool["function"]["name"] for tool in harness.prompt.tools] == [
-        "mcp__remote__echo"
+        "mcp__remote__echo",
+        "delegate_task",
     ]
+    assert "  - delegate_task" in harness.prompt.system_prompt
+    assert "已连接 1 个可选 MCP 工具" in harness.prompt.system_prompt
     assert len(FakeMcpClient.instances) == 1
     assert FakeMcpClient.instances[0].closed is False
 
@@ -287,6 +293,7 @@ def test_pdf_tools_are_exposed_without_workspace_for_attached_pdf(
     assert [tool["function"]["name"] for tool in harness.prompt.tools] == [
         "read_pdf",
         "search_pdf",
+        "delegate_task",
     ]
     assert harness.tool_context.workspace_scoped is False
     attachment = harness.tool_context.attachments["pdf-1"]
@@ -339,7 +346,9 @@ def test_mcp_server_is_not_connected_for_ordinary_request(
         not name.startswith(("mcp__", "mcpmeta__"))
         for name in harness.registry.names()
     )
-    assert harness.prompt.tools == ()
+    assert [tool["function"]["name"] for tool in harness.prompt.tools] == [
+        "delegate_task"
+    ]
     assert CapabilityMcpClient.instances == []
 
 
@@ -364,6 +373,7 @@ def test_mcp_capability_catalogs_are_exposed_for_explicit_feature_request(
         "mcpmeta__remote__resource_read",
         "mcpmeta__remote__prompt_catalog",
         "mcpmeta__remote__prompt_get",
+        "delegate_task",
     )
 
 
@@ -382,7 +392,10 @@ def test_mcp_server_name_activates_related_request(monkeypatch: Any) -> None:
     request.prompt_context.mcp_servers[0].name = "GitHub"
     asyncio.run(_drain(service.stream(request)))
 
-    assert harness.registry.names() == ("mcp__remote__echo",)
+    assert harness.registry.names() == (
+        "mcp__remote__echo",
+        "delegate_task",
+    )
 
 
 def test_conceptual_mcp_question_does_not_connect_generic_server(

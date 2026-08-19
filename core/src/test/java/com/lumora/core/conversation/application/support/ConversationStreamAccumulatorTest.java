@@ -99,6 +99,41 @@ class ConversationStreamAccumulatorTest {
     }
 
     @Test
+    void persistsChildAgentLifecycleAndNestedExecutionEvents() {
+        ConversationStreamAccumulator accumulator =
+                new ConversationStreamAccumulator();
+        accumulator.accept(agentEvent(
+                ChatStreamEventType.AGENT_STARTED,
+                "agent-1",
+                "",
+                Map.of("agentStatus", "running")
+        ));
+        accumulator.accept(agentEvent(
+                ChatStreamEventType.AGENT_EVENT,
+                "agent-1:tool-1",
+                "正在读取架构文档",
+                Map.of(
+                        "agentStatus", "running",
+                        "childEventType", "tool_started"
+                )
+        ));
+        accumulator.accept(agentEvent(
+                ChatStreamEventType.AGENT_COMPLETED,
+                "agent-1",
+                "已完成架构检查",
+                Map.of("agentStatus", "completed")
+        ));
+
+        assertThat(accumulator.getWorkLogEvents()).hasSize(2);
+        assertThat(accumulator.getWorkLogEvents().get(0).getType())
+                .isEqualTo(ChatStreamEventType.AGENT_COMPLETED);
+        assertThat(accumulator.getWorkLogEvents().get(0).getOutput())
+                .isEqualTo("已完成架构检查");
+        assertThat(accumulator.getWorkLogEvents().get(1).getMetadata())
+                .containsEntry("childEventType", "tool_started");
+    }
+
+    @Test
     void keepsTheLatestCumulativeUsageSnapshot() {
         ConversationStreamAccumulator accumulator =
                 new ConversationStreamAccumulator();
@@ -244,6 +279,26 @@ class ConversationStreamAccumulatorTest {
                 ChatStreamEventType.PROTOCOL_MESSAGE,
                 "", "model", null, "", "", "", "", "",
                 Map.of(), "", 0L, null, Map.of("message", message)
+        );
+    }
+
+    private ChatStreamEvent agentEvent(
+            ChatStreamEventType type,
+            String itemId,
+            String output,
+            Map<String, Object> extraMetadata
+    ) {
+        Map<String, Object> metadata = new java.util.LinkedHashMap<>(Map.of(
+                "agentId", "agent-1",
+                "sessionId", "run-1:agent:agent-1",
+                "parentAgentId", "supervisor",
+                "agentLabel", "架构检查"
+        ));
+        metadata.putAll(extraMetadata);
+        return new ChatStreamEvent(
+                type,
+                "", "model", null, "", itemId, "", "", "架构检查",
+                Map.of(), output, 20L, null, metadata
         );
     }
 }

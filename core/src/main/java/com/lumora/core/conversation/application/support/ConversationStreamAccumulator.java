@@ -14,7 +14,7 @@ import java.util.Map;
  */
 public class ConversationStreamAccumulator {
 
-    private static final int MAX_WORK_LOG_EVENTS = 200;
+    private static final int MAX_WORK_LOG_EVENTS = 400;
 
     private final StringBuilder content = new StringBuilder();
     private String model = "";
@@ -41,6 +41,10 @@ public class ConversationStreamAccumulator {
         }
 
         if (event.getType() == ChatStreamEventType.PROGRESS_MESSAGE
+                || event.getType() == ChatStreamEventType.AGENT_STARTED
+                || event.getType() == ChatStreamEventType.AGENT_EVENT
+                || event.getType() == ChatStreamEventType.AGENT_COMPLETED
+                || event.getType() == ChatStreamEventType.AGENT_FAILED
                 || event.getType() == ChatStreamEventType.TOOL_STARTED
                 || event.getType() == ChatStreamEventType.TOOL_COMPLETED
                 || event.getType() == ChatStreamEventType.TOOL_FAILED

@@ -36,6 +36,7 @@ class _ParallelGroupState:
     running: dict[int, asyncio.Task["_SettledCall"]] = field(default_factory=dict)
     next_to_start: int = 0
     next_to_commit: int = 0
+    live_events: asyncio.Queue[RunEvent] = field(default_factory=asyncio.Queue)
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,6 +157,7 @@ class ToolCallScheduler:
         run_control: RunControl | None,
     ) -> AsyncIterator[ScheduledToolItem]:
         state = _ParallelGroupState(calls)
+        live_event_task: asyncio.Task[RunEvent] | None = None
         pause_task = (
             asyncio.create_task(run_control.wait_until_pause_requested())
             if run_control is not None
@@ -163,6 +165,8 @@ class ToolCallScheduler:
         )
         try:
             while True:
+                while not state.live_events.empty():
+                    yield state.live_events.get_nowait()
                 self._harvest_finished(state)
                 async for item in self._commit_ready(
                     state,
@@ -204,7 +208,7 @@ class ToolCallScheduler:
                         if event.type == "tool_started":
                             yield event
                             state.running[index] = asyncio.create_task(
-                                _drain(generator)
+                                _drain(generator, state.live_events)
                             )
                             started = True
                             break
@@ -244,12 +248,20 @@ class ToolCallScheduler:
                 waiters: set[asyncio.Future[Any]] = set(state.running.values())
                 if pause_task is not None and not self.paused:
                     waiters.add(pause_task)
+                if live_event_task is None:
+                    live_event_task = asyncio.create_task(
+                        state.live_events.get()
+                    )
+                waiters.add(live_event_task)
                 done, _pending = await asyncio.wait(
                     waiters,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 if pause_task is not None and pause_task in done:
                     self.paused = True
+                if live_event_task in done:
+                    yield live_event_task.result()
+                    live_event_task = None
                 self._harvest_finished(state)
                 async for item in self._commit_ready(
                     state,
@@ -263,6 +275,12 @@ class ToolCallScheduler:
             )
             raise
         finally:
+            if live_event_task is not None and not live_event_task.done():
+                live_event_task.cancel()
+                await asyncio.gather(
+                    live_event_task,
+                    return_exceptions=True,
+                )
             if pause_task is not None and not pause_task.done():
                 pause_task.cancel()
                 await asyncio.gather(pause_task, return_exceptions=True)
@@ -338,12 +356,19 @@ class ToolCallScheduler:
 
 async def _drain(
     generator: AsyncIterator[_ExecutionPair],
+    live_events: asyncio.Queue[RunEvent] | None = None,
 ) -> _SettledCall:
     pairs: list[_ExecutionPair] = []
     result_text = "工具调用未返回结果"
     has_result = False
     async for pair in generator:
-        pairs.append(pair)
+        if (
+            live_events is not None
+            and pair[0].type not in {"tool_completed", "tool_failed"}
+        ):
+            await live_events.put(pair[0])
+        else:
+            pairs.append(pair)
         result_text = pair[1]
         has_result = has_result or bool(result_text)
     return _SettledCall(tuple(pairs), result_text, has_result)

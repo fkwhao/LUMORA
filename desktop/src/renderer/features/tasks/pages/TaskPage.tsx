@@ -6,6 +6,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
 } from "react";
@@ -89,6 +90,13 @@ import { ToolApprovalDialog } from "../components/ToolApprovalDialog";
 import { AgentRunSummary } from "../components/AgentRunSummary";
 import { DiffReviewPane, type FileChange } from "../components/DiffReviewPane";
 import { ConversationUsagePane } from "../components/ConversationUsagePane";
+import {
+  SubagentSessionPane,
+} from "../components/SubagentSessionPane";
+import {
+  TaskRightSidebar,
+  type TaskRightSidebarTab,
+} from "../components/TaskRightSidebar";
 import { ConversationInputQueue } from "../components/ConversationInputQueue";
 import { PlanTodoList } from "../components/PlanTodoList";
 import {
@@ -101,6 +109,11 @@ import {
   saveContextPaneWidth,
 } from "../../layout/context-pane-preferences";
 import { resolveContextUsage } from "../state/context-usage";
+import { subagentSessionsFromMessages } from "../state/subagent-sessions";
+import {
+  INITIAL_RIGHT_SIDEBAR_STATE,
+  rightSidebarTabReducer,
+} from "../state/right-sidebar-tabs";
 import { resolveQuestionRailTooltipPosition } from "../state/question-rail-tooltip";
 import {
   resolveModelSubmenuPlacement,
@@ -124,6 +137,7 @@ interface TaskMessageRenderContextValue {
   isCompacting: boolean;
   lastChatDurationMs?: number;
   onOpenArtifact(artifactId: string): void;
+  onOpenAgent(agentId: string): void;
   onReviewChange(item: WorkLogItem): void;
   taskEvents: TaskEvent[];
 }
@@ -186,9 +200,10 @@ export const TaskPage = memo(function TaskPage({
   const [composerAttachmentCount, setComposerAttachmentCount] = useState(0);
   const [skills, setSkills] = useState<SkillSummary[]>([]);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [reviewOpen, setReviewOpen] = useState(false);
-  const [usageOpen, setUsageOpen] = useState(false);
-  const [reviewWidth, setReviewWidth] = useState(460);
+  const [rightSidebar, dispatchRightSidebar] = useReducer(
+    rightSidebarTabReducer,
+    INITIAL_RIGHT_SIDEBAR_STATE,
+  );
   const [contextPaneWidth, setContextPaneWidth] = useState(
     loadContextPaneWidth,
   );
@@ -264,7 +279,7 @@ export const TaskPage = memo(function TaskPage({
     updatePlacement();
     window.addEventListener("resize", updatePlacement);
     return () => window.removeEventListener("resize", updatePlacement);
-  }, [composerMenu, contextPaneWidth, modelPickerSection, usageOpen]);
+  }, [composerMenu, contextPaneWidth, modelPickerSection, rightSidebar.visible]);
   const questionMessageCount = useMemo(
     () => messages.filter((message) => message.role === "user").length,
     [messages],
@@ -282,11 +297,24 @@ export const TaskPage = memo(function TaskPage({
     }
     return undefined;
   }, [messages]);
-  const openChangeReview = useCallback((item: WorkLogItem) => {
-    setUsageOpen(false);
-    setSelectedChangeId(item.itemId);
-    setReviewOpen(true);
+  const contextTabActive = rightSidebar.visible
+    && rightSidebar.activeTabId === "context";
+  const reviewTabActive = rightSidebar.visible
+    && rightSidebar.activeTabId === "review";
+  const openContextTab = useCallback(() => {
+    dispatchRightSidebar({ type: "open", tabId: "context" });
   }, []);
+  const openChangeReview = useCallback((item: WorkLogItem) => {
+    setSelectedChangeId(item.itemId);
+    dispatchRightSidebar({ type: "open", tabId: "review" });
+  }, []);
+  const openAgentSession = useCallback((agentId: string) => {
+    dispatchRightSidebar({ type: "open", tabId: `agent:${agentId}` });
+  }, []);
+
+  useEffect(() => {
+    dispatchRightSidebar({ type: "reset" });
+  }, [task?.taskId]);
 
   useEffect(() => {
     if (!modelApi) {
@@ -1246,6 +1274,39 @@ export const TaskPage = memo(function TaskPage({
     100,
     Math.round((contextTokens / contextLimit) * 100),
   );
+  const subagentSessions = useMemo(
+    () => subagentSessionsFromMessages(displayMessages),
+    [displayMessages],
+  );
+  const activeAgentId = rightSidebar.activeTabId?.startsWith("agent:")
+    ? rightSidebar.activeTabId.slice("agent:".length)
+    : undefined;
+  const selectedAgentSession = activeAgentId
+    ? subagentSessions.get(activeAgentId)
+    : undefined;
+  const rightSidebarTabs = useMemo<TaskRightSidebarTab[]>(
+    () => rightSidebar.tabs.map((tabId) => {
+      if (tabId === "context") {
+        return {
+          id: tabId,
+          label: "上下文",
+          kind: "context",
+          usagePercent: contextPercent,
+        };
+      }
+      if (tabId === "review") {
+        return { id: tabId, label: "审阅", kind: "review" };
+      }
+      const session = subagentSessions.get(tabId.slice("agent:".length));
+      return {
+        id: tabId,
+        label: session?.label || "子 Agent",
+        kind: "agent",
+        status: session?.status,
+      };
+    }),
+    [contextPercent, rightSidebar.tabs, subagentSessions],
+  );
 
   const messageRenderContext = useMemo<TaskMessageRenderContextValue>(
     () => ({
@@ -1256,6 +1317,7 @@ export const TaskPage = memo(function TaskPage({
       isCompacting,
       lastChatDurationMs,
       onOpenArtifact: openArtifact,
+      onOpenAgent: openAgentSession,
       onReviewChange: openChangeReview,
       taskEvents,
     }),
@@ -1267,6 +1329,7 @@ export const TaskPage = memo(function TaskPage({
       isCompacting,
       lastChatDurationMs,
       openArtifact,
+      openAgentSession,
       openChangeReview,
       taskEvents,
     ],
@@ -1294,14 +1357,11 @@ export const TaskPage = memo(function TaskPage({
 
         <div className="task-actions" ref={taskActionsRef}>
           <button
-            className={`review-toggle${reviewOpen ? " active" : ""}`}
+            className={`review-toggle${reviewTabActive ? " active" : ""}`}
             type="button"
             aria-label="审阅文件变更"
-            aria-expanded={reviewOpen}
-            onClick={() => {
-              setUsageOpen(false);
-              setReviewOpen((open) => !open);
-            }}
+            aria-expanded={reviewTabActive}
+            onClick={() => dispatchRightSidebar({ type: "open", tabId: "review" })}
           >
             <FileDiff size={15} />
             审阅
@@ -1513,6 +1573,7 @@ export const TaskPage = memo(function TaskPage({
                           }
                           onReviewChange={openChangeReview}
                           onOpenArtifact={openArtifact}
+                          onOpenAgent={openAgentSession}
                         />
                       )}
                       <MessagePrimitive.Root className="assistant-message-group aui-assistant-message-root">
@@ -1730,23 +1791,19 @@ export const TaskPage = memo(function TaskPage({
                             className="context-usage-ring"
                             role="button"
                             aria-describedby={
-                              usageOpen ? undefined : "context-usage-tooltip"
+                              contextTabActive ? undefined : "context-usage-tooltip"
                             }
                             aria-label="上下文已用"
                             aria-valuemin={0}
                             aria-valuemax={100}
                             aria-valuenow={contextPercent}
                             tabIndex={0}
-                            aria-expanded={usageOpen}
-                            onClick={() => {
-                              setReviewOpen(false);
-                              setUsageOpen((open) => !open);
-                            }}
+                            aria-expanded={contextTabActive}
+                            onClick={openContextTab}
                             onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
-                                setReviewOpen(false);
-                                setUsageOpen((open) => !open);
+                                openContextTab();
                               }
                             }}
                           >
@@ -2340,23 +2397,19 @@ export const TaskPage = memo(function TaskPage({
                     className="context-usage-ring"
                     role="button"
                     aria-describedby={
-                      usageOpen ? undefined : "context-usage-tooltip"
+                      contextTabActive ? undefined : "context-usage-tooltip"
                     }
                     aria-label="上下文已用"
                     aria-valuemin={0}
                     aria-valuemax={100}
                     aria-valuenow={contextPercent}
                     tabIndex={0}
-                    aria-expanded={usageOpen}
-                    onClick={() => {
-                      setReviewOpen(false);
-                      setUsageOpen((open) => !open);
-                    }}
+                    aria-expanded={contextTabActive}
+                    onClick={openContextTab}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        setReviewOpen(false);
-                        setUsageOpen((open) => !open);
+                        openContextTab();
                       }
                     }}
                   >
@@ -2554,19 +2607,25 @@ export const TaskPage = memo(function TaskPage({
           </div>
         )}
 
-        {reviewOpen && (
-          <DiffReviewPane
-            changes={fileChanges}
-            width={reviewWidth}
-            selectedChangeId={selectedChangeId}
-            onClose={() => setReviewOpen(false)}
-            onSelectChange={setSelectedChangeId}
-            onWidthChange={setReviewWidth}
-          />
-        )}
-        <ConversationUsagePane
-            open={usageOpen}
-            width={contextPaneWidth}
+        <TaskRightSidebar
+          open={rightSidebar.visible && rightSidebar.tabs.length > 0}
+          width={contextPaneWidth}
+          tabs={rightSidebarTabs}
+          activeTabId={rightSidebar.activeTabId}
+          onSelectTab={(tabId) => {
+            dispatchRightSidebar({ type: "select", tabId });
+          }}
+          onCloseTab={(tabId) => {
+            dispatchRightSidebar({ type: "close", tabId });
+          }}
+          onOpenChange={(open) => {
+            dispatchRightSidebar({ type: open ? "show" : "hide" });
+          }}
+          onWidthChange={setContextPaneWidth}
+          onWidthCommit={saveContextPaneWidth}
+        >
+          {rightSidebar.activeTabId === "context" && (
+            <ConversationUsagePane
             messages={displayMessages}
             conversationTitle={task.goal}
             provider={modelSettings?.providerName ?? ""}
@@ -2577,15 +2636,23 @@ export const TaskPage = memo(function TaskPage({
             estimated={contextUsage.estimated}
             createdAt={task.createdAt}
             updatedAt={task.updatedAt}
-            onClose={() => setUsageOpen(false)}
             onExport={exportConversation}
-            onOpenChange={(open) => {
-              if (open) setReviewOpen(false);
-              setUsageOpen(open);
-            }}
-            onWidthChange={setContextPaneWidth}
-            onWidthCommit={saveContextPaneWidth}
-          />
+            />
+          )}
+          {rightSidebar.activeTabId === "review" && (
+            <DiffReviewPane
+              changes={fileChanges}
+              selectedChangeId={selectedChangeId}
+              onSelectChange={setSelectedChangeId}
+            />
+          )}
+          {activeAgentId && (
+            <SubagentSessionPane
+              session={selectedAgentSession}
+              onOpenAgent={openAgentSession}
+            />
+          )}
+        </TaskRightSidebar>
       </div>
       </main>
       </TaskMessageRenderContext.Provider>
@@ -2626,6 +2693,7 @@ function TaskAssistantMessageRunSummary() {
       }
       onReviewChange={context.onReviewChange}
       onOpenArtifact={context.onOpenArtifact}
+      onOpenAgent={context.onOpenAgent}
     />
   );
 }

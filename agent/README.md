@@ -5,6 +5,7 @@ Python 3.12 Agent 推理与编排运行时。
 ## 职责
 
 - Agent Harness、动态计划、模型—工具循环和上下文压缩。
+- Supervisor 通过 `delegate_task` 启动独立、一次性的完整能力子 Agent Session；子 Agent 继承本次请求实际可见的文件、Shell、MCP、Skill 与委派工具，其生命周期、可见步骤、用量和最终回报通过统一 RunEvent 实时上报。
 - Chat Completions、OpenAI Responses、Anthropic Messages 三种协议适配，
   对话流式响应、TokenUsage 归一化和模型设置。
 - 文件、PDF 分页读取/检索、Shell、Artifact 与远程 MCP 工具注册、结果保护和权限执行。
@@ -47,6 +48,7 @@ app/prompt/            分层 System Prompt、动态上下文和模板装配
 app/tool/              工具工厂、注册中心和受工作区限制的内置工具
 app/permission/        分层权限策略、Shell 分类与自动 Reviewer
 app/mcp/               远程 Streamable HTTP MCP 客户端和能力适配
+app/subagent/          Supervisor 委派工具、子 Session 边界和事件投影
 app/config/            YAML 运行配置
 app/exception/         运行时异常
 app/main.py            FastAPI 与 Uvicorn 生命周期
@@ -57,6 +59,14 @@ app/main.py            FastAPI 与 Uvicorn 生命周期
 文件级资源协调：读取可共享，同文件写入独占，Shell 在调用期间作为工作区屏障。完整文件
 覆盖还会校验该任务最后读取的版本，避免另一个任务修改后被旧内容覆盖。设计边界见
 [任务并发与资源感知设计](../docs/cross-task-concurrency-design.md)。
+
+`delegate_task` 是只负责建立 Session 的并发安全控制面调用，本身不直接产生文件或外部副作用；
+真正的副作用由子 Agent 后续工具调用逐项进入权限引擎。每个子 Agent 只有一条自包含用户消息和
+独立模型历史，但继承父请求实际暴露的工具表，可以修改文件、执行 Shell、调用 MCP 或继续委派。
+子 Session 与主 Run 共用审批关联 ID，另用 `sessionId` 和 `agentId` 区分执行身份；委派深度最多
+3 层，全局活动子 Agent 数沿用请求并发上限。子用量作为 `usageDelta` 合入父 Run，完整设计和
+后续可续接 Session 规划见
+[Supervisor 多 Agent 设计](../docs/supervisor-multi-agent-design.md)。
 
 PDF 附件通过当前 Run 的 `attachmentId` 暴露给 `read_pdf` 和 `search_pdf`，不把任意绝对路径
 开放给模型。解析结果只进入当前工具结果，不建立向量索引、缓存文件或第二份持久化附件；

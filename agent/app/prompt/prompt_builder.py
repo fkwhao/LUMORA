@@ -42,6 +42,17 @@ class PromptBuilder:
                 cache_policy=PromptCachePolicy.TASK,
             )
         )
+        if self._has_tool_definition(resolved_context, "delegate_task"):
+            segments.append(
+                PromptSegment(
+                    key="tool.delegate_task.guidance",
+                    target=PromptTarget.SYSTEM,
+                    content=self._build_delegate_task_guidance(),
+                    trust_level=PromptTrustLevel.TRUSTED,
+                    priority=PromptPriority.REQUIRED,
+                    cache_policy=PromptCachePolicy.TASK,
+                )
+            )
         if resolved_context.project_instructions:
             segments.append(
                 PromptSegment(
@@ -155,6 +166,33 @@ class PromptBuilder:
             lines.append("- 当前未向模型注册任何可调用工具。")
 
         return "\n".join(lines)
+
+    @staticmethod
+    def _has_tool_definition(context: PromptContext, name: str) -> bool:
+        for definition in context.tool_definitions:
+            function = definition.get("function")
+            if isinstance(function, dict) and function.get("name") == name:
+                return True
+        return False
+
+    @staticmethod
+    def _build_delegate_task_guidance() -> str:
+        return (
+            "# delegate_task：Supervisor 委派策略\n"
+            "- 是否委派由你根据实际收益判断，不使用固定的复杂度分数、文件数或 Token 阈值。\n"
+            "- 仅当任务边界清晰、可独立推进且预期节省的时间或上下文明显高于协调开销时委派。"
+            "适合独立的代码库调查、资料核验、互不重叠的实现或验证。\n"
+            "- 简单问答、单次读取、只需调用一个工具、与当前下一步紧密耦合，或拆分后仍需大量"
+            "重复上下文的任务，由你直接完成。不要把整个用户请求原样转交后停止自己的工作。\n"
+            "- 多个互不依赖的任务应在同一模型回合一起调用，以便并行执行；有依赖的任务必须在"
+            "取得前序结果后再启动。并行写入必须确保目标范围不重叠，否则顺序执行。\n"
+            "- 当前 delegate_task 是前台 one-shot 调用：每个调用返回该子 Agent 的最终报告，"
+            "不提供后台续接或后续消息能力。不要假设它能在返回后继续驻留。\n"
+            "- 子 Agent 拥有独立 Session，看不到父会话。prompt 必须自包含，写清目标、范围、"
+            "必要背景、约束、证据要求和期望输出。\n"
+            "- 你负责核验关键依据、处理兄弟任务冲突并综合最终答案；不要把未经检查的子 Agent "
+            "输出直接转交给用户。"
+        )
 
     @staticmethod
     def _build_project_instructions(instructions: tuple[str, ...]) -> str:

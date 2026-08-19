@@ -118,16 +118,18 @@ describe("visible task flow", () => {
     fireEvent.click(contextUsageButton);
     expect(contextUsageButton).not.toHaveAttribute("aria-describedby");
     expect(screen.getByRole("complementary", {
-      name: "当前会话 Token 信息",
+      name: "任务详情侧栏",
     })).toBeVisible();
+    expect(screen.getByRole("tab", { name: "上下文" }))
+      .toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("缓存命中率")).toBeVisible();
     const contextResizeHandle = screen.getByRole("separator", {
-      name: "调整上下文侧边栏宽度",
+      name: "调整右侧栏宽度",
     });
     expect(contextResizeHandle).toHaveAttribute("aria-valuenow", "456");
     fireEvent.keyDown(contextResizeHandle, { key: "ArrowLeft" });
-    expect(contextResizeHandle).toHaveAttribute("aria-valuenow", "456");
-    fireEvent.click(screen.getByRole("button", { name: "关闭上下文统计" }));
+    expect(contextResizeHandle).toHaveAttribute("aria-valuenow", "480");
+    fireEvent.click(screen.getByRole("button", { name: "关闭上下文页签" }));
     expect(contextResizeHandle.closest("aside")).toHaveAttribute(
       "aria-hidden",
       "true",
@@ -138,17 +140,17 @@ describe("visible task flow", () => {
     });
     fireEvent.pointerMove(contextResizeHandle, {
       pointerId: 1,
-      clientX: 850,
+      clientX: 890,
     });
     fireEvent.pointerUp(contextResizeHandle, {
       pointerId: 1,
-      clientX: 850,
+      clientX: 890,
     });
     expect(contextResizeHandle.closest("aside")).toHaveAttribute(
       "aria-hidden",
       "false",
     );
-    fireEvent.click(screen.getByRole("button", { name: "关闭上下文统计" }));
+    fireEvent.click(screen.getByRole("button", { name: "关闭上下文页签" }));
     const followUpInput = screen.getByRole("textbox", { name: "继续任务" });
     fireEvent.change(followUpInput, { target: { value: "/" } });
     const slashCommandMenu = await screen.findByRole("menu", {
@@ -189,16 +191,22 @@ describe("visible task flow", () => {
     expect(
       screen.queryByText("设置要持续追求的目标"),
     ).not.toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole("button", { name: "审阅文件变更" }),
-    );
+    fireEvent.click(contextUsageButton);
+    fireEvent.click(screen.getByRole("button", { name: "审阅文件变更" }));
     expect(
-      screen.getByRole("complementary", { name: "变更审阅" }),
+      screen.getByRole("complementary", { name: "任务详情侧栏" }),
     ).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "关闭审阅" }));
-    expect(
-      screen.queryByRole("complementary", { name: "变更审阅" }),
-    ).not.toBeInTheDocument();
+    const contextTab = screen.getByRole("tab", { name: "上下文" });
+    const reviewTab = screen.getByRole("tab", { name: "审阅" });
+    expect(reviewTab).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(contextTab);
+    expect(contextTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("缓存命中率")).toBeVisible();
+    fireEvent.click(reviewTab);
+    fireEvent.click(screen.getByRole("button", { name: "关闭审阅页签" }));
+    expect(contextTab).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("button", { name: "关闭上下文页签" }));
+    expect(contextResizeHandle.closest("aside")).toHaveAttribute("aria-hidden", "true");
     expect(
       screen.queryByRole("button", { name: "暂停" }),
     ).not.toBeInTheDocument();

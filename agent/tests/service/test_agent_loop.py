@@ -21,6 +21,7 @@ from app.harness.contracts import (
     ProviderTurnEvent,
 )
 from app.harness.run_control import RunControlRegistry
+from app.harness.run_event import RunEvent
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.prompt.prompt_assembly import PromptAssembly
 from app.tool.base import ToolContext, ToolResult, function_tool
@@ -128,6 +129,10 @@ def test_agent_loop_runs_safe_sibling_tools_concurrently_in_model_order() -> Non
     asyncio.run(_assert_safe_sibling_tools_overlap_and_commit_in_order())
 
 
+def test_agent_loop_streams_parallel_tool_internal_events_before_completion() -> None:
+    asyncio.run(_assert_parallel_internal_events_are_live())
+
+
 def test_agent_loop_treats_unsafe_tools_as_ordering_barriers() -> None:
     asyncio.run(_assert_unsafe_tool_is_an_ordering_barrier())
 
@@ -229,6 +234,97 @@ async def _assert_safe_sibling_tools_overlap_and_commit_in_order() -> None:
         and event.metadata["message"]["role"] == "tool"
     ]
     assert [message["toolCallId"] for message in protocol_results] == [
+        "call-first",
+        "call-second",
+    ]
+
+
+async def _assert_parallel_internal_events_are_live() -> None:
+    turn_number = 0
+    release = asyncio.Event()
+    both_events_visible = asyncio.Event()
+    visible: list[RunEvent] = []
+
+    async def complete_turn(*_args):
+        nonlocal turn_number
+        turn_number += 1
+        if turn_number == 1:
+            return ProviderTurn(
+                content="并行委派。",
+                reasoning="",
+                model="test-model",
+                usage=TokenUsageResponse(
+                    promptTokens=10,
+                    completionTokens=2,
+                    totalTokens=12,
+                ),
+                tool_calls=(
+                    ProviderToolCall(
+                        "call-first", "live_worker", '{"name":"first"}'
+                    ),
+                    ProviderToolCall(
+                        "call-second", "live_worker", '{"name":"second"}'
+                    ),
+                ),
+            )
+        return ProviderTurn(
+            content="委派完成。",
+            reasoning="",
+            model="test-model",
+            usage=TokenUsageResponse(
+                promptTokens=16,
+                completionTokens=2,
+                totalTokens=18,
+            ),
+            tool_calls=(),
+        )
+
+    async def execute(context, data):
+        assert context.emit_event is not None
+        name = str(data["name"])
+        await context.emit_event(RunEvent(
+            type="agent_started",
+            item_id=f"agent-{name}",
+            title=name,
+        ))
+        await release.wait()
+        return ToolResult(f"result-{name}")
+
+    registry = ToolRegistry((function_tool(
+        name="live_worker",
+        description="实时并发事件测试",
+        input_schema={
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+        execute=execute,
+        read_only=True,
+        concurrency_safe=True,
+    ),))
+
+    async def collect() -> None:
+        async for event in AgentLoopRunner(complete_turn).stream(
+            _settings(),
+            PromptAssembly(()),
+            [ChatMessageRequest(role="user", content="并行委派")],
+            None,
+            registry,
+            ToolContext(Path(".")),
+        ):
+            visible.append(event)
+            if sum(event.type == "agent_started" for event in visible) == 2:
+                both_events_visible.set()
+
+    task = asyncio.create_task(collect())
+    await asyncio.wait_for(both_events_visible.wait(), timeout=1)
+    assert not any(event.type == "tool_completed" for event in visible)
+    release.set()
+    await asyncio.wait_for(task, timeout=1)
+
+    completed = [event for event in visible if event.type == "tool_completed"]
+    assert [event.tool_call_id for event in completed] == [
         "call-first",
         "call-second",
     ]

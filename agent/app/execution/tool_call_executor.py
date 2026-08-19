@@ -531,11 +531,39 @@ class ToolCallExecutor:
                 metadata=permission_metadata,
                 model=model,
             ), ""
-            result = await self._registry.execute(
+            emitted_events: asyncio.Queue[RunEvent] = asyncio.Queue()
+            execution_context = replace(
+                execution_context,
+                emit_event=emitted_events.put,
+            )
+            execution_task = asyncio.create_task(self._registry.execute(
                 call.name,
                 execution_context,
                 arguments,
-            )
+            ))
+            try:
+                while not execution_task.done():
+                    event_task = asyncio.create_task(emitted_events.get())
+                    done, _pending = await asyncio.wait(
+                        {execution_task, event_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if event_task in done:
+                        yield event_task.result(), ""
+                    else:
+                        event_task.cancel()
+                        await asyncio.gather(event_task, return_exceptions=True)
+                while not emitted_events.empty():
+                    yield emitted_events.get_nowait(), ""
+                result = await execution_task
+            except BaseException:
+                if not execution_task.done():
+                    execution_task.cancel()
+                    await asyncio.gather(
+                        execution_task,
+                        return_exceptions=True,
+                    )
+                raise
             if not defer_result_processing:
                 result = self._result_processor.process(
                     call.name,

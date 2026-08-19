@@ -51,6 +51,7 @@ from app.prompt.prompt_context import PromptContext
 from app.provider.token_usage import add_token_usage, empty_token_usage
 from app.service.mcp_service import to_mcp_config
 from app.skill.catalog import SkillCatalog
+from app.subagent.runtime import SubagentRuntime, create_delegate_task_tool
 from app.tool.base import ToolAttachment, ToolContext
 from app.tool.default_registry import create_default_tool_registry
 from app.tool.registry import ToolRegistry
@@ -198,9 +199,50 @@ class ChatService:
                 await self._prepare_mcp_registry(request)
             )
             settings = self._connection(request)
+            workspace_path = request.prompt_context.workspace_path
+            resolved_workspace = (
+                Path(workspace_path).expanduser().resolve(strict=True)
+                if workspace_path
+                else None
+            )
+            base_permission_policy = self._permission_policy(request)
+            permission_policy = base_permission_policy
+            if resolved_workspace is not None:
+                permission_policy = self._permission_config_store.load_policy(
+                    resolved_workspace,
+                    permission_policy,
+                )
+            runtime_registry = runtime_registry.copy()
+            subagent_runtime = SubagentRuntime(
+                harness=self._resolve_agent_harness(),
+                settings=settings,
+                reasoning_effort=request.reasoning_effort,
+                source_registry=runtime_registry,
+                prompt_builder=self._prompt_builder,
+                project_instructions=(
+                    tuple(request.prompt_context.project_instructions)
+                    + self._project_instruction_loader.load(
+                        request.prompt_context.workspace_path
+                    )
+                ),
+                permission_engine=self._permission_engine,
+                approval_broker=self._approval_broker,
+                permission_config_store=self._permission_config_store,
+                permission_policy=base_permission_policy,
+                run_control=run_control,
+                max_active_agents=self._max_parallel_tool_calls,
+            )
+            runtime_registry.register(
+                create_delegate_task_tool(subagent_runtime)
+            )
             prompt_context = self._prompt_context(
                 request,
                 tool_registry=runtime_registry,
+            )
+            subagent_runtime.bind_allowed_tools(
+                prompt_context.available_tools,
+                mcp_tool_names=prompt_context.mcp_tool_names,
+                available_skills=prompt_context.available_skills,
             )
             prompt = self._prompt_builder.build(prompt_context)
             request_messages = request.messages
@@ -309,30 +351,20 @@ class ChatService:
                         usage=_to_run_usage(prelude_usage),
                         active_context_tokens=plan.after_tokens,
                     )
-            workspace_path = request.prompt_context.workspace_path
-            resolved_workspace = (
-                Path(workspace_path).expanduser().resolve(strict=True)
-                if workspace_path
-                else None
-            )
             tool_context = (
                 ToolContext(
                     workspace_path=resolved_workspace or Path.cwd().resolve(),
                     workspace_scoped=resolved_workspace is not None,
-                    correlation_id=correlation_id,
-                    task_id=request.prompt_context.task_id or correlation_id,
+                    correlation_id=run_id,
+                    task_id=request.prompt_context.task_id or run_id,
+                    session_id=run_id,
+                    agent_id="supervisor",
                     artifact_store=self._artifact_store,
                     attachments=self._tool_attachments(request),
                 )
                 if prompt.tools
                 else None
             )
-            permission_policy = self._permission_policy(request)
-            if resolved_workspace is not None:
-                permission_policy = self._permission_config_store.load_policy(
-                    resolved_workspace,
-                    permission_policy,
-                )
             stream = self._resolve_agent_harness().stream(
                 settings,
                 prompt,
@@ -465,7 +497,13 @@ class ChatService:
         skills = self._skill_catalog.discover(context.workspace_path)
         attachment_tool_names = self._attachment_tool_names(request)
         registered_names = registry.names()
-        base_names = set(self._tool_registry.names())
+        request_local_names = tuple(
+            name for name in ("delegate_task",) if name in registered_names
+        )
+        base_names = {
+            *self._tool_registry.names(),
+            *request_local_names,
+        }
         mcp_names = tuple(
             name for name in registered_names if name not in base_names
         )
@@ -484,6 +522,7 @@ class ChatService:
                     *allowed_local_names,
                     *attachment_tool_names,
                     *skill_tool_names,
+                    *request_local_names,
                     *mcp_names,
                 )
             ))
@@ -497,6 +536,7 @@ class ChatService:
                 *attachment_tool_names,
                 *(name for name in ("load_skill", "read_skill_resource")
                   if skills and name in registered_names),
+                *request_local_names,
                 *mcp_names,
             )))
         return PromptContext(

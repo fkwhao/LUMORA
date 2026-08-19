@@ -5,8 +5,8 @@ Java 和 Python 三个独立工程组成完整运行链路，兼顾桌面交互�
 Agent 推理编排。
 
 > 当前处于持续开发阶段：真实模型对话、Agent 工具循环、动态计划、权限审批、上下文
-> 压缩、Artifact 和本地会话持久化已经打通；动态多 Agent、浏览器/OCR、完整通用
-> Changes、插件运行时和 Windows 受限 Worker 仍按架构逐步实现。
+> 压缩、Artifact、本地会话持久化和完整能力 Supervisor 多 Agent 已经打通；可续接
+> Agent Session、浏览器/OCR、完整通用 Changes、插件运行时和 Windows 受限 Worker 仍按架构逐步实现。
 
 ## 项目结构
 
@@ -46,6 +46,7 @@ Electron Renderer
 - 本地保存、归档和恢复任务会话；仅允许编辑最后一条用户消息并重新生成后续回答。
 - 运行期间的新问题默认进入耐久队列并在当前任务结束后自动执行；队列问题可在安全步骤边界转换为运行中引导，暂停与重启不会丢失。
 - 不同任务在可配置的有界槽位内并发执行；同任务仍由问题队列串行，同一步骤的安全工具可有界并发，文件访问使用读写协调和陈旧覆盖保护。
+- 主 Agent 可作为 Supervisor 通过 `delegate_task` 动态启动独立子 Session；子 Agent 继承本次请求实际可见的文件读写、Shell、MCP、Skill 和委派工具，并继续经过相同权限审批与工作区边界。委派最多深入 3 层，互不依赖的任务有界并行；直属 Agent 以头像显示在主执行区，进一步委派的 Agent 显示在父 Agent 的右侧 Session 面板中，执行步骤、Token 与最终回报随父 Run 事件日志持久化重放。
 - 支持 User、Project、Conversation 三层动态 Memory 和本地个性化开关。
 - Java 使用 MyBatis-Plus 将任务、计划、会话、模型配置、记忆、审批和 Artifact 索引写入 SQLite。
 - 浅色、深色和跟随系统的外观设置。
@@ -70,7 +71,7 @@ context: full
 ```
 
 `name` 只允许小写字母、数字和连字符。`mode` 支持 `inline` 与 `fork` 元数据；
-当前运行时会以内联方式执行，独立 Agent 上下文将在后续运行时版本接入。
+当前 Skill 仍以内联方式执行，`fork` 元数据尚未连接到 Supervisor 子 Session。
 
 开发阶段分别启动三个工程：
 
@@ -93,6 +94,9 @@ context: full
 
 图片、文件与 PDF 的引用模型、生命周期、供应商路由和安全边界见
 [附件设计](docs/attachment-design.md)。
+
+Supervisor/子 Agent 的 Session、事件、界面和分阶段路线图见
+[Supervisor 多 Agent 设计](docs/supervisor-multi-agent-design.md)。
 
 ## 安全说明
 

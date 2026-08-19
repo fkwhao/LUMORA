@@ -103,3 +103,47 @@ describe("hidden protocol work log", () => {
     expect(item).toBeUndefined();
   });
 });
+
+describe("subagent work log", () => {
+  it("keeps the child session identity and nested event type", () => {
+    const lifecycle = workLogItemFromEvent({
+      type: "agent_completed",
+      delta: "",
+      model: "deepseek-v4",
+      errorMessage: "",
+      itemId: "agent-1",
+      title: "架构检查",
+      output: "入口位于 ChatService。",
+      metadata: {
+        agentId: "agent-1",
+        sessionId: "run-1:agent:agent-1",
+        agentStatus: "completed",
+      },
+    });
+    const nested = workLogItemFromEvent({
+      type: "agent_event",
+      delta: "正在读取文件",
+      model: "deepseek-v4",
+      errorMessage: "",
+      itemId: "agent-1:tool-1",
+      toolName: "read_file",
+      metadata: {
+        agentId: "agent-1",
+        childEventType: "tool_started",
+      },
+    });
+
+    expect(lifecycle).toMatchObject({
+      kind: "agent",
+      status: "completed",
+      model: "deepseek-v4",
+      output: "入口位于 ChatService。",
+    });
+    expect(nested).toMatchObject({
+      kind: "agent",
+      status: "running",
+      toolName: "read_file",
+      metadata: { childEventType: "tool_started" },
+    });
+  });
+});

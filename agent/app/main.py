@@ -104,7 +104,7 @@ def create_app(
     ) -> JSONResponse:
         del error
         correlation_id = request.headers.get(
-            CORRELATION_ID_HEADER,
+                CORRELATION_ID_HEADER,
             "",
         ).strip()
         # 未预期异常在 HTTP 边界统一脱敏，不能返回堆栈或内部异常文本。
