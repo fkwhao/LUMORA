@@ -617,6 +617,15 @@ def test_continuable_interrupt_and_report_preserve_session(
             self.started = asyncio.Event()
 
         async def stream(self, *args: Any) -> AsyncIterator[RunEvent]:
+            yield RunEvent(
+                type="usage",
+                model="model",
+                usage=RunUsage(
+                    prompt_tokens=21,
+                    completion_tokens=5,
+                    total_tokens=26,
+                ),
+            )
             self.started.set()
             await asyncio.Event().wait()
             if False:
@@ -682,9 +691,92 @@ def test_continuable_interrupt_and_report_preserve_session(
     asyncio.run(scenario())
 
     assert any(event.type == "agent_reported" for event in events)
-    assert any(event.type == "agent_activation_interrupted" for event in events)
+    interrupted_event = next(
+        event for event in events
+        if event.type == "agent_activation_interrupted"
+    )
+    assert interrupted_event.metadata["totalTokens"] == 26
+    usage_events = [event for event in events if event.type == "usage"]
+    assert len(usage_events) == 1
+    assert usage_events[0].usage is not None
+    assert usage_events[0].usage.total_tokens == 26
+    assert usage_events[0].metadata["usageDelta"] is True
+    assert [event.type for event in events].index("usage") < [
+        event.type for event in events
+    ].index("agent_activation_interrupted")
     assert any(
         event.type == "agent_checkpointed"
         and event.metadata["agentStatus"] == "interrupted"
         for event in events
     )
+
+
+def test_continuable_failure_preserves_usage_emitted_before_failure(
+    tmp_path: Path,
+) -> None:
+    class FailingHarness(ChildHarness):
+        async def stream(self, *args: Any) -> AsyncIterator[RunEvent]:
+            yield RunEvent(
+                type="usage",
+                model="model",
+                usage=RunUsage(
+                    prompt_tokens=34,
+                    completion_tokens=8,
+                    total_tokens=42,
+                ),
+            )
+            yield RunEvent(type="failed", error_message="模型流失败")
+
+    runtime = SubagentRuntime(
+        harness=FailingHarness(),  # type: ignore[arg-type]
+        settings=ModelConnectionSettings(
+            provider_name="test",
+            base_url="https://example.com/v1",
+            api_key="secret",
+            model="model",
+        ),
+        reasoning_effort=None,
+        source_registry=create_default_tool_registry(),
+        prompt_builder=PromptBuilder(),
+        project_instructions=(),
+        permission_engine=PermissionEngine(),
+        approval_broker=ApprovalBroker(),
+        permission_config_store=PermissionConfigStore(tmp_path / "home"),
+        permission_policy=PermissionPolicy(mode=PermissionMode.FULL_ACCESS),
+        run_control=None,
+    )
+    manager = ContinuableSessionManager(runtime)
+    events: list[RunEvent] = []
+
+    async def scenario() -> None:
+        async def emit(event: RunEvent) -> None:
+            events.append(event)
+
+        context = ToolContext(
+            workspace_path=tmp_path,
+            correlation_id="run-failure-usage",
+            session_id="run-failure-usage",
+            agent_id="supervisor",
+            background_event=emit,
+        )
+        started = await manager.start(
+            context,
+            description="失败研究",
+            prompt="先产生用量再失败",
+        )
+        assert started.is_error is False
+        await manager.wait_for_activations()
+        listed = json.loads(manager.list(context).content)
+        assert listed[0]["status"] == "failed"
+
+    asyncio.run(scenario())
+
+    usage_events = [event for event in events if event.type == "usage"]
+    assert len(usage_events) == 1
+    assert usage_events[0].usage is not None
+    assert usage_events[0].usage.total_tokens == 42
+    assert usage_events[0].metadata["usageDelta"] is True
+    event_types = [event.type for event in events]
+    failed_event = next(event for event in events if event.type == "agent_failed")
+    assert failed_event.metadata["totalTokens"] == 42
+    assert event_types.index("usage") < event_types.index("agent_failed")

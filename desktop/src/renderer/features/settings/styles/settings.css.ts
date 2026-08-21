@@ -1013,11 +1013,17 @@ globalStyle(".model-config-dialog > footer button.primary", { color: "var(--surf
 globalStyle(".personalization-settings", {
   display: "grid",
   gridAutoRows: "max-content",
-  width: "min(900px, 100%)",
+  width: "min(1040px, calc(100% - 96px))",
   alignContent: "start",
   rowGap: "42px",
-  padding: "46px clamp(28px, 5vw, 64px) 64px",
+  margin: "0 auto",
+  padding: "46px 0 64px",
   boxSizing: "border-box",
+  "@media": {
+    "(max-width: 1120px)": {
+      width: "calc(100% - 48px)",
+    },
+  },
 });
 
 globalStyle(".personalization-header", {

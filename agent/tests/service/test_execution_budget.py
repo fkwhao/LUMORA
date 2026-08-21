@@ -12,9 +12,8 @@ from app.tool.base import ToolContext
 from app.tool.default_registry import create_default_tool_registry
 
 
-def test_budget_ledger_enforces_model_token_and_agent_limits() -> None:
+def test_budget_ledger_enforces_model_and_agent_limits() -> None:
     ledger = ExecutionBudgetLedger(ExecutionBudgetLimits(
-        max_total_tokens=10,
         max_model_requests=1,
         max_tool_calls=1,
         max_wall_time_ms=60_000,
@@ -25,12 +24,6 @@ def test_budget_ledger_enforces_model_token_and_agent_limits() -> None:
     with pytest.raises(BudgetExceeded) as model_error:
         ledger.reserve_model_request()
     assert model_error.value.dimension == "model_requests"
-
-    ledger.settle_tokens(8)
-    with pytest.raises(BudgetExceeded) as token_error:
-        ledger.settle_tokens(3)
-    assert token_error.value.dimension == "total_tokens"
-    assert token_error.value.snapshot.total_tokens == 11
 
     assert ledger.try_acquire_agent() is True
     assert ledger.try_acquire_agent() is False
@@ -47,7 +40,6 @@ def test_agent_admission_preserves_wall_time_failure_kind(
         lambda: next(moments),
     )
     ledger = ExecutionBudgetLedger(ExecutionBudgetLimits(
-        max_total_tokens=100,
         max_model_requests=10,
         max_tool_calls=10,
         max_wall_time_ms=1,
@@ -60,9 +52,30 @@ def test_agent_admission_preserves_wall_time_failure_kind(
     assert captured.value.dimension == "wall_time"
 
 
+def test_wall_time_is_checked_again_after_a_model_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    moments = iter((0.0, 0.0, 0.0, 0.002, 0.002))
+    monkeypatch.setattr(
+        "app.execution.budget.time.monotonic",
+        lambda: next(moments),
+    )
+    ledger = ExecutionBudgetLedger(ExecutionBudgetLimits(
+        max_model_requests=10,
+        max_tool_calls=10,
+        max_wall_time_ms=1,
+        max_active_agents=1,
+    ))
+
+    ledger.reserve_model_request()
+    with pytest.raises(BudgetExceeded) as captured:
+        ledger.check_wall_time()
+
+    assert captured.value.dimension == "wall_time"
+
+
 def test_tool_budget_blocks_body_before_second_call(tmp_path: Path) -> None:
     ledger = ExecutionBudgetLedger(ExecutionBudgetLimits(
-        max_total_tokens=100,
         max_model_requests=10,
         max_tool_calls=1,
         max_wall_time_ms=60_000,

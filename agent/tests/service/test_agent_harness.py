@@ -3,6 +3,7 @@ from pathlib import Path
 
 from app.dto.request.chat_completion_request import ChatMessageRequest
 from app.dto.response.chat_completion_response import TokenUsageResponse
+from app.execution.budget import ExecutionBudgetLedger
 from app.harness.agent_harness import AgentHarness
 from app.harness.contracts import ProviderTurn, ProviderTurnEvent
 from app.harness.run_control import RunControl, RunControlRegistry
@@ -176,6 +177,66 @@ def test_harness_uses_agent_loop_strategy_with_tools(tmp_path: Path) -> None:
     assert provider.stream_calls == 0
     assert provider.turn_calls == 0
     assert provider.turn_stream_calls == 1
+
+
+def test_harness_never_treats_cumulative_token_usage_as_an_execution_limit(
+    tmp_path: Path,
+) -> None:
+    class HighUsageProvider(StrategyRecordingProvider):
+        async def stream(self, *args, **kwargs):
+            del args, kwargs
+            yield RunEvent(type="text_delta", delta="继续执行", model="test-model")
+            yield RunEvent(
+                type="usage",
+                model="test-model",
+                usage=RunUsage(1_500_000, 500_000, 2_000_000),
+            )
+            yield RunEvent(type="completed", model="test-model")
+
+        async def stream_agent_turn(self, *args, **kwargs):
+            del args, kwargs
+            yield ProviderTurnEvent(
+                type="content_delta",
+                delta="继续执行",
+                model="test-model",
+            )
+            yield ProviderTurnEvent(
+                type="completed",
+                model="test-model",
+                turn=ProviderTurn(
+                    content="继续执行",
+                    reasoning="",
+                    model="test-model",
+                    usage=TokenUsageResponse(
+                        promptTokens=1_500_000,
+                        completionTokens=500_000,
+                        totalTokens=2_000_000,
+                    ),
+                    tool_calls=(),
+                ),
+            )
+
+    ledger = ExecutionBudgetLedger()
+    provider = HighUsageProvider()
+    plain_events = asyncio.run(_collect(
+        AgentHarness(provider),  # type: ignore[arg-type]
+        PromptAssembly(()),
+        ToolContext(workspace_path=tmp_path, execution_budget=ledger),
+    ))
+    tool_events = asyncio.run(_collect(
+        AgentHarness(provider),  # type: ignore[arg-type]
+        _tool_prompt(),
+        ToolContext(workspace_path=tmp_path, execution_budget=ledger),
+    ))
+
+    assert plain_events[-1].type == "completed"
+    assert tool_events[-1].type == "completed"
+    assert all(event.type != "failed" for event in [*plain_events, *tool_events])
+    assert max(
+        event.usage.total_tokens
+        for event in [*plain_events, *tool_events]
+        if event.usage is not None
+    ) == 2_000_000
 
 
 def test_harness_cancels_a_stalled_plain_model_stream_on_pause() -> None:

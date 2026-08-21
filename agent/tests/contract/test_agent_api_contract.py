@@ -2,7 +2,9 @@ from pathlib import Path
 from typing import get_args
 
 import yaml
+
 from app.config.settings import AgentSettings
+from app.dto.request.chat_completion_request import ExecutionBudgetRequest
 from app.dto.response.chat_stream_event_response import ChatStreamEventResponse
 from app.harness.run_event import RunEventType
 from app.main import create_app
@@ -44,6 +46,17 @@ def test_prompt_context_contract_contains_only_runtime_facts() -> None:
         "workflowSnapshots",
         "executionBudget",
     }
+    execution_budget = contract["components"]["schemas"]["ExecutionBudget"]
+    assert set(execution_budget["properties"]) == {
+        "maxModelRequests",
+        "maxToolCalls",
+        "maxWallTimeMs",
+        "maxActiveAgents",
+    }
+    runtime_budget = ExecutionBudgetRequest.model_json_schema(by_alias=True)
+    assert set(runtime_budget["properties"]) == set(
+        execution_budget["properties"]
+    )
 
     memory_schema = contract["components"]["schemas"]["MemoryContext"]
     assert memory_schema["properties"]["scope"]["enum"] == [

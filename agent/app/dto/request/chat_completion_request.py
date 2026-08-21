@@ -250,12 +250,6 @@ class McpServerRequest(BaseModel):
 class ExecutionBudgetRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    max_total_tokens: int = Field(
-        default=1_000_000,
-        alias="maxTotalTokens",
-        ge=1,
-        le=100_000_000,
-    )
     max_model_requests: int = Field(
         default=256,
         alias="maxModelRequests",

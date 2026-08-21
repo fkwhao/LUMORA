@@ -5,6 +5,7 @@ import {
   resolveContextBreakdown,
   resolveContextUsage,
 } from "../../src/renderer/features/tasks/state/context-usage";
+import { aggregateMessageUsage } from "../../src/renderer/features/tasks/state/token-usage";
 
 describe("context usage", () => {
   it("anchors context pressure to the latest provider prompt", () => {
@@ -118,6 +119,7 @@ describe("context usage", () => {
         activePath: false,
         usageRecordOnly: true,
         parentMessageId: "user-current",
+        durationMs: 1,
         usage: { promptTokens: 250, completionTokens: 10, totalTokens: 260 },
       },
     ];
@@ -142,6 +144,55 @@ describe("context usage", () => {
     ]);
 
     expect(usage).toEqual({ tokens: 250, estimated: true });
+  });
+
+  it("does not replace the main context anchor with delayed memory usage", () => {
+    const user: ChatMessage = {
+      messageId: "user-1",
+      sequence: 1,
+      role: "user",
+      content: "remember this",
+    };
+    const assistant: ChatMessage = {
+      messageId: "assistant-1",
+      sequence: 2,
+      parentMessageId: "user-1",
+      role: "assistant",
+      content: "完成",
+      activeContextTokens: 20_000,
+      usage: {
+        promptTokens: 20_000,
+        completionTokens: 500,
+        totalTokens: 20_500,
+      },
+    };
+    const memoryUsage: ChatMessage = {
+      messageId: "memory-usage-1",
+      sequence: 3,
+      parentMessageId: "user-1",
+      role: "assistant",
+      content: "",
+      activePath: false,
+      usageRecordOnly: true,
+      activeContextTokens: 0,
+      durationMs: 0,
+      usage: {
+        promptTokens: 3_800,
+        completionTokens: 200,
+        totalTokens: 4_000,
+      },
+    };
+    const beforeRefresh = resolveContextUsage([user, assistant]);
+    const threadMessages = [user, assistant, memoryUsage];
+    const refreshedMessages = [
+      { ...user, threadMessages },
+      { ...assistant, threadMessages },
+    ];
+    const afterRefresh = resolveContextUsage(refreshedMessages);
+
+    expect(beforeRefresh).toEqual({ tokens: 20_008, estimated: true });
+    expect(afterRefresh).toEqual(beforeRefresh);
+    expect(aggregateMessageUsage(refreshedMessages).totalTokens).toBe(24_500);
   });
 
   it("falls back to a local estimate before any provider usage exists", () => {

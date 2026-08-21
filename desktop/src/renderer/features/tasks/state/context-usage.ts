@@ -88,7 +88,7 @@ function contextProjectionMessages(messages: ChatMessage[]): ChatMessage[] {
   const failedUsageParents = new Set(
     messages.flatMap((message) =>
       (message.threadMessages ?? []).flatMap((candidate) =>
-        candidate.usageRecordOnly === true && candidate.parentMessageId
+        isFailedProviderUsageRecord(candidate) && candidate.parentMessageId
           ? [candidate.parentMessageId]
           : [],
       ),
@@ -113,7 +113,7 @@ function contextProjectionMessages(messages: ChatMessage[]): ChatMessage[] {
   });
   messages.forEach((message) => {
     message.threadMessages
-      ?.filter((candidate) => candidate.usageRecordOnly === true)
+      ?.filter(isFailedProviderUsageRecord)
       .forEach(visit);
   });
   return result.sort(
@@ -121,6 +121,16 @@ function contextProjectionMessages(messages: ChatMessage[]): ChatMessage[] {
       (left.sequence ?? Number.MAX_SAFE_INTEGER)
       - (right.sequence ?? Number.MAX_SAFE_INTEGER),
   );
+}
+
+/**
+ * Failed root requests and supplemental memory calls are both persisted as
+ * usage-only messages. Core records elapsed time for a failed root request,
+ * while supplemental memory usage is deliberately stored with zero duration.
+ * Only the former describes the main conversation's provider context.
+ */
+function isFailedProviderUsageRecord(message: ChatMessage): boolean {
+  return message.usageRecordOnly === true && positive(message.durationMs) > 0;
 }
 
 function providerPromptAnchor(message: ChatMessage | undefined): number {

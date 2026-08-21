@@ -526,7 +526,6 @@ components:
       type: object
       additionalProperties: false
       properties:
-        maxTotalTokens: { type: integer, minimum: 1, maximum: 100000000, default: 1000000 }
         maxModelRequests: { type: integer, minimum: 1, maximum: 100000, default: 256 }
         maxToolCalls: { type: integer, minimum: 1, maximum: 1000000, default: 1024 }
         maxWallTimeMs: { type: integer, minimum: 1000, maximum: 604800000, default: 7200000 }

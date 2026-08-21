@@ -2903,12 +2903,19 @@ globalStyle(".right-sidebar-tab", {
   borderRadius: "9px",
   background: "transparent",
   overflow: "hidden",
+  transition: "color 140ms ease, border-color 140ms ease, background-color 140ms ease",
 });
 
 globalStyle(".right-sidebar-tab.is-active", {
   color: "var(--ink)",
   borderColor: "color-mix(in srgb, var(--line) 74%, transparent)",
   background: "color-mix(in srgb, var(--surface-soft) 55%, transparent)",
+});
+
+globalStyle(".right-sidebar-tab:not(.is-active):hover", {
+  color: "var(--ink)",
+  borderColor: "color-mix(in srgb, var(--line) 72%, transparent)",
+  background: "color-mix(in srgb, var(--muted) 9%, transparent)",
 });
 
 globalStyle(".right-sidebar-tab-select", {

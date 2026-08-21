@@ -7,7 +7,6 @@ from dataclasses import asdict, dataclass
 class ExecutionBudgetLimits:
     """Hard limits shared by a root Run and all of its descendant Agents."""
 
-    max_total_tokens: int = 1_000_000
     max_model_requests: int = 256
     max_tool_calls: int = 1_024
     max_wall_time_ms: int = 7_200_000
@@ -21,12 +20,10 @@ class ExecutionBudgetLimits:
 
 @dataclass(frozen=True, slots=True)
 class ExecutionBudgetSnapshot:
-    max_total_tokens: int
     max_model_requests: int
     max_tool_calls: int
     max_wall_time_ms: int
     max_active_agents: int
-    total_tokens: int
     model_requests: int
     tool_calls: int
     elapsed_ms: int
@@ -35,12 +32,10 @@ class ExecutionBudgetSnapshot:
 
     def metadata(self) -> dict[str, int | str]:
         return {
-            "maxTotalTokens": self.max_total_tokens,
             "maxModelRequests": self.max_model_requests,
             "maxToolCalls": self.max_tool_calls,
             "maxWallTimeMs": self.max_wall_time_ms,
             "maxActiveAgents": self.max_active_agents,
-            "totalTokens": self.total_tokens,
             "modelRequests": self.model_requests,
             "toolCalls": self.tool_calls,
             "elapsedMs": self.elapsed_ms,
@@ -54,7 +49,6 @@ class BudgetExceeded(RuntimeError):
         self.dimension = dimension
         self.snapshot = snapshot
         labels = {
-            "total_tokens": "总 Token",
             "model_requests": "模型请求次数",
             "tool_calls": "工具调用次数",
             "wall_time": "运行时间",
@@ -71,12 +65,11 @@ class BudgetExceeded(RuntimeError):
 
 
 class ExecutionBudgetLedger:
-    """Thread-safe admission and settlement ledger for one root Run tree."""
+    """Thread-safe admission ledger for one root Run tree."""
 
     def __init__(self, limits: ExecutionBudgetLimits | None = None) -> None:
         self.limits = limits or ExecutionBudgetLimits()
         self._started_at = time.monotonic()
-        self._total_tokens = 0
         self._model_requests = 0
         self._tool_calls = 0
         self._active_agents = 0
@@ -87,18 +80,11 @@ class ExecutionBudgetLedger:
             self._check_wall_time_locked()
             if self._model_requests >= self.limits.max_model_requests:
                 raise self._exceeded_locked("model_requests")
-            if self._total_tokens >= self.limits.max_total_tokens:
-                raise self._exceeded_locked("total_tokens")
             self._model_requests += 1
             return self._snapshot_locked()
 
-    def settle_tokens(self, total_tokens: int) -> ExecutionBudgetSnapshot:
-        if total_tokens < 0:
-            raise ValueError("结算 Token 不能为负数")
+    def check_wall_time(self) -> ExecutionBudgetSnapshot:
         with self._guard:
-            self._total_tokens += total_tokens
-            if self._total_tokens > self.limits.max_total_tokens:
-                raise self._exceeded_locked("total_tokens")
             self._check_wall_time_locked()
             return self._snapshot_locked()
 
@@ -141,7 +127,6 @@ class ExecutionBudgetLedger:
     ) -> ExecutionBudgetSnapshot:
         return ExecutionBudgetSnapshot(
             **asdict(self.limits),
-            total_tokens=self._total_tokens,
             model_requests=self._model_requests,
             tool_calls=self._tool_calls,
             elapsed_ms=self._elapsed_ms_locked(),

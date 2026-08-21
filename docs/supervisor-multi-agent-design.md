@@ -86,10 +86,11 @@ Run 持有到所有子 Agent 完成后再释放，子 Agent 不另建不可审�
 默认最大委派深度为 3：Depth 1 和 Depth 2 的 Agent 可以继续委派，Depth 3 的工具表不再暴露
 `delegate_task`；即使模型提交了越界调用，Runtime 仍会返回 `delegation_depth_exceeded`。
 
-每个父 Run 建立一个由 Supervisor 与全部后代共享的 `ExecutionBudgetLedger`。默认限制为总 Token
-1,000,000、模型请求 256、工具尝试 1,024、墙钟时间 2 小时和活动子 Agent 10；调用方可通过
+每个父 Run 建立一个由 Supervisor 与全部后代共享的 `ExecutionBudgetLedger`。默认限制为模型请求
+256、工具尝试 1,024、墙钟时间 2 小时和活动子 Agent 10；调用方可通过
 `promptContext.executionBudget` 按请求收紧。模型请求、上下文压缩、工具重试和递归委派都在真正
-执行前原子预留预算，超限返回 `budget_exhausted`，后代不能通过新 Session 绕过根预算。
+执行前原子预留对应预算，超限返回 `budget_exhausted`，后代不能通过新 Session 绕过根预算。
+Token 用量继续汇总并上报，但不参与执行准入或终止判断；上下文容量仍由独立的自动压缩机制管理。
 
 活动 Agent 使用非等待式配额：达到上限的新委派明确返回 `agent_concurrency_limit`，并标记为
 `retryable=true`、`toolExecutionState=not_started`。这避免父 Agent 占据配额并等待后代时形成
@@ -217,8 +218,8 @@ Desktop 对 continuable Session 只提供只读状态和报告展示，不提供
   使用 Session 树，避免为每次委派引入节点建模成本。
 - 已把依赖、优先级、deadline、重试策略、写入范围和 Evidence/Artifact 引用建模为显式 DAG；
   独立 ready 节点按 wave 并行，重叠写范围自动错峰。
-- 已增加根 Run 共享的 Token、模型请求、工具尝试、墙钟时间和活动 Agent 预算，预算耗尽结构化
-  失败并保留已完成结果。
+- 已增加根 Run 共享的模型请求、工具尝试、墙钟时间和活动 Agent 预算，预算耗尽结构化失败并
+  保留已完成结果；Token 用量只做统计，不作为终止条件。
 - 已增加稳定 Effect ID、失败分类和只读瞬态安全重试；未知副作用不自动重放。
 - 已在资源锁之上增加路径级写入意图、基线哈希、冲突写者诊断和重规划提示。
 - 已通过公开工具消息跨 Turn 恢复 DAG 最新快照，运行中节点只在状态可安全判定时自动重试。

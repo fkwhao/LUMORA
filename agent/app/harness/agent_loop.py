@@ -431,7 +431,7 @@ class AgentLoopRunner:
             ))
             if budget is not None:
                 try:
-                    budget.settle_tokens(settled_usage.total_tokens)
+                    budget.check_wall_time()
                 except BudgetExceeded as error:
                     yield RunEvent(
                         type="usage",
@@ -647,7 +647,7 @@ class AgentLoopRunner:
                     )
                     if budget is not None:
                         try:
-                            budget.settle_tokens(compacted.usage.total_tokens)
+                            budget.check_wall_time()
                         except BudgetExceeded as error:
                             yield RunEvent(
                                 type="usage",

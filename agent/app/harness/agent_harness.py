@@ -107,9 +107,9 @@ class AgentHarness:
                 if event.type != "completed":
                     yield event
                     continue
-                if budget is not None and carried_usage is not None:
+                if budget is not None:
                     try:
-                        budget.settle_tokens(carried_usage.total_tokens)
+                        budget.check_wall_time()
                     except BudgetExceeded as error:
                         yield _budget_failed_event(
                             error,

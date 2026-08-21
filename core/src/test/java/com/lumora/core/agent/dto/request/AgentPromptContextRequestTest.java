@@ -18,10 +18,6 @@ class AgentPromptContextRequestTest {
 
         assertTrue(context.getAvailableTools().isEmpty());
         assertEquals(
-                1_000_000,
-                context.getExecutionBudget().getMaxTotalTokens()
-        );
-        assertEquals(
                 10,
                 context.getExecutionBudget().getMaxActiveAgents()
         );

@@ -196,7 +196,6 @@ class ChatService:
         prelude_usage = empty_token_usage()
         budget_request = request.prompt_context.execution_budget
         execution_budget = ExecutionBudgetLedger(ExecutionBudgetLimits(
-            max_total_tokens=budget_request.max_total_tokens,
             max_model_requests=budget_request.max_model_requests,
             max_tool_calls=budget_request.max_tool_calls,
             max_wall_time_ms=budget_request.max_wall_time_ms,
@@ -331,9 +330,7 @@ class ChatService:
                             )
                             return
                         assert compacted is not None
-                        execution_budget.settle_tokens(
-                            compacted.usage.total_tokens
-                        )
+                        execution_budget.check_wall_time()
                     except BudgetExceeded as error:
                         yield RunEvent(
                             type="failed",
@@ -887,6 +884,40 @@ async def _stream_with_background_events(
     session_manager: ContinuableSessionManager,
 ) -> AsyncIterator[RunEvent]:
     """Merge root and Activation events, committing root completion last."""
+    root_usage = RunUsage()
+    background_usage = RunUsage()
+    root_active_context_tokens = 0
+
+    def project_root_event(event: RunEvent) -> RunEvent:
+        nonlocal root_active_context_tokens, root_usage
+        if event.active_context_tokens > 0:
+            root_active_context_tokens = event.active_context_tokens
+        if event.usage is None:
+            return event
+        root_usage = event.usage
+        return replace(
+            event,
+            usage=_sum_run_usage(root_usage, background_usage),
+        )
+
+    def project_background_event(event: RunEvent) -> RunEvent:
+        nonlocal background_usage
+        if (
+            event.type != "usage"
+            or event.usage is None
+            or event.metadata.get("usageDelta") is not True
+        ):
+            return event
+        background_usage = _sum_run_usage(background_usage, event.usage)
+        metadata = dict(event.metadata)
+        metadata.pop("usageDelta", None)
+        return replace(
+            event,
+            usage=_sum_run_usage(root_usage, background_usage),
+            active_context_tokens=root_active_context_tokens,
+            metadata=metadata,
+        )
+
     iterator = stream.__aiter__()
     main_task: asyncio.Task[RunEvent] | None = asyncio.create_task(
         _next_run_event(iterator)
@@ -906,7 +937,7 @@ async def _stream_with_background_events(
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if background_task is not None and background_task in done:
-                yield background_task.result()
+                yield project_background_event(background_task.result())
                 background_task = asyncio.create_task(background_events.get())
             if main_task in done:
                 try:
@@ -915,9 +946,10 @@ async def _stream_with_background_events(
                     main_task = None
                 else:
                     if event.type in {"completed", "failed", "paused"}:
+                        project_root_event(event)
                         terminal_event = event
                     else:
-                        yield event
+                        yield project_root_event(event)
                     main_task = asyncio.create_task(_next_run_event(iterator))
 
         activation_task = asyncio.create_task(
@@ -927,7 +959,7 @@ async def _stream_with_background_events(
         )
         while not activation_task.done():
             if not background_events.empty():
-                yield background_events.get_nowait()
+                yield project_background_event(background_events.get_nowait())
                 continue
             if background_task is None:
                 background_task = asyncio.create_task(background_events.get())
@@ -936,17 +968,17 @@ async def _stream_with_background_events(
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if background_task in done:
-                yield background_task.result()
+                yield project_background_event(background_task.result())
                 background_task = asyncio.create_task(background_events.get())
 
         await activation_task
         if background_task is not None and background_task.done():
-            yield background_task.result()
+            yield project_background_event(background_task.result())
             background_task = None
         while not background_events.empty():
-            yield background_events.get_nowait()
+            yield project_background_event(background_events.get_nowait())
         if terminal_event is not None:
-            yield terminal_event
+            yield project_root_event(terminal_event)
     finally:
         for task in (main_task, background_task, activation_task):
             if task is not None and not task.done():
@@ -956,3 +988,26 @@ async def _stream_with_background_events(
 
 async def _next_run_event(iterator: AsyncIterator[RunEvent]) -> RunEvent:
     return await iterator.__anext__()
+
+
+def _sum_run_usage(left: RunUsage, right: RunUsage) -> RunUsage:
+    return RunUsage(
+        prompt_tokens=left.prompt_tokens + right.prompt_tokens,
+        completion_tokens=(
+            left.completion_tokens + right.completion_tokens
+        ),
+        total_tokens=left.total_tokens + right.total_tokens,
+        input_tokens=left.input_tokens + right.input_tokens,
+        output_tokens=left.output_tokens + right.output_tokens,
+        reasoning_tokens=left.reasoning_tokens + right.reasoning_tokens,
+        cache_read_tokens=(
+            left.cache_read_tokens + right.cache_read_tokens
+        ),
+        cache_write_tokens=(
+            left.cache_write_tokens + right.cache_write_tokens
+        ),
+        cache_metrics_available=(
+            left.cache_metrics_available
+            or right.cache_metrics_available
+        ),
+    )

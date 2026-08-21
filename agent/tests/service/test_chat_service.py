@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -231,6 +232,198 @@ def test_root_completion_is_emitted_after_background_settlement() -> None:
     assert [event.type for event in events] == [
         "agent_reported",
         "completed",
+    ]
+
+
+def test_background_usage_deltas_extend_root_cumulative_usage() -> None:
+    queue: asyncio.Queue[RunEvent] = asyncio.Queue()
+
+    class Manager:
+        async def wait_for_activations(self) -> None:
+            await queue.put(_usage_delta(30))
+            await queue.put(_usage_delta(20))
+
+        async def shutdown(self) -> None:
+            return None
+
+    async def root_stream() -> AsyncIterator[RunEvent]:
+        yield _usage_snapshot(100)
+        yield RunEvent(type="completed")
+
+    events = asyncio.run(_collect_merged_events(
+        root_stream(), queue, Manager()  # type: ignore[arg-type]
+    ))
+
+    usage_events = [event for event in events if event.type == "usage"]
+    assert [event.usage.total_tokens for event in usage_events if event.usage] == [
+        100,
+        130,
+        150,
+    ]
+    assert [event.active_context_tokens for event in usage_events] == [
+        4_000,
+        4_000,
+        4_000,
+    ]
+    assert all(
+        event.metadata.get("usageDelta") is not True
+        for event in usage_events
+    )
+
+
+def test_background_usage_delta_before_root_snapshot_is_not_overwritten() -> None:
+    queue: asyncio.Queue[RunEvent] = asyncio.Queue()
+    queue.put_nowait(_usage_delta(30))
+
+    class Manager:
+        async def wait_for_activations(self) -> None:
+            await queue.put(_usage_delta(20))
+
+        async def shutdown(self) -> None:
+            return None
+
+    async def root_stream() -> AsyncIterator[RunEvent]:
+        yield _usage_snapshot(100)
+        yield RunEvent(type="completed")
+
+    events = asyncio.run(_collect_merged_events(
+        root_stream(), queue, Manager()  # type: ignore[arg-type]
+    ))
+
+    usage_events = [event for event in events if event.type == "usage"]
+    assert [event.usage.total_tokens for event in usage_events if event.usage] == [
+        30,
+        130,
+        150,
+    ]
+    assert [event.active_context_tokens for event in usage_events] == [
+        0,
+        4_000,
+        4_000,
+    ]
+    assert all(
+        event.metadata.get("usageDelta") is not True
+        for event in usage_events
+    )
+
+
+def test_background_usage_preserves_root_context_without_root_usage() -> None:
+    queue: asyncio.Queue[RunEvent] = asyncio.Queue()
+
+    class Manager:
+        async def wait_for_activations(self) -> None:
+            await queue.put(_usage_delta(30))
+
+        async def shutdown(self) -> None:
+            return None
+
+    async def root_stream() -> AsyncIterator[RunEvent]:
+        yield RunEvent(type="usage", active_context_tokens=4_000)
+        yield RunEvent(type="completed")
+
+    events = asyncio.run(_collect_merged_events(
+        root_stream(), queue, Manager()  # type: ignore[arg-type]
+    ))
+
+    background_usage = next(event for event in events if event.usage is not None)
+    assert background_usage.usage is not None
+    assert background_usage.usage.total_tokens == 30
+    assert background_usage.active_context_tokens == 4_000
+
+
+def test_usage_on_non_usage_root_event_is_part_of_background_total() -> None:
+    queue: asyncio.Queue[RunEvent] = asyncio.Queue()
+
+    class Manager:
+        async def wait_for_activations(self) -> None:
+            await queue.put(_usage_delta(30))
+            await queue.put(_usage_delta(20))
+
+        async def shutdown(self) -> None:
+            return None
+
+    async def root_stream() -> AsyncIterator[RunEvent]:
+        yield replace(_usage_snapshot(100), type="context_compacted")
+        yield RunEvent(type="completed")
+
+    events = asyncio.run(_collect_merged_events(
+        root_stream(), queue, Manager()  # type: ignore[arg-type]
+    ))
+
+    usage_events = [event for event in events if event.usage is not None]
+    assert [event.usage.total_tokens for event in usage_events if event.usage] == [
+        100,
+        130,
+        150,
+    ]
+
+
+def test_usage_on_delayed_root_terminal_includes_background_total() -> None:
+    queue: asyncio.Queue[RunEvent] = asyncio.Queue()
+
+    class Manager:
+        async def wait_for_activations(self) -> None:
+            raise AssertionError("failed root must shut down activations")
+
+        async def shutdown(self) -> None:
+            await queue.put(_usage_delta(30))
+            await queue.put(_usage_delta(20))
+
+    async def root_stream() -> AsyncIterator[RunEvent]:
+        yield replace(
+            _usage_snapshot(100),
+            type="failed",
+            error_message="root failed",
+        )
+
+    events = asyncio.run(_collect_merged_events(
+        root_stream(), queue, Manager()  # type: ignore[arg-type]
+    ))
+
+    usage_events = [event for event in events if event.usage is not None]
+    assert [event.usage.total_tokens for event in usage_events if event.usage] == [
+        130,
+        150,
+        150,
+    ]
+    assert events[-1].type == "failed"
+    assert events[-1].active_context_tokens == 4_000
+
+
+def _usage_snapshot(total_tokens: int) -> RunEvent:
+    return RunEvent(
+        type="usage",
+        usage=RunUsage(
+            prompt_tokens=total_tokens,
+            total_tokens=total_tokens,
+        ),
+        active_context_tokens=4_000,
+    )
+
+
+def _usage_delta(total_tokens: int) -> RunEvent:
+    return RunEvent(
+        type="usage",
+        usage=RunUsage(
+            completion_tokens=total_tokens,
+            total_tokens=total_tokens,
+        ),
+        metadata={"usageDelta": True, "usageCategory": "subagent"},
+    )
+
+
+async def _collect_merged_events(
+    stream: AsyncIterator[RunEvent],
+    queue: asyncio.Queue[RunEvent],
+    manager: Any,
+) -> list[RunEvent]:
+    return [
+        event
+        async for event in _stream_with_background_events(
+            stream,
+            queue,
+            manager,
+        )
     ]
 
 

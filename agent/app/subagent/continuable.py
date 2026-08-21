@@ -465,9 +465,22 @@ class ContinuableSessionManager:
         started_at = time.perf_counter()
         answer_parts: list[str] = []
         latest_usage: RunUsage | None = None
+        usage_emitted = False
         forwarded_events = 0
         child_sequence = 0
         report_count_before = session.unread_report_count
+
+        async def emit_latest_usage_once() -> None:
+            nonlocal usage_emitted
+            if latest_usage is None or usage_emitted:
+                return
+            await self._runtime._emit_usage(
+                _background_context(parent_context),
+                latest_usage,
+                self._identity(session),
+            )
+            usage_emitted = True
+
         try:
             pending = sorted(
                 (
@@ -623,11 +636,7 @@ class ContinuableSessionManager:
                 ))
             await self._checkpoint(session, parent_context, "idle")
             duration_ms = int((time.perf_counter() - started_at) * 1000)
-            await self._runtime._emit_usage(
-                _background_context(parent_context),
-                latest_usage,
-                self._identity(session),
-            )
+            await emit_latest_usage_once()
             await self._emit_background(parent_context, RunEvent(
                 type="agent_completed",
                 item_id=session.agent_id,
@@ -648,18 +657,21 @@ class ContinuableSessionManager:
             ))
         except asyncio.CancelledError:
             session.status = "interrupted"
+            await emit_latest_usage_once()
             await self._checkpoint(session, parent_context, "interrupted")
             await self._emit_background(
                 parent_context,
                 self._interrupted_event(
                     session,
                     session.interrupt_reason or "父 Agent 已中止当前 Activation",
+                    latest_usage,
                 ),
             )
         except Exception as error:  # noqa: BLE001 - activation boundary
             session.status = "failed"
-            await self._checkpoint(session, parent_context, "failed")
             error_message = str(error) or "子 Agent Activation 失败"
+            await emit_latest_usage_once()
+            await self._checkpoint(session, parent_context, "failed")
             await self._emit_background(parent_context, RunEvent(
                 type="agent_failed",
                 item_id=session.agent_id,
@@ -672,6 +684,7 @@ class ContinuableSessionManager:
                     "sessionMode": "continuable",
                     "agentStatus": "failed",
                     "activationId": session.activation_id,
+                    **_usage_metadata(latest_usage),
                 },
             ))
         finally:
@@ -710,7 +723,12 @@ class ContinuableSessionManager:
             },
         ))
 
-    def _interrupted_event(self, session: _Session, reason: str) -> RunEvent:
+    def _interrupted_event(
+        self,
+        session: _Session,
+        reason: str,
+        usage: RunUsage | None = None,
+    ) -> RunEvent:
         return RunEvent(
             type="agent_activation_interrupted",
             item_id=session.activation_id or session.agent_id,
@@ -724,6 +742,7 @@ class ContinuableSessionManager:
                 "activationId": session.activation_id,
                 "interruptReason": reason,
                 "recovered": session.recovered,
+                **_usage_metadata(usage),
             },
         )
 
