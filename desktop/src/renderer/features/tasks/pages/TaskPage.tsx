@@ -12,14 +12,10 @@ import {
   type CSSProperties,
 } from "react";
 import {
-  ActionBarPrimitive,
   AssistantRuntimeProvider,
   ComposerPrimitive,
-  MessagePrimitive,
-  ThreadPrimitive,
   type AppendMessage,
   type ThreadMessage,
-  type TextMessagePartProps,
   fromThreadMessageLike,
   useAuiState,
   useRuntimeAdapters,
@@ -33,7 +29,6 @@ import {
   ExternalStoreRuntimeCore,
 } from "@assistant-ui/core/internal";
 import {
-  ArrowDown,
   ArrowUp,
   Check,
   ChevronDown,
@@ -49,14 +44,11 @@ import {
   MoreHorizontal,
   PackageOpen,
   PanelRight,
-  Pencil,
   Play,
   Plus,
   ShieldAlert,
   Square,
   Target,
-  ThumbsDown,
-  ThumbsUp,
   X,
 } from "lucide-react";
 import { useStore } from "zustand";
@@ -85,7 +77,6 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "../../../components/ui/popover";
-import { MarkdownMessage } from "../../../components/MarkdownMessage";
 import { ApprovalDock } from "../components/ApprovalDock";
 import { ToolApprovalDialog } from "../components/ToolApprovalDialog";
 import { AgentRunSummary } from "../components/AgentRunSummary";
@@ -228,16 +219,13 @@ export const TaskPage = memo(function TaskPage({
   const [artifactLoading, setArtifactLoading] = useState(false);
   const [artifactError, setArtifactError] = useState<string>();
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
-  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const conversationScrollRef = useRef<HTMLDivElement>(null);
   const conversationContentRef = useRef<HTMLDivElement>(null);
   const questionRailContainerRef = useRef<HTMLElement>(null);
   const questionRailRef = useRef<HTMLElement>(null);
   const questionRailScrollFrameRef = useRef<number | null>(null);
   const followUpInputRef = useRef<HTMLTextAreaElement>(null);
-  const conversationFooterRef = useRef<HTMLDivElement>(null);
   const modelPopoverRef = useRef<HTMLDivElement>(null);
-  const composerMenuRef = useRef<HTMLFormElement>(null);
   const contextFileInputRef = useRef<HTMLInputElement>(null);
   const taskActionsRef = useRef<HTMLDivElement>(null);
   const scrollStateFrameRef = useRef<number | null>(null);
@@ -475,27 +463,6 @@ export const TaskPage = memo(function TaskPage({
 
   useEffect(() => {
     const scroll = conversationScrollRef.current;
-    const footer = conversationFooterRef.current;
-    if (!scroll || !footer) {
-      return;
-    }
-    const syncFooterHeight = () => {
-      scroll.style.setProperty(
-        "--conversation-footer-height",
-        `${footer.getBoundingClientRect().height}px`,
-      );
-    };
-    syncFooterHeight();
-    if (typeof ResizeObserver === "undefined") {
-      return;
-    }
-    const observer = new ResizeObserver(syncFooterHeight);
-    observer.observe(footer);
-    return () => observer.disconnect();
-  }, [task?.taskId]);
-
-  useEffect(() => {
-    const scroll = conversationScrollRef.current;
     const content = conversationContentRef.current;
     if (!scroll || !content) {
       return;
@@ -545,18 +512,6 @@ export const TaskPage = memo(function TaskPage({
       }
     };
   }, [task?.taskId, questionMessageCount]);
-
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      const scroll = conversationScrollRef.current;
-      if (scroll) {
-        setShowScrollToBottom(
-          scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight > 56,
-        );
-      }
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [questionMessageCount, isChatting]);
 
   useEffect(() => {
     if (!isChatting) {
@@ -922,7 +877,6 @@ export const TaskPage = memo(function TaskPage({
     requestAnimationFrame(() => followUpInputRef.current?.focus());
   }, [runtime]);
 
-  const showLegacyThread = Boolean(task && task.taskId.length < 0);
   const fileChanges = fileChangesFromMessages(displayMessages);
   const questionEntries = displayMessages.flatMap((message, messageIndex) => {
     if (message.role !== "user") {
@@ -1139,9 +1093,6 @@ export const TaskPage = memo(function TaskPage({
     const scroll = event.currentTarget;
     scrollStateFrameRef.current = requestAnimationFrame(() => {
       scrollStateFrameRef.current = null;
-      setShowScrollToBottom(
-        scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight > 56,
-      );
       const positions = questionPositionsRef.current;
       if (positions.length === 0) {
         return;
@@ -1434,649 +1385,6 @@ export const TaskPage = memo(function TaskPage({
             </div>
           </nav>
         </aside>
-
-        {showLegacyThread && (
-          <>
-        <ThreadPrimitive.Root className="conversation-pane aui-thread-root">
-          <ThreadPrimitive.Viewport
-            className="conversation-scroll"
-            ref={conversationScrollRef}
-            onScroll={updateActiveQuestion}
-            onWheelCapture={cancelConversationScrollAnimation}
-            onPointerDownCapture={cancelConversationScrollAnimation}
-          >
-            <div className="conversation-content" ref={conversationContentRef}>
-              {task.errorMessage && (
-                <div className="task-error-banner">{task.errorMessage}</div>
-              )}
-
-              <ThreadPrimitive.Messages>
-                {({ message: runtimeMessage }) => {
-                  const index = runtimeMessage.index;
-                  const originalMessage = displayMessages[index];
-                  const questionIndex =
-                    originalMessage?.role === "user"
-                      ? questionEntries.findIndex(
-                          (entry) => entry.messageIndex === index,
-                        )
-                      : undefined;
-                  const isCurrentAssistant =
-                    runtimeMessage.role === "assistant" &&
-                    isChatting &&
-                    (originalMessage === undefined ||
-                      index === displayMessages.length - 1);
-                  const isThinkingStage =
-                    isCurrentAssistant &&
-                    !originalMessage?.content.trim() &&
-                    (originalMessage?.workLog?.length ?? 0) === 0 &&
-                    taskEvents.length === 0;
-
-                  if (runtimeMessage.composer.isEditing) {
-                    return (
-                      <ComposerPrimitive.Root className="user-message user-message-edit aui-edit-composer">
-                        <ComposerPrimitive.Input
-                          autoFocus
-                          aria-label="编辑消息"
-                          submitMode="enter"
-                        />
-                        <div className="user-message-edit-actions">
-                          <ComposerPrimitive.Cancel asChild>
-                            <button type="button">
-                              <X size={14} />
-                              取消
-                            </button>
-                          </ComposerPrimitive.Cancel>
-                          <ComposerPrimitive.Send asChild>
-                            <button className="confirm" type="submit">
-                              <ArrowUp size={14} />
-                              重新发送
-                            </button>
-                          </ComposerPrimitive.Send>
-                        </div>
-                      </ComposerPrimitive.Root>
-                    );
-                  }
-
-                  if (runtimeMessage.role === "user") {
-                    return (
-                      <MessagePrimitive.Root
-                        className="user-message-group aui-user-message-root"
-                        data-question-index={questionIndex}
-                      >
-                        <div className="user-message">
-                          <MessagePrimitive.Parts
-                            components={{ Text: PlainTextMessagePart }}
-                          />
-                        </div>
-                        <div className="user-message-meta">
-                          <time dateTime={originalMessage?.createdAt}>
-                            {formatMessageTime(originalMessage?.createdAt)}
-                          </time>
-                          <ActionBarPrimitive.Root
-                            className="user-message-actions"
-                            autohide="not-last"
-                          >
-                            <ActionBarPrimitive.Copy asChild>
-                              <button type="button" aria-label="复制消息" title="复制">
-                                <Copy size={14} />
-                              </button>
-                            </ActionBarPrimitive.Copy>
-                            {questionIndex === questionEntries.length - 1 && (
-                              <ActionBarPrimitive.Edit asChild>
-                                <button
-                                  type="button"
-                                  aria-label="编辑并重新发送消息"
-                                  title="编辑并重新发送"
-                                >
-                                  <Pencil size={14} />
-                                </button>
-                              </ActionBarPrimitive.Edit>
-                            )}
-                          </ActionBarPrimitive.Root>
-                        </div>
-                      </MessagePrimitive.Root>
-                    );
-                  }
-
-                  return (
-                    <>
-                      {originalMessage && !isThinkingStage && (
-                        <AgentRunSummary
-                          startedAt={chatStartedAt}
-                          durationMs={
-                            originalMessage.durationMs ||
-                            (index === displayMessages.length - 1
-                              ? lastChatDurationMs
-                              : undefined)
-                          }
-                          events={
-                            index === displayMessages.length - 1
-                              ? taskEvents
-                              : EMPTY_TASK_EVENTS
-                          }
-                          workLog={originalMessage.workLog}
-                          running={
-                            (isChatting || isCompacting) &&
-                            index === displayMessages.length - 1
-                          }
-                          stopped={
-                            chatWasStopped &&
-                            index === displayMessages.length - 1
-                          }
-                          onReviewChange={openChangeReview}
-                          onOpenArtifact={openArtifact}
-                          onOpenAgent={openAgentSession}
-                        />
-                      )}
-                      <MessagePrimitive.Root className="assistant-message-group aui-assistant-message-root">
-                        {isThinkingStage ? (
-                          <div className="thinking-stage" role="status">
-                            <span>正在思考</span>
-                          </div>
-                        ) : (
-                          <div className="assistant-message">
-                            <MessagePrimitive.Parts
-                              components={{ Text: AssistantTextMessagePart }}
-                            />
-                            {isCurrentAssistant && (
-                              <span className="stream-cursor" aria-hidden="true" />
-                            )}
-                          </div>
-                        )}
-                        {!isCurrentAssistant && !isThinkingStage && (
-                          <div className="assistant-message-meta">
-                            <ActionBarPrimitive.Root
-                              className="assistant-message-actions"
-                              autohide="not-last"
-                            >
-                              <ActionBarPrimitive.Copy asChild>
-                                <button type="button" aria-label="复制回复" title="复制">
-                                  <Copy size={14} />
-                                </button>
-                              </ActionBarPrimitive.Copy>
-                              <ActionBarPrimitive.FeedbackPositive asChild>
-                                <button type="button" aria-label="喜欢这条回复" title="喜欢">
-                                  <ThumbsUp size={14} />
-                                </button>
-                              </ActionBarPrimitive.FeedbackPositive>
-                              <ActionBarPrimitive.FeedbackNegative asChild>
-                                <button type="button" aria-label="不喜欢这条回复" title="不喜欢">
-                                  <ThumbsDown size={14} />
-                                </button>
-                              </ActionBarPrimitive.FeedbackNegative>
-                              <ActionBarPrimitive.Reload asChild>
-                                <button type="button" aria-label="重新生成回复" title="重新生成">
-                                  <LoaderCircle size={14} />
-                                </button>
-                              </ActionBarPrimitive.Reload>
-                            </ActionBarPrimitive.Root>
-                            <time dateTime={originalMessage?.createdAt}>
-                              {formatMessageDateTime(originalMessage?.createdAt)}
-                            </time>
-                          </div>
-                        )}
-                      </MessagePrimitive.Root>
-                    </>
-                  );
-                }}
-              </ThreadPrimitive.Messages>
-
-              {chatError && <div className="task-error-banner">{chatError}</div>}
-            </div>
-
-            <ThreadPrimitive.ViewportFooter
-              className="conversation-footer"
-              ref={conversationFooterRef}
-            >
-              <div className="conversation-footer-inner">
-                {task.approval && <ApprovalDock store={store} />}
-                <div className="conversation-composer-wrap">
-                  {showScrollToBottom && (
-                    <ThreadPrimitive.ScrollToBottom asChild>
-                      <button
-                        className={
-                          "scroll-to-bottom" +
-                          (isChatting ? " is-processing" : "")
-                        }
-                        type="button"
-                        aria-label="返回对话底部"
-                        title="返回底部"
-                      >
-                        {isChatting ? (
-                          <span className="scroll-to-bottom-dots" aria-hidden="true">
-                            <i />
-                            <i />
-                            <i />
-                          </span>
-                        ) : (
-                          <ArrowDown size={19} strokeWidth={1.8} />
-                        )}
-                      </button>
-                    </ThreadPrimitive.ScrollToBottom>
-                  )}
-
-                  <ComposerPrimitive.Root
-                    className="follow-up-composer aui-composer-root"
-                    ref={composerMenuRef}
-                  >
-                    <input
-                      ref={contextFileInputRef}
-                      className="visually-hidden"
-                      type="file"
-                      multiple
-                      onChange={(event) => {
-                        const count = event.target.files?.length ?? 0;
-                        if (count > 0) {
-                          notify("已选择 " + count + " 个本地资源", "success");
-                        }
-                        event.target.value = "";
-                      }}
-                    />
-                    <ComposerPrimitive.Input
-                      ref={followUpInputRef}
-                      aria-label="继续任务"
-                      placeholder="继续任务…"
-                      submitMode="enter"
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        setComposerText(value);
-                        if (value.startsWith("/")) setComposerMenu("command");
-                        else if (composerMenu === "command") setComposerMenu(null);
-                      }}
-                    />
-                    <div className="composer-toolbar">
-                      <div className="composer-toolbar-left">
-                        <span className="composer-menu-anchor">
-                          <button
-                            className="composer-icon-button"
-                            type="button"
-                            aria-label="添加上下文"
-                            aria-expanded={composerMenu === "context"}
-                            onClick={() =>
-                              setComposerMenu((open) =>
-                                open === "context" ? null : "context",
-                              )
-                            }
-                          >
-                            <Plus size={20} strokeWidth={1.7} />
-                          </button>
-                        </span>
-
-                        <span className="composer-menu-anchor permission-anchor">
-                          <button
-                            className={
-                              "composer-permission-button" +
-                              (permissionMode === "full_access"
-                                ? " is-dangerous"
-                                : "")
-                            }
-                            type="button"
-                            aria-label="选择权限模式"
-                            aria-expanded={composerMenu === "permission"}
-                            data-permission-mode={permissionMode}
-                            onClick={() =>
-                              setComposerMenu((open) =>
-                                open === "permission" ? null : "permission",
-                              )
-                            }
-                          >
-                            <PermissionModeIcon mode={permissionMode} size={17} />
-                            <span>{permissionModeLabel(permissionMode)}</span>
-                          </button>
-                          {composerMenu === "permission" && (
-                            <span
-                              className="composer-popover permission-popover"
-                              role="menu"
-                            >
-                              <span className="permission-popover-header">
-                                <span>应如何批准 LUMORA 操作？</span>
-                              </span>
-                              {permissionModeOptions.map((option) => (
-                                <button
-                                  className={[
-                                    option.value === permissionMode
-                                      ? "is-selected"
-                                      : "",
-                                    option.value === "full_access"
-                                      ? "is-dangerous"
-                                      : "",
-                                  ]
-                                    .filter(Boolean)
-                                    .join(" ")}
-                                  type="button"
-                                  role="menuitemradio"
-                                  aria-checked={option.value === permissionMode}
-                                  key={option.value}
-                                  onClick={() => {
-                                    setPermissionMode(option.value);
-                                    savePermissionMode(option.value);
-                                    setComposerMenu(null);
-                                  }}
-                                >
-                                  <span className="permission-option-icon">
-                                    <PermissionModeIcon
-                                      mode={option.value}
-                                      size={18}
-                                    />
-                                  </span>
-                                  <span className="permission-option-copy">
-                                    <strong>{option.label}</strong>
-                                    <small>{option.description}</small>
-                                  </span>
-                                  {option.value === permissionMode && (
-                                    <Check
-                                      className="permission-option-check"
-                                      size={17}
-                                      strokeWidth={1.8}
-                                    />
-                                  )}
-                                </button>
-                              ))}
-                            </span>
-                          )}
-                        </span>
-                      </div>
-
-                      <div className="composer-controls">
-                        <span className="context-usage-control">
-                          <span
-                            className="context-usage-ring"
-                            role="button"
-                            aria-describedby={
-                              contextTabActive ? undefined : "context-usage-tooltip"
-                            }
-                            aria-label="上下文已用"
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                            aria-valuenow={contextPercent}
-                            tabIndex={0}
-                            aria-expanded={contextTabActive}
-                            onClick={openContextTab}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter" || event.key === " ") {
-                                event.preventDefault();
-                                openContextTab();
-                              }
-                            }}
-                          >
-                            <svg
-                              aria-hidden="true"
-                              preserveAspectRatio="xMidYMid meet"
-                              viewBox="0 0 20 20"
-                            >
-                              <circle
-                                className="context-usage-track"
-                                cx="10"
-                                cy="10"
-                                r="8"
-                              />
-                              <circle
-                                className="context-usage-value"
-                                cx="10"
-                                cy="10"
-                                pathLength="100"
-                                r="8"
-                                strokeDasharray={contextPercent + " 100"}
-                              />
-                            </svg>
-                          </span>
-                          <span
-                            className="context-usage-tooltip"
-                            id="context-usage-tooltip"
-                            role="tooltip"
-                          >
-                            <span>
-                              {isChatting ? "当前模型请求：" : "最近一次模型请求："}
-                            </span>
-                            <strong>
-                              {contextUsage.estimated ? "约 " : ""}
-                              {contextPercent}% 已用
-                            </strong>
-                            <b>
-                              已用
-                              {contextUsage.estimated ? "约 " : " "}
-                              {formatTokenCount(contextTokens)} 标记，共{" "}
-                              {formatTokenCount(contextLimit)}
-                            </b>
-                          </span>
-                        </span>
-
-                        <span className="composer-menu-anchor model-anchor">
-                          <button
-                            className="composer-choice-button model-choice-button"
-                            type="button"
-                            aria-label="选择模型"
-                            aria-expanded={composerMenu === "model"}
-                            onClick={() =>
-                              setComposerMenu((open) =>
-                                open === "model" ? null : "model",
-                              )
-                            }
-                          >
-                            <span>
-                              {selectedModel
-                                ? modelDisplayName(selectedModel)
-                                : "模型"}
-                            </span>
-                          </button>
-                          {composerMenu === "model" && (
-                            <span
-                              className="composer-popover model-picker-popover align-right"
-                              role="menu"
-                            >
-                              <b>选择模型</b>
-                              {modelOptions.map((model) => (
-                                <button
-                                  className={
-                                    model === selectedModel
-                                      ? "is-selected"
-                                      : undefined
-                                  }
-                                  type="button"
-                                  role="menuitemradio"
-                                  aria-checked={model === selectedModel}
-                                  key={model}
-                                  onClick={() => {
-                                    selectModel(model);
-                                    setComposerMenu(null);
-                                  }}
-                                >
-                                  <span>{modelDisplayName(model)}</span>
-                                  {model === selectedModel && (
-                                    <Check
-                                      className="composer-option-check"
-                                      size={16}
-                                      strokeWidth={1.8}
-                                    />
-                                  )}
-                                </button>
-                              ))}
-                            </span>
-                          )}
-                        </span>
-
-                        {reasoningEffortOptions.length > 0 && (
-                          <span className="composer-menu-anchor reasoning-anchor">
-                            <button
-                              className="composer-choice-button reasoning-choice-button"
-                              type="button"
-                              aria-label="选择推理强度"
-                              aria-expanded={composerMenu === "reasoning"}
-                              onClick={() =>
-                                setComposerMenu((open) =>
-                                  open === "reasoning" ? null : "reasoning",
-                                )
-                              }
-                            >
-                              <span>{reasoningEffortLabel(reasoningEffort)}</span>
-                              <ChevronDown size={14} strokeWidth={1.7} />
-                            </button>
-                            {composerMenu === "reasoning" && (
-                              <span
-                                className="composer-popover reasoning-popover align-right"
-                                role="menu"
-                              >
-                                <b>推理强度</b>
-                                {reasoningEffortOptions.map((option) => (
-                                  <button
-                                    className={
-                                      option.value === reasoningEffort
-                                        ? "is-selected"
-                                        : undefined
-                                    }
-                                    type="button"
-                                    role="menuitemradio"
-                                    aria-checked={
-                                      option.value === reasoningEffort
-                                    }
-                                    key={option.value}
-                                    onClick={() => {
-                                      selectReasoningEffort(option.value);
-                                      setComposerMenu(null);
-                                    }}
-                                  >
-                                    <span className="composer-option-copy">
-                                      <strong>{option.label}</strong>
-                                      <small>{option.description}</small>
-                                    </span>
-                                    {option.value === reasoningEffort && (
-                                      <Check
-                                        className="composer-option-check"
-                                        size={16}
-                                        strokeWidth={1.8}
-                                      />
-                                    )}
-                                  </button>
-                                ))}
-                              </span>
-                            )}
-                          </span>
-                        )}
-
-                        {isChatting ? (
-                          <ComposerPrimitive.Cancel asChild>
-                            <button
-                              className="send-follow-up is-stopping"
-                              type="button"
-                              aria-label="停止生成"
-                            >
-                              <span className="stop-glyph" aria-hidden="true" />
-                            </button>
-                          </ComposerPrimitive.Cancel>
-                        ) : (
-                          <ComposerPrimitive.Send asChild>
-                            <button
-                              className="send-follow-up"
-                              type="submit"
-                              aria-label="发送消息"
-                            >
-                              <ArrowUp size={16} strokeWidth={2} />
-                            </button>
-                          </ComposerPrimitive.Send>
-                        )}
-                      </div>
-                    </div>
-
-                    {composerMenu === "context" && (
-                      <span
-                        className="composer-popover context-picker-popover"
-                        role="menu"
-                      >
-                        <button
-                          className="context-compact-command"
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            runtime.thread.composer.setText("/compact");
-                            setComposerText("/compact");
-                            setComposerMenu("command");
-                            requestAnimationFrame(() =>
-                              followUpInputRef.current?.focus(),
-                            );
-                          }}
-                        >
-                          <Minimize2 size={17} />
-                          <span>
-                            <strong>压缩上下文</strong>
-                            <small>
-                              摘要较早消息（已使用 {contextPercent}%）
-                            </small>
-                          </span>
-                        </button>
-                        <span className="context-picker-section">添加</span>
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => openLocalContext(false)}
-                        >
-                          <File size={17} />
-                          <span>
-                            <strong>文件</strong>
-                            <small>选择本地文件作为上下文</small>
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => openLocalContext(true)}
-                        >
-                          <Folder size={17} />
-                          <span>
-                            <strong>文件夹</strong>
-                            <small>选择一个本地目录</small>
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            setComposerMenu(null);
-                            notify("持续目标接口待接入");
-                          }}
-                        >
-                          <Target size={17} />
-                          <span>
-                            <strong>目标</strong>
-                            <small>设置要持续追求的目标</small>
-                          </span>
-                        </button>
-                      </span>
-                    )}
-
-                    {composerMenu === "command" &&
-                      composerText.startsWith("/") && (
-                        <span
-                          className="composer-popover command-picker-popover"
-                          role="menu"
-                        >
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={() => {
-                              runtime.thread.composer.setText("/compact");
-                              setComposerText("/compact");
-                              setComposerMenu(null);
-                              requestAnimationFrame(() =>
-                                followUpInputRef.current?.focus(),
-                              );
-                            }}
-                          >
-                            <Minimize2 size={17} />
-                            <span>
-                              <strong>/compact</strong>
-                              <small>摘要较早消息，保留近期原文</small>
-                            </span>
-                          </button>
-                        </span>
-                      )}
-                  </ComposerPrimitive.Root>
-                </div>
-              </div>
-            </ThreadPrimitive.ViewportFooter>
-          </ThreadPrimitive.Viewport>
-        </ThreadPrimitive.Root>
-          </>
-        )}
 
         <section className="conversation-pane aui-official-thread-shell">
           <input
@@ -2733,14 +2041,6 @@ function useSynchronousExternalStoreRuntime<T>(
   return runtime;
 }
 
-function PlainTextMessagePart({ text }: TextMessagePartProps) {
-  return <p>{text}</p>;
-}
-
-function AssistantTextMessagePart({ text }: TextMessagePartProps) {
-  return <MarkdownMessage content={text} />;
-}
-
 function textFromAppendMessage(message: AppendMessage): string {
   return message.content
     .filter((part) => part.type === "text")
@@ -2922,34 +2222,6 @@ function formatTokenCount(tokens: number): string {
   }
   const compact = tokens / 1_000;
   return `${compact >= 10 ? Math.round(compact) : compact.toFixed(1).replace(/\.0$/, "")}k`;
-}
-
-function formatMessageTime(createdAt?: string): string {
-  if (!createdAt) {
-    return "";
-  }
-  const date = new Date(createdAt);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-  return new Intl.DateTimeFormat("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(date);
-}
-
-function formatMessageDateTime(createdAt?: string): string {
-  if (!createdAt) return "";
-  const date = new Date(createdAt);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(date);
 }
 
 const PERMISSION_MODE_STORAGE_KEY = "lumora.permission-mode";
