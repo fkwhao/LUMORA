@@ -2113,6 +2113,13 @@ const agentAvatarPulse = keyframes({
   "70%, 100%": { opacity: "0", transform: "scale(1.22)" },
 });
 
+const runningAgentAvatarHop = keyframes({
+  "0%, 18%, 72%, 100%": { transform: "translateY(0) scale(1)" },
+  "34%": { transform: "translateY(-2.5px) scale(1.025)" },
+  "46%": { transform: "translateY(0) scale(0.985)" },
+  "57%": { transform: "translateY(-1px) scale(1.01)" },
+});
+
 globalStyle(".agent-call-item", {
   minWidth: "0",
 });
@@ -2157,6 +2164,18 @@ globalStyle(".agent-call-avatar, .subagent-pane-avatar", {
 globalStyle(".agent-call-avatar", {
   width: "22px",
   height: "22px",
+});
+
+globalStyle('.agent-call-item[data-status="running"] .agent-call-avatar', {
+  animation: `${runningAgentAvatarHop} 1.45s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite`,
+  transformOrigin: "50% 100%",
+  willChange: "transform",
+  "@media": {
+    "(prefers-reduced-motion: reduce)": {
+      animation: "none",
+      transform: "none",
+    },
+  },
 });
 
 globalStyle(".agent-call-item > button > span:nth-child(2)", {
