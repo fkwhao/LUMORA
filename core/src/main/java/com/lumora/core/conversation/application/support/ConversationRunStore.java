@@ -41,6 +41,7 @@ public class ConversationRunStore {
     private final ConversationRunMapper runMapper;
     private final ConversationRunEventMapper eventMapper;
     private final AgentSessionStore agentSessionStore;
+    private final AgentWorkflowStore agentWorkflowStore;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
     private final Clock clock;
@@ -218,6 +219,7 @@ public class ConversationRunStore {
             stored.setOccurredAt(occurredAt);
             eventMapper.insert(stored);
             agentSessionStore.project(run, event, occurredAt);
+            agentWorkflowStore.project(run, event, occurredAt);
             envelopes.add(new ConversationRunEventEnvelope(
                     runId, sequence, event, occurredAt
             ));

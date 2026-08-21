@@ -6,6 +6,7 @@ import com.lumora.core.conversation.application.port.ContextCompactionPort;
 import com.lumora.core.conversation.application.port.ConversationRuntimePort;
 import com.lumora.core.conversation.application.port.ToolApprovalPort;
 import com.lumora.core.conversation.application.support.AgentSessionStore;
+import com.lumora.core.conversation.application.support.AgentWorkflowStore;
 import com.lumora.core.conversation.domain.model.ChatCompletion;
 import com.lumora.core.conversation.domain.model.ChatMessage;
 import com.lumora.core.conversation.domain.model.ChatStreamEvent;
@@ -30,6 +31,7 @@ public class AgentConversationRuntimeAdapter implements ConversationRuntimePort,
     private final ModelConnectionResolver connectionResolver;
     private final McpService mcpService;
     private final AgentSessionStore agentSessionStore;
+    private final AgentWorkflowStore agentWorkflowStore;
 
     @Override
     public ChatCompletion completeChat(List<ChatMessage> messages,
@@ -80,7 +82,8 @@ public class AgentConversationRuntimeAdapter implements ConversationRuntimePort,
                 request.conversationSummary(),
                 request.memoryCandidates(),
                 mcpService.listEnabledServers(),
-                agentSessionStore.listSnapshots(request.taskId())
+                agentSessionStore.listSnapshots(request.taskId()),
+                agentWorkflowStore.listSnapshots(request.taskId())
             ),
             eventConsumer
         );

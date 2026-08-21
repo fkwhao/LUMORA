@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 
 from app.execution.retry import RetryPolicy
@@ -12,6 +13,61 @@ from app.permission.engine import PermissionEngine
 from app.permission.model import PermissionMode, PermissionPolicy
 from app.tool.base import ToolContext, ToolResult, function_tool
 from app.tool.registry import ToolRegistry
+
+
+def test_read_observation_metadata_is_visible_to_follow_up_tool_calls(
+    tmp_path: Path,
+) -> None:
+    async def execute(_context, _input):
+        return ToolResult(
+            "1: value",
+            metadata={
+                "path": "values.txt",
+                "observationId": "obs_123",
+                "resourceVersion": "version-1",
+                "internalSecret": "hidden",
+            },
+        )
+
+    tool = function_tool(
+        name="read_file",
+        description="read",
+        input_schema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+        execute=execute,
+        read_only=True,
+    )
+    executor = ToolCallExecutor(
+        ToolRegistry((tool,)),
+        PermissionEngine(),
+        ApprovalBroker(),
+        PermissionConfigStore(tmp_path / "home"),
+        ToolResultProcessor(),
+    )
+
+    async def scenario():
+        return [
+            pair
+            async for pair in executor.execute(
+                ProviderToolCall("call-read", "read_file", "{}"),
+                ToolContext(tmp_path.resolve(), session_id="session-1"),
+                "model",
+                _settings(),
+                PermissionPolicy(mode=PermissionMode.FULL_ACCESS),
+                0,
+            )
+        ]
+
+    pairs = asyncio.run(scenario())
+    payload = json.loads(pairs[-1][1])
+    assert payload["metadata"] == {
+        "path": "values.txt",
+        "observationId": "obs_123",
+        "resourceVersion": "version-1",
+    }
 
 
 def test_read_only_tool_retries_transient_errors_with_stable_effect_id(

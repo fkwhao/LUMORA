@@ -32,6 +32,7 @@ import com.lumora.core.conversation.domain.model.TokenUsage;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 隔离 Python HTTP DTO 与 Java 内部领域模型。
@@ -168,6 +169,26 @@ public class AgentDtoMapper {
             List<McpServerRuntimeConfiguration> mcpServers,
             List<AgentSessionSnapshot> agentSessions
     ) {
+        return toChatRequest(messages, connection, reasoningEffort,
+                memorySummary, workspacePath, permissionMode, taskId,
+                conversationSummary, memoryCandidates, mcpServers,
+                agentSessions, List.of());
+    }
+
+    public AgentChatCompletionRequest toChatRequest(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<MemoryContextItem> memoryCandidates,
+            List<McpServerRuntimeConfiguration> mcpServers,
+            List<AgentSessionSnapshot> agentSessions,
+            List<Map<String, Object>> workflowSnapshots
+    ) {
         List<AgentChatMessageRequest> requestMessages = messages.stream()
                 .map(message -> new AgentChatMessageRequest(
                         message.getRole(),
@@ -201,7 +222,8 @@ public class AgentDtoMapper {
                                 .toList(),
                         agentSessions.stream()
                                 .map(AgentSessionSnapshotRequest::new)
-                                .toList()
+                                .toList(),
+                        workflowSnapshots
                 ),
                 normalizeOptionalText(reasoningEffort)
         );

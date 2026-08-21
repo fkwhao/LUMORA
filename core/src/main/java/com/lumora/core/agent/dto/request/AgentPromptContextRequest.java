@@ -1,6 +1,7 @@
 package com.lumora.core.agent.dto.request;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Prompt 组装所需的运行时上下文。
@@ -20,6 +21,7 @@ public class AgentPromptContextRequest {
     private final String conversationSummary;
     private final List<AgentMcpServerRequest> mcpServers;
     private final List<AgentSessionSnapshotRequest> agentSessions;
+    private final List<Map<String, Object>> workflowSnapshots;
     private final AgentExecutionBudgetRequest executionBudget;
 
     public AgentPromptContextRequest(
@@ -135,6 +137,25 @@ public class AgentPromptContextRequest {
             List<AgentSessionSnapshotRequest> agentSessions,
             AgentExecutionBudgetRequest executionBudget
     ) {
+        this(workspacePath, projectInstructions, availableTools, memorySummary,
+                permissionMode, taskId, conversationSummary, memoryCandidates,
+                mcpServers, agentSessions, executionBudget, List.of());
+    }
+
+    public AgentPromptContextRequest(
+            String workspacePath,
+            List<String> projectInstructions,
+            List<String> availableTools,
+            String memorySummary,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<AgentMemoryContextRequest> memoryCandidates,
+            List<AgentMcpServerRequest> mcpServers,
+            List<AgentSessionSnapshotRequest> agentSessions,
+            AgentExecutionBudgetRequest executionBudget,
+            List<Map<String, Object>> workflowSnapshots
+    ) {
         this.workspacePath = workspacePath;
         this.projectInstructions = List.copyOf(projectInstructions);
         this.availableTools = List.copyOf(availableTools);
@@ -145,6 +166,8 @@ public class AgentPromptContextRequest {
         this.conversationSummary = conversationSummary;
         this.mcpServers = List.copyOf(mcpServers);
         this.agentSessions = List.copyOf(agentSessions);
+        this.workflowSnapshots = workflowSnapshots == null
+                ? List.of() : List.copyOf(workflowSnapshots);
         this.executionBudget = executionBudget == null
                 ? AgentExecutionBudgetRequest.defaults()
                 : executionBudget;
@@ -248,6 +271,22 @@ public class AgentPromptContextRequest {
             List<AgentMcpServerRequest> mcpServers,
             List<AgentSessionSnapshotRequest> agentSessions
     ) {
+        return forWorkspace(memorySummary, workspacePath, permissionMode,
+                taskId, conversationSummary, memoryCandidates, mcpServers,
+                agentSessions, List.of());
+    }
+
+    public static AgentPromptContextRequest forWorkspace(
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<AgentMemoryContextRequest> memoryCandidates,
+            List<AgentMcpServerRequest> mcpServers,
+            List<AgentSessionSnapshotRequest> agentSessions,
+            List<Map<String, Object>> workflowSnapshots
+    ) {
         AgentPromptContextRequest base = forWorkspace(
                 memorySummary, workspacePath, permissionMode
         );
@@ -261,7 +300,9 @@ public class AgentPromptContextRequest {
                 conversationSummary,
                 memoryCandidates,
                 mcpServers,
-                agentSessions
+                agentSessions,
+                AgentExecutionBudgetRequest.defaults(),
+                workflowSnapshots
         );
     }
 
@@ -297,6 +338,10 @@ public class AgentPromptContextRequest {
 
     public List<AgentSessionSnapshotRequest> getAgentSessions() {
         return agentSessions;
+    }
+
+    public List<Map<String, Object>> getWorkflowSnapshots() {
+        return workflowSnapshots;
     }
 
     public AgentExecutionBudgetRequest getExecutionBudget() {

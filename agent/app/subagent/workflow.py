@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any
 
@@ -50,6 +51,22 @@ class WorkflowNode:
     failure_kind: str = ""
     agent_id: str = ""
     session_id: str = ""
+    effect_id: str = ""
+    effect_state: str = "not_started"
+    dispatch_count: int = 0
+    dispatch_sequence: int = 0
+    ready_since: datetime | None = None
+    duration_ms: int = 0
+
+
+@dataclass(slots=True)
+class WorkflowQuota:
+    max_waves: int = 256
+    max_total_attempts: int = 1024
+    max_runtime_ms: int = 7 * 24 * 60 * 60 * 1000
+    used_waves: int = 0
+    used_attempts: int = 0
+    used_runtime_ms: int = 0
 
 
 @dataclass(slots=True)
@@ -58,14 +75,27 @@ class WorkflowGraph:
     label: str
     owner_agent_id: str
     nodes: dict[str, WorkflowNode] = field(default_factory=dict)
+    version: int = 0
+    scheduler_sequence: int = 0
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    quota: WorkflowQuota = field(default_factory=WorkflowQuota)
+    quota_exhausted: bool = False
 
 
 class WorkflowManager:
     """Optional explicit DAG planner backed by the existing Agent Runtime."""
 
-    def __init__(self, runtime: SubagentRuntime) -> None:
+    def __init__(
+        self,
+        runtime: SubagentRuntime,
+        durable_snapshots: Sequence[dict[str, Any]] = (),
+    ) -> None:
         self._runtime = runtime
         self._graphs: dict[str, WorkflowGraph] = {}
+        self._durable_snapshots = tuple(durable_snapshots)
+        self._durable_restored = False
+        self._created_graphs = 0
 
     def tools(self):
         return (
@@ -106,9 +136,30 @@ class WorkflowManager:
                     graph = _graph_from_snapshot(context, snapshot)
                 except (TypeError, ValueError):
                     continue
-                self._graphs[graph.graph_id] = graph
+                current = self._graphs.get(graph.graph_id)
+                if current is None or graph.version >= current.version:
+                    self._graphs[graph.graph_id] = graph
                 restored.add(graph.graph_id)
         return len(restored)
+
+    def restore_durable(
+        self,
+        context: ToolContext,
+    ) -> int:
+        if self._durable_restored:
+            return 0
+        restored = 0
+        for snapshot in self._durable_snapshots:
+            try:
+                graph = _graph_from_snapshot(context, snapshot)
+            except (TypeError, ValueError):
+                continue
+            current = self._graphs.get(graph.graph_id)
+            if current is None or graph.version >= current.version:
+                self._graphs[graph.graph_id] = graph
+                restored += 1
+        self._durable_restored = True
+        return restored
 
     async def create(
         self,
@@ -116,8 +167,10 @@ class WorkflowManager:
         *,
         label: str,
         raw_nodes: list[dict[str, Any]],
+        raw_quota: dict[str, Any] | None = None,
     ) -> ToolResult:
-        if len(self._graphs) >= _MAX_GRAPHS:
+        self.restore_durable(context)
+        if self._created_graphs >= _MAX_GRAPHS:
             return ToolResult(
                 f"当前 Run 最多创建 {_MAX_GRAPHS} 个显式工作流",
                 is_error=True,
@@ -126,6 +179,7 @@ class WorkflowManager:
         try:
             nodes = _parse_nodes(context, raw_nodes)
             _validate_dependencies(nodes)
+            quota = _parse_quota(raw_quota)
         except (TypeError, ValueError) as error:
             return ToolResult(
                 str(error),
@@ -137,8 +191,12 @@ class WorkflowManager:
             label=label,
             owner_agent_id=context.agent_id or "supervisor",
             nodes=nodes,
+            quota=quota,
         )
+        for node in graph.nodes.values():
+            node.ready_since = graph.created_at
         self._graphs[graph.graph_id] = graph
+        self._created_graphs += 1
         await self._checkpoint(context, graph, "created")
         return ToolResult(
             json.dumps(self._snapshot(graph), ensure_ascii=False),
@@ -150,6 +208,7 @@ class WorkflowManager:
         )
 
     def list_workflows(self, context: ToolContext) -> ToolResult:
+        self.restore_durable(context)
         graphs = [
             self._snapshot(graph)
             for graph in self._graphs.values()
@@ -165,6 +224,7 @@ class WorkflowManager:
         max_waves: int,
         max_parallel: int,
     ) -> ToolResult:
+        self.restore_durable(context)
         graph = self._managed_graph(context, graph_id)
         if graph is None:
             return ToolResult(
@@ -174,6 +234,23 @@ class WorkflowManager:
             )
         waves = 0
         while waves < max_waves:
+            quota_failure = self._quota_failure(graph)
+            if quota_failure:
+                graph.quota_exhausted = True
+                await self._checkpoint(context, graph, "quota_exhausted")
+                snapshot = self._snapshot(graph)
+                return ToolResult(
+                    json.dumps(snapshot, ensure_ascii=False),
+                    is_error=True,
+                    metadata={
+                        "workflowId": graph.graph_id,
+                        "workflowStatus": snapshot["status"],
+                        "failureKind": "workflow_quota_exhausted",
+                        "quotaDimension": quota_failure,
+                        "retryable": False,
+                        "toolExecutionState": "not_started",
+                    },
+                )
             self._mark_dependency_blocks(graph)
             ready = self._ready_nodes(graph)
             if not ready:
@@ -182,9 +259,31 @@ class WorkflowManager:
             if not batch:
                 break
             waves += 1
+            graph.quota.used_waves += 1
+            executable: list[WorkflowNode] = []
+            for node in batch:
+                if node.deadline is not None and datetime.now(timezone.utc) >= node.deadline:
+                    node.status = "failed"
+                    node.failure_kind = "deadline_exceeded"
+                    node.error = "节点 deadline 已过期"
+                    node.effect_state = "not_started"
+                    continue
+                graph.scheduler_sequence += 1
+                node.status = "running"
+                node.attempts += 1
+                node.dispatch_count += 1
+                node.dispatch_sequence = graph.scheduler_sequence
+                node.effect_id = (
+                    f"workflow_effect:{graph.graph_id}:{node.node_id}:"
+                    f"{node.attempts}"
+                )
+                node.effect_state = "prepared"
+                graph.quota.used_attempts += 1
+                executable.append(node)
+            await self._checkpoint(context, graph, "wave_started")
             await asyncio.gather(*(
-                self._run_node(context, graph, node)
-                for node in batch
+                self._execute_node(context, graph, node)
+                for node in executable
             ))
             await self._checkpoint(context, graph, "wave_completed")
 
@@ -210,6 +309,7 @@ class WorkflowManager:
         graph_id: str,
         node_id: str,
     ) -> ToolResult:
+        self.restore_durable(context)
         graph = self._managed_graph(context, graph_id)
         node = graph.nodes.get(node_id) if graph is not None else None
         if graph is None or node is None:
@@ -228,6 +328,10 @@ class WorkflowManager:
         node.attempts = 0
         node.error = ""
         node.failure_kind = ""
+        node.effect_id = ""
+        node.effect_state = "not_started"
+        node.ready_since = datetime.now(timezone.utc)
+        graph.quota_exhausted = False
         self._reset_dependency_blocks(graph)
         await self._checkpoint(context, graph, "node_requeued")
         return ToolResult(
@@ -239,37 +343,44 @@ class WorkflowManager:
             },
         )
 
-    async def _run_node(
+    async def _execute_node(
         self,
         context: ToolContext,
         graph: WorkflowGraph,
         node: WorkflowNode,
     ) -> None:
-        if node.deadline is not None and datetime.now(timezone.utc) >= node.deadline:
-            node.status = "failed"
-            node.failure_kind = "deadline_exceeded"
-            node.error = "节点 deadline 已过期"
-            return
-        node.status = "running"
-        node.attempts += 1
+        started = time.perf_counter()
         prompt = node.prompt
         if node.evidence_refs:
             prompt += "\n\n已有 Evidence/Artifact 引用：\n- " + "\n- ".join(
                 node.evidence_refs
             )
-        result = await self._runtime.run(
+        node_context = replace(
             context,
+            workflow_id=graph.graph_id,
+            workflow_node_id=node.node_id,
+            # Each dispatch attempt gets its own writer identity.  Child tools
+            # still re-enter this attempt's declared lease, while a recovered
+            # attempt cannot accidentally reuse a stale worker's fencing token.
+            write_owner_id=node.effect_id,
+        )
+        result = await self._runtime.run(
+            node_context,
             description=node.title,
             prompt=prompt,
             write_scopes=node.declared_scope_values,
         )
         node.agent_id = str(result.metadata.get("agentId") or "")
         node.session_id = str(result.metadata.get("sessionId") or "")
+        elapsed_ms = max(1, round((time.perf_counter() - started) * 1000))
+        node.duration_ms += elapsed_ms
+        graph.quota.used_runtime_ms += elapsed_ms
         if not result.is_error:
             node.status = "completed"
             node.result = result.content
             node.error = ""
             node.failure_kind = ""
+            node.effect_state = "committed"
             return
         node.error = result.content
         node.failure_kind = str(
@@ -283,6 +394,11 @@ class WorkflowManager:
             and node.attempts < node.max_attempts
         )
         node.status = "pending" if safe_retry else "failed"
+        node.effect_state = str(
+            result.metadata.get("toolExecutionState") or "unknown"
+        )
+        if safe_retry:
+            node.ready_since = datetime.now(timezone.utc)
 
     def _ready_nodes(self, graph: WorkflowGraph) -> list[WorkflowNode]:
         return sorted(
@@ -293,15 +409,31 @@ class WorkflowManager:
                 and self._dependencies_completed(graph, node)
             ),
             key=lambda node: (
+                node.dispatch_count,
                 -node.priority,
                 (
                     node.deadline.timestamp()
                     if node.deadline is not None
                     else float("inf")
                 ),
+                (
+                    node.ready_since.timestamp()
+                    if node.ready_since is not None
+                    else 0
+                ),
                 node.node_id,
             ),
         )
+
+    @staticmethod
+    def _quota_failure(graph: WorkflowGraph) -> str:
+        if graph.quota.used_waves >= graph.quota.max_waves:
+            return "waves"
+        if graph.quota.used_attempts >= graph.quota.max_total_attempts:
+            return "attempts"
+        if graph.quota.used_runtime_ms >= graph.quota.max_runtime_ms:
+            return "runtime"
+        return ""
 
     @staticmethod
     def _dependencies_completed(
@@ -344,17 +476,21 @@ class WorkflowManager:
         graph: WorkflowGraph,
         reason: str,
     ) -> None:
+        graph.version += 1
+        graph.updated_at = datetime.now(timezone.utc)
+        snapshot = self._snapshot(graph)
         if context.emit_event is None:
             return
         await context.emit_event(RunEvent(
             type="progress_message",
-            item_id=f"{graph.graph_id}:{uuid.uuid4().hex}",
+            item_id=f"{graph.graph_id}:checkpoint:{graph.version}",
             title=f"工作流：{graph.label}",
             delta=f"显式 DAG 已更新：{reason}",
             metadata={
                 "category": "workflow_checkpoint",
-                "workflow": self._snapshot(graph),
+                "workflow": snapshot,
                 "checkpointReason": reason,
+                "checkpointVersion": graph.version,
             },
         ))
 
@@ -375,7 +511,9 @@ class WorkflowManager:
     @staticmethod
     def _snapshot(graph: WorkflowGraph) -> dict[str, Any]:
         statuses = {node.status for node in graph.nodes.values()}
-        if statuses == {"completed"}:
+        if graph.quota_exhausted:
+            status = "paused"
+        elif statuses == {"completed"}:
             status = "completed"
         elif "running" in statuses:
             status = "running"
@@ -388,6 +526,18 @@ class WorkflowManager:
             "label": graph.label,
             "ownerAgentId": graph.owner_agent_id,
             "status": status,
+            "version": graph.version,
+            "createdAt": graph.created_at.isoformat(),
+            "updatedAt": graph.updated_at.isoformat(),
+            "schedulerSequence": graph.scheduler_sequence,
+            "quota": {
+                "maxWaves": graph.quota.max_waves,
+                "maxTotalAttempts": graph.quota.max_total_attempts,
+                "maxRuntimeMs": graph.quota.max_runtime_ms,
+                "usedWaves": graph.quota.used_waves,
+                "usedAttempts": graph.quota.used_attempts,
+                "usedRuntimeMs": graph.quota.used_runtime_ms,
+            },
             "nodes": [
                 {
                     "nodeId": node.node_id,
@@ -412,6 +562,16 @@ class WorkflowManager:
                     "failureKind": node.failure_kind or None,
                     "agentId": node.agent_id or None,
                     "sessionId": node.session_id or None,
+                    "effectId": node.effect_id or None,
+                    "effectState": node.effect_state,
+                    "dispatchCount": node.dispatch_count,
+                    "dispatchSequence": node.dispatch_sequence,
+                    "readySince": (
+                        node.ready_since.isoformat()
+                        if node.ready_since is not None
+                        else None
+                    ),
+                    "durationMs": node.duration_ms,
                 }
                 for node in graph.nodes.values()
             ],
@@ -424,6 +584,11 @@ def create_workflow_tool(manager: WorkflowManager):
             context,
             label=str(data["label"]).strip(),
             raw_nodes=[dict(node) for node in data["nodes"]],
+            raw_quota=(
+                dict(data["quota"])
+                if isinstance(data.get("quota"), dict)
+                else None
+            ),
         )
 
     return function_tool(
@@ -441,6 +606,24 @@ def create_workflow_tool(manager: WorkflowManager):
                     "minItems": 1,
                     "maxItems": _MAX_NODES,
                     "items": {"type": "object"},
+                },
+                "quota": {
+                    "type": "object",
+                    "description": "跨回合累计的长期工作流配额。",
+                    "properties": {
+                        "maxWaves": {
+                            "type": "integer", "minimum": 1, "maximum": 10000
+                        },
+                        "maxTotalAttempts": {
+                            "type": "integer", "minimum": 1, "maximum": 100000
+                        },
+                        "maxRuntimeMs": {
+                            "type": "integer",
+                            "minimum": 1000,
+                            "maximum": 2592000000,
+                        },
+                    },
+                    "additionalProperties": False,
                 },
             },
             "required": ["label", "nodes"],
@@ -650,6 +833,24 @@ def _parse_deadline(value: Any, node_id: str) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _parse_quota(value: dict[str, Any] | None) -> WorkflowQuota:
+    raw = value or {}
+    max_waves = int(raw.get("maxWaves") or 256)
+    max_attempts = int(raw.get("maxTotalAttempts") or 1024)
+    max_runtime = int(raw.get("maxRuntimeMs") or 7 * 24 * 60 * 60 * 1000)
+    if not 1 <= max_waves <= 10_000:
+        raise ValueError("工作流 quota.maxWaves 必须为 1-10000")
+    if not 1 <= max_attempts <= 100_000:
+        raise ValueError("工作流 quota.maxTotalAttempts 必须为 1-100000")
+    if not 1_000 <= max_runtime <= 2_592_000_000:
+        raise ValueError("工作流 quota.maxRuntimeMs 必须为 1000-2592000000")
+    return WorkflowQuota(
+        max_waves=max_waves,
+        max_total_attempts=max_attempts,
+        max_runtime_ms=max_runtime,
+    )
+
+
 def _validate_create_input(data: ToolInput) -> str | None:
     if not isinstance(data.get("label"), str) or not str(data["label"]).strip():
         return "label 必须是非空字符串"
@@ -703,14 +904,29 @@ def _graph_from_snapshot(
         prompt = str(raw.get("prompt") or "").strip()
         failure_kind = str(raw.get("failureKind") or "")
         error = str(raw.get("error") or "")
+        effect_state = str(raw.get("effectState") or "not_started")
+        recovery_state = str(raw.get("recoveryState") or "")
         if status in {"pending", "running"} and not prompt:
             status = "failed"
             failure_kind = "workflow_restore_incomplete"
             error = "历史工作流快照缺少节点 prompt，无法安全恢复执行"
         elif status == "running":
-            status = "pending"
-            failure_kind = ""
-            error = ""
+            if recovery_state == "completed":
+                status = "completed"
+                effect_state = "committed"
+            elif recovery_state == "safe_to_retry":
+                status = "pending"
+                effect_state = "not_started"
+                failure_kind = ""
+                error = ""
+            else:
+                status = "failed"
+                effect_state = "unknown"
+                failure_kind = "workflow_recovery_requires_verification"
+                error = (
+                    "节点在上次进程退出时仍在运行，已有副作用状态无法确认；"
+                    "请核验后显式重新排队"
+                )
         nodes[node_id] = WorkflowNode(
             node_id=node_id,
             title=title,
@@ -745,13 +961,37 @@ def _graph_from_snapshot(
             failure_kind=failure_kind,
             agent_id=str(raw.get("agentId") or ""),
             session_id=str(raw.get("sessionId") or ""),
+            effect_id=str(raw.get("effectId") or ""),
+            effect_state=effect_state,
+            dispatch_count=max(0, int(raw.get("dispatchCount") or 0)),
+            dispatch_sequence=max(0, int(raw.get("dispatchSequence") or 0)),
+            ready_since=_parse_optional_datetime(raw.get("readySince")),
+            duration_ms=max(0, int(raw.get("durationMs") or 0)),
         )
     _validate_dependencies(nodes)
+    raw_quota = snapshot.get("quota")
+    quota_value = raw_quota if isinstance(raw_quota, dict) else {}
+    quota = _parse_quota(quota_value)
+    quota.used_waves = max(0, int(quota_value.get("usedWaves") or 0))
+    quota.used_attempts = max(0, int(quota_value.get("usedAttempts") or 0))
+    quota.used_runtime_ms = max(0, int(quota_value.get("usedRuntimeMs") or 0))
     return WorkflowGraph(
         graph_id=graph_id,
         label=label,
         owner_agent_id=str(snapshot.get("ownerAgentId") or "supervisor"),
         nodes=nodes,
+        version=max(0, int(snapshot.get("version") or 0)),
+        scheduler_sequence=max(0, int(snapshot.get("schedulerSequence") or 0)),
+        created_at=(
+            _parse_optional_datetime(snapshot.get("createdAt"))
+            or datetime.now(timezone.utc)
+        ),
+        updated_at=(
+            _parse_optional_datetime(snapshot.get("updatedAt"))
+            or datetime.now(timezone.utc)
+        ),
+        quota=quota,
+        quota_exhausted=snapshot.get("status") == "paused",
     )
 
 
@@ -773,3 +1013,15 @@ def _declared_scopes_from_snapshot(raw: dict[str, Any]) -> tuple[str, ...]:
             value += "/**"
         values.append(value)
     return tuple(values)
+
+
+def _parse_optional_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)

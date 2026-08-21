@@ -468,8 +468,60 @@ components:
           description: Core 持久化的 continuable 子 Agent Session 快照，用于恢复。
           items:
             $ref: "#/components/schemas/AgentSessionSnapshot"
+        workflowSnapshots:
+          type: array
+          maxItems: 100
+          description: Core 从专用 DAG、节点与 Effect 表重建的耐久工作流快照，用于 mid-wave 恢复。
+          items:
+            $ref: "#/components/schemas/WorkflowSnapshot"
         executionBudget:
           $ref: "#/components/schemas/ExecutionBudget"
+    WorkflowSnapshot:
+      type: object
+      required: [workflowId, label, ownerAgentId, status, version, quota, nodes]
+      properties:
+        workflowId: { type: string, minLength: 1 }
+        label: { type: string, minLength: 1, maxLength: 120 }
+        ownerAgentId: { type: string, minLength: 1 }
+        status:
+          type: string
+          enum: [pending, running, completed, failed, paused]
+        version: { type: integer, minimum: 0 }
+        schedulerSequence: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        quota:
+          $ref: "#/components/schemas/WorkflowQuota"
+        nodes:
+          type: array
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/WorkflowNodeSnapshot"
+    WorkflowQuota:
+      type: object
+      properties:
+        maxWaves: { type: integer, minimum: 1, maximum: 10000 }
+        maxTotalAttempts: { type: integer, minimum: 1, maximum: 100000 }
+        maxRuntimeMs: { type: integer, minimum: 1000, maximum: 2592000000 }
+        usedWaves: { type: integer, minimum: 0 }
+        usedAttempts: { type: integer, minimum: 0 }
+        usedRuntimeMs: { type: integer, minimum: 0 }
+    WorkflowNodeSnapshot:
+      type: object
+      required: [nodeId, title, prompt, status, attempts, effectState]
+      properties:
+        nodeId: { type: string, minLength: 1, maxLength: 80 }
+        title: { type: string, minLength: 1, maxLength: 120 }
+        prompt: { type: string, minLength: 1, maxLength: 20000 }
+        status:
+          type: string
+          enum: [pending, running, completed, failed, blocked]
+        attempts: { type: integer, minimum: 0 }
+        effectId: { type: string }
+        effectState: { type: string }
+        recoveryState:
+          type: string
+          enum: [safe_to_retry, requires_verification, completed]
     ExecutionBudget:
       type: object
       additionalProperties: false

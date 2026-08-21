@@ -258,7 +258,10 @@ class ChatService:
             )
             for tool in session_manager.tools():
                 runtime_registry.register(tool)
-            workflow_manager = WorkflowManager(subagent_runtime)
+            workflow_manager = WorkflowManager(
+                subagent_runtime,
+                tuple(request.prompt_context.workflow_snapshots),
+            )
             for tool in workflow_manager.tools():
                 runtime_registry.register(tool)
             prompt_context = self._prompt_context(
@@ -402,6 +405,7 @@ class ChatService:
                 background_event=background_events.put,
                 execution_budget=execution_budget,
             )
+            workflow_manager.restore_durable(tool_context)
             workflow_manager.restore_from_messages(request.messages, tool_context)
             if prompt.tools:
                 await session_manager.publish_recovery_events(tool_context)

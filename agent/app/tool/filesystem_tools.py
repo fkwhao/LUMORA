@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import stat
@@ -5,6 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from app.execution.merge import merge_text
 from app.tool.base import (
     FunctionTool,
     ToolCategory,
@@ -137,13 +139,25 @@ def filesystem_tools() -> tuple[FunctionTool, ...]:
             name="write_file",
             description=(
                 "在工作区内新建或明确完整覆盖 UTF-8 文本文件。"
-                "现有文件的局部修改应使用 apply_patch。"
+                "现有文件的局部修改应使用 apply_patch；conflictPolicy=merge 可基于"
+                "读取基线自动合并不重叠修改，重叠修改会返回人工解决信息。"
+                "read_file 返回的 observationId 可作为 baseObservationId 显式指定基线。"
             ),
             input_schema={
                 "type": "object",
                 "properties": {
                     "path": {"type": "string"},
                     "content": {"type": "string"},
+                    "conflictPolicy": {
+                        "type": "string",
+                        "enum": ["reject", "merge"],
+                        "default": "reject",
+                    },
+                    "baseObservationId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80,
+                    },
                 },
                 "required": ["path", "content"],
                 "additionalProperties": False,
@@ -153,6 +167,7 @@ def filesystem_tools() -> tuple[FunctionTool, ...]:
             destructive=lambda data: bool(data.get("path")),
             resource_accesses=_file_write_access,
             execute=_write_file,
+            validate=_validate_write_file,
             title=lambda data: str(data.get("path") or "写入文件"),
         ),
     )
@@ -191,6 +206,12 @@ def _validate_patch(data: ToolInput) -> str | None:
         return "替换文本必须是字符串"
     if max(len(old_text), len(new_text)) > MAX_PATCH_TEXT_CHARS:
         return "单次补丁文本长度超过限制"
+    return None
+
+
+def _validate_write_file(data: ToolInput) -> str | None:
+    if data.get("conflictPolicy", "reject") not in {"reject", "merge"}:
+        return "conflictPolicy 必须是 reject 或 merge"
     return None
 
 
@@ -258,7 +279,7 @@ def _list_files(context: ToolContext, data: ToolInput) -> ToolResult:
 def _read_file(context: ToolContext, data: ToolInput) -> ToolResult:
     path = _resolve_path(context, data.get("path"))
     content, version = _read_text_file(path)
-    _observe_file(context, path, version)
+    observation_id = _observe_file(context, path, version, content)
     lines = content.splitlines()
     if not lines:
         return ToolResult(
@@ -271,6 +292,8 @@ def _read_file(context: ToolContext, data: ToolInput) -> ToolResult:
                 "endLine": 0,
                 "hasMore": False,
                 "truncated": False,
+                "observationId": observation_id,
+                "resourceVersion": version,
             },
         )
     start = max(1, int(data.get("startLine") or 1))
@@ -305,6 +328,8 @@ def _read_file(context: ToolContext, data: ToolInput) -> ToolResult:
         "endLine": actual_end,
         "hasMore": has_more,
         "truncated": has_more or range_limited or output_limited,
+        "observationId": observation_id,
+        "resourceVersion": version,
     }
     if has_more:
         metadata["nextStartLine"] = actual_end + 1
@@ -322,7 +347,7 @@ def _read_file(context: ToolContext, data: ToolInput) -> ToolResult:
 def _search_in_file(context: ToolContext, data: ToolInput) -> ToolResult:
     path = _resolve_path(context, data.get("path"))
     content, version = _read_text_file(path)
-    _observe_file(context, path, version)
+    observation_id = _observe_file(context, path, version, content)
     query = str(data["query"])
     case_sensitive = bool(data.get("caseSensitive", False))
     max_results = min(
@@ -357,6 +382,8 @@ def _search_in_file(context: ToolContext, data: ToolInput) -> ToolResult:
         "matchCount": match_count,
         "resultCount": len(matches),
         "truncated": truncated,
+        "observationId": observation_id,
+        "resourceVersion": version,
     }
     return ToolResult(
         content=("\n".join(matches) if matches else "未找到匹配内容") + suffix,
@@ -380,12 +407,15 @@ def _apply_patch(context: ToolContext, data: ToolInput) -> ToolResult:
     updated = content.replace(old_text, new_text, -1 if replace_all else 1)
     replacements = occurrences if replace_all else 1
     _atomic_write_text(path, updated, expected_version=version)
-    _observe_file(context, path, _file_version(path))
+    current_version = _file_version(path)
+    observation_id = _observe_file(context, path, current_version, updated)
     metadata = {
         "path": _display_path(context, path),
         "replacements": replacements,
         "previousLines": len(content.splitlines()),
         "currentLines": len(updated.splitlines()),
+        "observationId": observation_id,
+        "resourceVersion": current_version,
     }
     return ToolResult(content=json.dumps(metadata, ensure_ascii=False), metadata=metadata)
 
@@ -398,23 +428,109 @@ def _write_file(context: ToolContext, data: ToolInput) -> ToolResult:
     if len(content) > MAX_FULL_WRITE_CHARS:
         raise ValueError("写入内容过大")
     existed = path.exists()
+    write_resolution = "created" if not existed else "direct"
+    base_observation_id = str(
+        data.get("baseObservationId") or ""
+    ).strip() or None
+    used_observation_id: str | None = None
+    observed_version: str | None = None
+    base: str | None = None
     if existed:
         current_version = _file_version(path)
-        _require_current_observation(context, path, current_version)
         previous, verified_version = _read_text_file(path)
         if verified_version != current_version:
             raise ValueError("文件在写入前发生变化，请重新读取后再试")
+        owner_id = context.resource_owner_id
+        observations = context.resource_observations
+        resource_key = file_resource_key(path)
+        observation = (
+            observations.observation(
+                owner_id,
+                resource_key,
+                base_observation_id,
+            )
+            if owner_id and observations is not None
+            else None
+        )
+        if owner_id and observations is not None and observation is None:
+            if base_observation_id is not None:
+                return _human_merge_required(
+                    context,
+                    path,
+                    None,
+                    previous,
+                    content,
+                    (),
+                    reason="指定的读取观察不存在、已过期或不属于当前 Agent",
+                    write_resolution="baseline_unavailable",
+                    base_observation_id=base_observation_id,
+                    base_version=None,
+                    current_version=verified_version,
+                )
+            raise ValueError("覆盖已有文件前必须先读取该文件")
+        if observation is not None:
+            used_observation_id = observation.observation_id
+            observed_version = observation.version
+            base = observation.content
+        if observed_version is not None and observed_version != verified_version:
+            if data.get("conflictPolicy", "reject") != "merge":
+                raise ValueError(
+                    "文件已被其他任务修改，或被其他 Agent 修改，请重新读取后再试"
+                )
+            if base is None:
+                return _human_merge_required(
+                    context,
+                    path,
+                    None,
+                    previous,
+                    content,
+                    (),
+                    reason="读取观察未保留完整基线，无法安全自动合并",
+                    write_resolution="baseline_unavailable",
+                    base_observation_id=used_observation_id,
+                    base_version=observed_version,
+                    current_version=verified_version,
+                )
+            merge = merge_text(base, previous, content)
+            if not merge.merged or merge.content is None:
+                return _human_merge_required(
+                    context,
+                    path,
+                    base,
+                    previous,
+                    content,
+                    tuple(hunk.metadata() for hunk in merge.conflicts),
+                    reason="当前修改与待写入修改发生重叠",
+                    write_resolution="manual_merge_required",
+                    base_observation_id=used_observation_id,
+                    base_version=observed_version,
+                    current_version=verified_version,
+                )
+            content = merge.content
+            write_resolution = (
+                "already_current" if content == previous else "auto_merged"
+            )
+        elif content == previous:
+            write_resolution = "already_current"
         expected_version: str | None = verified_version
     else:
         previous = ""
         expected_version = None
-    _atomic_write_text(path, content, expected_version=expected_version)
-    _observe_file(context, path, _file_version(path))
+    if write_resolution != "already_current":
+        _atomic_write_text(path, content, expected_version=expected_version)
+    final_version = _file_version(path)
+    observation_id = _observe_file(context, path, final_version, content)
     metadata = {
         "path": _display_path(context, path),
         "previousLines": len(previous.splitlines()),
         "currentLines": len(content.splitlines()),
         "created": not existed,
+        "mergeApplied": write_resolution == "auto_merged",
+        "writeResolution": write_resolution,
+        "baseObservationId": used_observation_id,
+        "observationId": observation_id,
+        "baseVersion": observed_version,
+        "resourceVersion": final_version,
     }
     return ToolResult(content=json.dumps(metadata, ensure_ascii=False), metadata=metadata)
 
@@ -441,14 +557,73 @@ def _file_version(path: Path) -> str:
     )
 
 
-def _observe_file(context: ToolContext, path: Path, version: str) -> None:
+def _observe_file(
+    context: ToolContext,
+    path: Path,
+    version: str,
+    content: str | None = None,
+) -> str | None:
     observations = context.resource_observations
     if observations is not None:
-        observations.observe(
+        merge_baseline = (
+            content
+            if content is not None and len(content) <= MAX_FULL_WRITE_CHARS
+            else None
+        )
+        observation = observations.observe(
             context.resource_owner_id,
             file_resource_key(path),
             version,
+            merge_baseline,
         )
+        return (
+            observation.observation_id if observation is not None else None
+        )
+    return None
+
+
+def _human_merge_required(
+    context: ToolContext,
+    path: Path,
+    base: str | None,
+    current: str,
+    proposed: str,
+    conflicts: tuple[dict[str, object], ...],
+    *,
+    reason: str,
+    write_resolution: str,
+    base_observation_id: str | None,
+    base_version: str | None,
+    current_version: str,
+) -> ToolResult:
+    metadata = {
+        "failureKind": "human_merge_required",
+        "retryable": False,
+        "toolExecutionState": "not_started",
+        "path": _display_path(context, path),
+        "reason": reason,
+        "writeResolution": write_resolution,
+        "mergeApplied": False,
+        "conflictHunks": conflicts,
+        "baseObservationId": base_observation_id,
+        "baseVersion": base_version,
+        "resourceVersion": current_version,
+        "baseHash": _content_hash(base) if base is not None else None,
+        "currentHash": _content_hash(current),
+        "proposedHash": _content_hash(proposed),
+        "nextAction": (
+            "请查看 conflictHunks，读取文件最新内容后人工整合，再以新的完整内容重试。"
+        ),
+    }
+    return ToolResult(
+        content=json.dumps(metadata, ensure_ascii=False),
+        is_error=True,
+        metadata=metadata,
+    )
+
+
+def _content_hash(value: str) -> str:
+    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _require_current_observation(

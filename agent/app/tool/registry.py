@@ -157,7 +157,8 @@ class ToolRegistry:
             owner_id,
             write_scopes,
             owner_label=runtime_context.agent_id or owner_id,
-        ):
+        ) as write_claim:
+            self._write_intents.ensure_current(owner_id, write_scopes)
             if not accesses:
                 resource_wait_ms = 0
                 resource_contended = False
@@ -189,6 +190,12 @@ class ToolRegistry:
                 for access in accesses
             ),
         }
+        if write_claim is not None:
+            metadata["writeLease"] = write_claim.metadata(state="released")
+        if runtime_context.workflow_id:
+            metadata["workflowId"] = runtime_context.workflow_id
+        if runtime_context.workflow_node_id:
+            metadata["workflowNodeId"] = runtime_context.workflow_node_id
         return replace(result, metadata=metadata)
 
 

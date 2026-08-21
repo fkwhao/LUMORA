@@ -44,6 +44,7 @@ class ConversationRunStoreTest {
                 runMapper,
                 mock(ConversationRunEventMapper.class),
                 mock(AgentSessionStore.class),
+                mock(AgentWorkflowStore.class),
                 new ObjectMapper(),
                 mock(TransactionTemplate.class),
                 Clock.systemUTC()
@@ -79,6 +80,7 @@ class ConversationRunStoreTest {
                 runMapper,
                 eventMapper,
                 mock(AgentSessionStore.class),
+                mock(AgentWorkflowStore.class),
                 new ObjectMapper(),
                 transactionTemplate,
                 clock

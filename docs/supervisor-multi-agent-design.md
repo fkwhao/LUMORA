@@ -141,8 +141,9 @@ Checkpoint Transcript；Checkpoint 保存公开消息、工具调用/结果和 I
 
 显式 DAG 通过 `create_workflow`、`list_workflows`、`run_workflow` 和 `retry_workflow_node` 操作。
 节点包含依赖、优先级、deadline、安全重试策略、写入范围和 Evidence/Artifact 引用；调度器每个
-wave 选择 ready 且写范围互不重叠的节点并行执行。每次工具结果都携带完整最新快照，后续 Turn
-从已持久化的公开工具消息恢复，因此已完成节点不会在正常跨 Turn 续接时重复执行。
+wave 选择 ready 且写范围互不重叠的节点并行执行。每次工具结果都携带完整最新快照，Core 同时将
+DAG、节点、checkpoint 和 Effect 投影到专用表。后续 Turn 优先从 Core 耐久快照恢复，公开工具消息
+仅作兼容来源，因此已完成节点不会在正常跨 Turn 续接时重复执行。
 
 ## 6. Desktop 交互
 
@@ -183,10 +184,14 @@ Desktop 对 continuable Session 只提供只读状态和报告展示，不提供
   自动关闭策略或跨设备远程调度。
 - `report` 会耐久写回父任务，并可在当前或后续 Turn 由 `list` 读取；它不会在父模型已经结束回答后
   强行插入新的隐藏模型回合。
-- 写入意图目前是单 Python 进程内的执行期所有权，不是跨进程分布式租约；它检测冲突并支持
-  重规划，但不自动合并补丁或解决业务语义冲突。
-- DAG 的最新已完成工具结果可跨 Turn 恢复；若进程恰在一个 wave 中途退出，尚未形成工具结果的
-  节点副作用仍需 Supervisor 核验。专用耐久 DAG 表和 mid-wave exactly-once 恢复尚未实现。
+- 写入意图由进程内快速索引与 OS 文件锁保护的跨进程租约共同约束；TTL 清理崩溃持有者，FIFO
+  ticket 避免持续插队，每次节点派发使用独立 writer 身份和 fencing token，工具在实际写入前
+  必须校验并续期当前 token，迟到 worker 会被拒绝。Core 同时保存租约审计，但不把数据库投影
+  当作实时互斥锁。
+- DAG 在 wave 派发前把 running/prepared 状态作为同一 RunEvent 事务原子写入 Core；工具 Effect 的
+  started/committed/unknown 状态随后进入提交记录。重启时，无已观察 Effect 的节点可安全重排，
+  已开始但未确认的副作用会进入 `workflow_recovery_requires_verification`，不会声称实现无法证明的
+  外部系统 exactly-once。
 
 ## 8. 后续路线图
 
@@ -218,10 +223,14 @@ Desktop 对 continuable Session 只提供只读状态和报告展示，不提供
 - 已在资源锁之上增加路径级写入意图、基线哈希、冲突写者诊断和重规划提示。
 - 已通过公开工具消息跨 Turn 恢复 DAG 最新快照，运行中节点只在状态可安全判定时自动重试。
 
-### Phase 3B：耐久 DAG 与高级协作
+### Phase 3B：耐久 DAG 与高级协作（已完成）
 
-- 为 mid-wave 恢复增加专用 Core DAG/节点表、原子 checkpoint 与副作用提交记录。
-- 增加跨进程写入租约、公平调度、长期任务配额，以及基于基线的补丁合并/人工冲突解决。
+- 已增加专用 Core DAG、节点、checkpoint、Effect Commit 与租约审计表；checkpoint 与公开运行事件
+  在一个事务提交，Core 快照优先于聊天工具消息恢复。
+- 已增加跨进程 TTL 租约、FIFO ticket、fencing token 和基于历史 dispatch count 的公平 DAG 调度。
+- 已增加跨回合累计的 wave、节点尝试和运行时长配额，耗尽后保留结果并将工作流置为 paused。
+- 已增加基于最近读取基线的保守三方文本合并；独立修改自动合并，重叠修改返回结构化冲突片段和
+  人工处理动作。
 
 ### Phase 4：Windows 受限 Worker 与 Capability Broker
 

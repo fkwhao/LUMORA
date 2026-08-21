@@ -7,6 +7,7 @@ import com.lumora.core.memory.domain.model.MemoryContextItem;
 import com.lumora.core.model.domain.model.ModelConnection;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Transport-ready input for one streamed Python Agent request.
@@ -23,7 +24,8 @@ public record AgentChatStreamRequest(
         String conversationSummary,
         List<MemoryContextItem> memoryCandidates,
         List<McpServerRuntimeConfiguration> mcpServers,
-        List<AgentSessionSnapshot> agentSessions
+        List<AgentSessionSnapshot> agentSessions,
+        List<Map<String, Object>> workflowSnapshots
 ) {
     public AgentChatStreamRequest(
             List<ChatMessage> messages,
@@ -40,7 +42,27 @@ public record AgentChatStreamRequest(
     ) {
         this(messages, connection, correlationId, reasoningEffort,
                 memorySummary, workspacePath, permissionMode, taskId,
-                conversationSummary, memoryCandidates, mcpServers, List.of());
+                conversationSummary, memoryCandidates, mcpServers, List.of(), List.of());
+    }
+
+    public AgentChatStreamRequest(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String correlationId,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<MemoryContextItem> memoryCandidates,
+            List<McpServerRuntimeConfiguration> mcpServers,
+            List<AgentSessionSnapshot> agentSessions
+    ) {
+        this(messages, connection, correlationId, reasoningEffort,
+                memorySummary, workspacePath, permissionMode, taskId,
+                conversationSummary, memoryCandidates, mcpServers,
+                agentSessions, List.of());
     }
 
     public AgentChatStreamRequest {
@@ -50,5 +72,7 @@ public record AgentChatStreamRequest(
         mcpServers = mcpServers == null ? List.of() : List.copyOf(mcpServers);
         agentSessions = agentSessions == null
                 ? List.of() : List.copyOf(agentSessions);
+        workflowSnapshots = workflowSnapshots == null
+                ? List.of() : List.copyOf(workflowSnapshots);
     }
 }

@@ -1,6 +1,7 @@
 import asyncio
 import os
 import threading
+import uuid
 from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -29,6 +30,15 @@ class ResourceLockReport:
     @property
     def contended(self) -> bool:
         return bool(self.contended_keys)
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceObservation:
+    observation_id: str
+    owner: str
+    resource_key: str
+    version: str
+    content: str | None = None
 
 
 class _AsyncReadWriteLock:
@@ -123,19 +133,70 @@ class ResourceObservationStore:
     """Tracks the last resource version observed by each logical task."""
 
     def __init__(self) -> None:
-        self._versions: dict[tuple[str, str], str] = {}
+        self._latest: dict[tuple[str, str], str] = {}
+        self._observations: dict[str, ResourceObservation] = {}
+        self._history: dict[tuple[str, str], list[str]] = {}
         self._guard = threading.Lock()
 
-    def observe(self, owner: str, resource_key: str, version: str) -> None:
-        if owner:
-            with self._guard:
-                self._versions[(owner, resource_key)] = version
+    def observe(
+        self,
+        owner: str,
+        resource_key: str,
+        version: str,
+        content: str | None = None,
+    ) -> ResourceObservation | None:
+        if not owner:
+            return None
+        observation = ResourceObservation(
+            observation_id=f"obs_{uuid.uuid4().hex}",
+            owner=owner,
+            resource_key=resource_key,
+            version=version,
+            content=content,
+        )
+        key = (owner, resource_key)
+        with self._guard:
+            history = self._history.setdefault(key, [])
+            history.append(observation.observation_id)
+            self._observations[observation.observation_id] = observation
+            self._latest[key] = observation.observation_id
+            while len(history) > 4:
+                expired = history.pop(0)
+                self._observations.pop(expired, None)
+        return observation
 
-    def expected(self, owner: str, resource_key: str) -> str | None:
+    def observation(
+        self,
+        owner: str,
+        resource_key: str,
+        observation_id: str | None = None,
+    ) -> ResourceObservation | None:
         if not owner:
             return None
         with self._guard:
-            return self._versions.get((owner, resource_key))
+            selected_id = observation_id or self._latest.get(
+                (owner, resource_key)
+            )
+            selected = (
+                self._observations.get(selected_id)
+                if selected_id is not None
+                else None
+            )
+            if (
+                selected is None
+                or selected.owner != owner
+                or selected.resource_key != resource_key
+            ):
+                return None
+            return selected
+
+    def expected(self, owner: str, resource_key: str) -> str | None:
+        observation = self.observation(owner, resource_key)
+        return observation.version if observation is not None else None
+
+    def expected_content(self, owner: str, resource_key: str) -> str | None:
+        observation = self.observation(owner, resource_key)
+        return observation.content if observation is not None else None
 
 
 def workspace_resource_key(path: Path) -> str:

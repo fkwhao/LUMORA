@@ -220,6 +220,8 @@ class PromptBuilder:
             "规划时，才使用 create_workflow。\n"
             "- 节点 prompt 必须自包含；dependsOn 只表达真实前置条件。为写节点声明 writeScopes，"
             "调度器会并行 ready 且范围不冲突的节点，并把重叠节点安排到后续 wave。\n"
+            "- 长期工作流可在 quota 中设置跨回合累计 wave、节点尝试和运行时长上限；DAG 与 Effect "
+            "状态由 Core 耐久恢复，配额耗尽时先保留已完成结果，不要通过新工作流规避配额。\n"
             "- retryPolicy.mode=safe 只会重试确认可重试且没有未知副作用的失败。状态未知时必须先核验，"
             "再显式使用 retry_workflow_node。\n"
             "- run_workflow 返回节点报告后，你仍负责核验关键结果并综合用户答复。"

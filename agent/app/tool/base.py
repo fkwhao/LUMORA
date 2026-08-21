@@ -64,6 +64,9 @@ class ToolContext:
     session_id: str = ""
     agent_id: str = "supervisor"
     delegation_depth: int = 0
+    workflow_id: str = ""
+    workflow_node_id: str = ""
+    write_owner_id: str = ""
     execution_budget: "ExecutionBudgetLedger | None" = field(
         default=None,
         repr=False,
@@ -80,7 +83,12 @@ class ToolContext:
         callers that do not create Sessions continue to fall back to task id.
         """
 
-        return self.session_id or self.task_id or self.agent_id
+        return (
+            self.write_owner_id
+            or self.session_id
+            or self.task_id
+            or self.agent_id
+        )
 
 
 @dataclass(frozen=True, slots=True)

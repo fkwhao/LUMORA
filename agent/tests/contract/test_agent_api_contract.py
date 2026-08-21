@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import get_args
 
 import yaml
-
 from app.config.settings import AgentSettings
 from app.dto.response.chat_stream_event_response import ChatStreamEventResponse
 from app.harness.run_event import RunEventType
@@ -42,6 +41,7 @@ def test_prompt_context_contract_contains_only_runtime_facts() -> None:
         "permissionRules",
         "mcpServers",
         "agentSessions",
+        "workflowSnapshots",
         "executionBudget",
     }
 

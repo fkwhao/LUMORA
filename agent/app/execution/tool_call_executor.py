@@ -3,7 +3,7 @@ import hashlib
 import json
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable
+from collections.abc import AsyncIterator, Awaitable, Mapping
 from dataclasses import replace
 from typing import Any, Literal, TypeVar
 
@@ -591,6 +591,8 @@ class ToolCallExecutor:
                     "attempt": attempt,
                     "maxAttempts": self._retry_policy.max_attempts,
                     "toolExecutionState": "started",
+                    "effectId": effect_id,
+                    "idempotencyKey": effect_id,
                 },
                 model=model,
             ), ""
@@ -712,13 +714,17 @@ class ToolCallExecutor:
             duration_ms = int(result.metadata.get("durationMs") or 0)
             raw_exit_code = result.metadata.get("exitCode")
             exit_code = raw_exit_code if isinstance(raw_exit_code, int) else None
-            result_text = json.dumps(
-                {
-                    "ok": event_type == "tool_completed",
-                    "content": result.content,
-                },
-                ensure_ascii=False,
+            result_payload: dict[str, Any] = {
+                "ok": event_type == "tool_completed",
+                "content": result.content,
+            }
+            model_metadata = _model_visible_tool_metadata(
+                call.name,
+                result.metadata,
             )
+            if model_metadata:
+                result_payload["metadata"] = model_metadata
+            result_text = json.dumps(result_payload, ensure_ascii=False)
             yield RunEvent(
                 type=event_type,
                 item_id=item_id,
@@ -732,6 +738,8 @@ class ToolCallExecutor:
                 metadata={
                     **permission_metadata,
                     **dict(result.metadata),
+                    "effectId": effect_id,
+                    "idempotencyKey": effect_id,
                     "attempt": attempt,
                     "maxAttempts": self._retry_policy.max_attempts,
                     "retryable": bool(result.metadata.get("retryable", False)),
@@ -898,6 +906,45 @@ def _tool_call_signature(tool_name: str, arguments: dict[str, Any]) -> str:
         separators=(",", ":"),
     )
     return f"{tool_name.casefold()}:{normalized}"
+
+
+def _model_visible_tool_metadata(
+    tool_name: str,
+    metadata: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Expose only metadata needed for a safe follow-up tool call."""
+    allowed_by_tool = {
+        "read_file": (
+            "path",
+            "observationId",
+            "resourceVersion",
+        ),
+        "search_in_file": (
+            "path",
+            "observationId",
+            "resourceVersion",
+        ),
+        "apply_patch": (
+            "path",
+            "observationId",
+            "resourceVersion",
+        ),
+        "write_file": (
+            "path",
+            "writeResolution",
+            "mergeApplied",
+            "baseObservationId",
+            "observationId",
+            "baseVersion",
+            "resourceVersion",
+        ),
+    }
+    allowed = allowed_by_tool.get(tool_name, ())
+    return {
+        key: metadata[key]
+        for key in allowed
+        if key in metadata and metadata[key] is not None
+    }
 
 
 def _tool_call_digest(signature: str) -> str:

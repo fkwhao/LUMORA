@@ -262,3 +262,12 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 030-durable-agent-workflow
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V30__durable_agent_workflow.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

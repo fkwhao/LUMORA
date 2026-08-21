@@ -127,8 +127,9 @@ Agent 名称、职责和数量由 Supervisor 根据当前任务动态产生。`d
 也能在深度上限内继续委派。子工具调用沿用主 Run 的审批关联 ID、PermissionPolicy、工作区边界
 和跨 Run 资源锁。默认最多委派 3 层，全局活动子 Agent 数不超过请求工具并发上限；达到上限时
 明确失败而不无限排队。模型在同一回合发出的多个独立委派复用安全工具滚动并发池，存在依赖的
-任务由当前 Agent 在后续回合继续派发。文件、代码、浏览器和电脑控制属于 Capability，不是固定
-Agent 类型。显式 DAG、跨回合子 Session Inbox 和 Agent Checkpoint 属于后续阶段；只有出现
+任务可由当前 Agent 在后续回合继续派发，也可选用耐久显式 DAG 按依赖、deadline、配额和写入范围调度。
+文件、代码、浏览器和电脑控制属于 Capability，不是固定 Agent 类型。跨回合子 Session Inbox、Agent
+Checkpoint、DAG checkpoint 与 Effect 恢复均已由 Core 耐久状态支撑；只有出现
 多实例或跨节点需求后才考虑外部消息队列。
 
 ## 4. 统一运行事件
@@ -342,9 +343,9 @@ Python：Agent 编排状态、模型适配和 Harness Checkpoint
 保存有界的前后片段供右侧 Diff 审阅，同时截断其他参数、输出与错误，并限制单次回答
 的工作记录数量。
 
-当前 Python 尚未实现持久化 Checkpoint，因此进程重启后不能恢复执行中的模型调用；
-后续恢复能力应以 Java Run Snapshot 和 Python Checkpoint 共同实现。本文不把目标能力
-描述为当前已经具备的行为。
+当前已能恢复耐久 Agent Session、DAG 节点和可判定的 Effect 状态，但仍不会在进程重启后
+继续一次执行到一半的模型流或工具调用。已开始但副作用未确认的 Effect 需人工核验，不会被
+自动重放或描述为 exactly-once。
 
 ### 模型供应商配置
 
@@ -484,8 +485,8 @@ Assistant 的直接 `parentMessageId` 当作原始问题。Java 仍以回溯得�
 
 ## 8. 高级本地能力目标设计
 
-> 状态：渐进实现。8.1 的两层上下文压缩和 8.4 的一次性完整能力子 Session 已经落地；
-> 浏览器、插件、可续接 Agent Session 与操作系统沙箱仍是目标设计，不能作为当前能力声明。
+> 状态：渐进实现。8.1 的两层上下文压缩和 8.4 的可续接多 Agent、耐久显式 DAG、共享预算、
+> 安全重试与多写者冲突规划已经落地；浏览器、插件与操作系统沙箱仍是目标设计。
 
 这些能力继续复用现有 `ToolRegistry`、`RunEvent`、权限引擎和 Java 持久化边界。
 不为浏览器、插件或 Worker 另建一套不可审计的执行通道。
@@ -534,7 +535,7 @@ Shell、凭据和浏览器能力仍由 Capability Broker 授权。首版只支�
 
 ### 8.4 多 Agent 调度
 
-Supervisor/Worker 沿用统一 Run。当前已交付一次性完整能力 Session：Worker 获得自包含委派，
+Supervisor/Worker 沿用统一 Run。当前已交付 one-shot 与 continuable 两种完整能力 Session：Worker 获得自包含委派，
 不复制完整父会话，但继承父请求可见工具并复用相同 PermissionPolicy、审批关联、MCP Lease、
 工作区边界和资源锁。Worker 不是固定角色或能力清单，而是按需创建的子 Agent UI/调度身份；其
 实际能力等于父请求允许继承的工具表，默认最大委派深度为 3。
@@ -543,21 +544,14 @@ Supervisor/Worker 沿用统一 Run。当前已交付一次性完整能力 Sessio
 统一取消、活动 Agent 上限和 Token 结算；单个 Worker 失败以工具结果返回，由父 Agent 决定降级。
 
 是否委派由仅在 `delegate_task` 可见时注入的 System Prompt 定性引导，Runtime 只硬限制深度、
-并发和权限。当前调用是前台 one-shot；多个独立调用可同轮并发，但父 Agent 会等结果返回后再进入
-下一模型回合。
+并发和权限。one-shot 调用会在父 Agent 继续前返回结果；continuable Session 通过耐久 FIFO Inbox、
+Checkpoint 和按需 Activation 在后续 Turn 续接。
 
-下一阶段先引入可续接 Agent Session、FIFO Inbox、可重建 Activation、`send/list/interrupt/report`
-控制面和 Core AgentCheckpoint。显式任务 DAG、每 Agent 预算/截止时间属于再下一层增强，不是
-可续接 Session 的前置条件。当前写入已经复用文件资源锁与陈旧覆盖保护；稳定的多写者协作还需要
-显式路径写入租约、基线哈希、补丁合并和冲突重规划。
-
-多 Agent 稳定版依赖 ContextPlanner、Artifact 引用、Run Snapshot 和 Agent Checkpoint，避免
-进程重启后丢失 DAG、租约或已完成结果。
-
-可续接多 Agent 开始实现时，再引入上述任务级 `SessionActor`/Driver：耐久 Child Session 保存
-身份与 Transcript，每个活跃 Session 至多关联一个进程内 Activation，负责 FIFO Inbox 和后代
-协作。Activation 可空闲卸载和冷恢复，不是预创建 Worker Pool；耐久状态仍以 Core 的 Run、事件
-日志和 Checkpoint 为准，常驻对象不能成为暂停、队列或任务完成状态的唯一来源。
+当前已交付可续接 Agent Session、FIFO Inbox、可重建 Activation、`send/list/interrupt/report`
+控制面和 Core AgentCheckpoint。复杂任务可选显式 DAG，共享请求级预算并叠加跨回合工作流配额；
+耐久 checkpoint、Effect 提交状态、跨进程写租约和三方合并使崩溃恢复与多写者冲突可审计。
+Activation 仍是可按需冷恢复的短期执行体，不是预创建 Worker Pool；耐久状态以 Core 的 Run、事件日志
+和 Checkpoint 为准，常驻对象不能成为暂停、队列或任务完成状态的唯一来源。
 
 ### 8.5 Windows OS 权限隔离
 
@@ -594,20 +588,21 @@ AppContainer、Restricted Token 与文件 ACL 的兼容性需要先做 Windows �
 ### 8.6 实施顺序
 
 ```text
-ContextPlanner 与自动压缩
-  → 浏览器只读/交互工具
-  → 完整能力多 Agent（已交付一次性 Session）
-  → 可续接 Agent Session / Inbox / Activation / Checkpoint
-  → 可选显式 DAG / 多 Agent 预算与冲突规划
+已交付：ContextPlanner 与自动压缩
+  → 完整能力多 Agent（one-shot + continuable）
+  → 可续接 Agent Session / Inbox / Activation / Checkpoint（已交付）
+  → 可选显式 DAG / 多 Agent 预算与冲突规划（已交付）
+  → 耐久 DAG / 跨进程写入租约 / 冲突合并（已交付）
+后续：浏览器只读/交互工具
   → Windows Worker 隔离与 Capability Broker
   → 官方插件
-  → 高级多写者租约与冲突合并
   → 第三方插件生态
 ```
 
 当前子 Agent 写入与 Shell 仍运行在主 Python 进程的宿主用户权限下，由应用层权限和工作区检查
-保护，不能称为操作系统沙箱。第三方插件和高级多写者协作仍需进程隔离、资源预算、Checkpoint
-和冲突控制；该顺序用于避免“功能可以运行”先于“功能可以安全恢复和审计”。
+保护，不能称为操作系统沙箱。耐久 DAG、跨进程租约、资源预算、Checkpoint 与冲突控制已经在
+应用层交付；第三方插件仍需进程隔离和 Capability Broker。该顺序用于避免“功能可以运行”先于
+“功能可以安全恢复和审计”。
 
 ## 9. 仓库边界
 

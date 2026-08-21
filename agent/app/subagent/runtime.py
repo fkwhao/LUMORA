@@ -6,6 +6,7 @@ from dataclasses import replace
 from app.dto.request.chat_completion_request import ChatMessageRequest
 from app.execution.budget import BudgetExceeded, ExecutionBudgetLedger
 from app.execution.write_intents import (
+    WriteIntentClaim,
     WriterConflict,
     declared_write_scopes,
 )
@@ -190,6 +191,10 @@ class SubagentRuntime:
                 scope.metadata() for scope in resolved_write_scopes
             ],
         }
+        if context.workflow_id:
+            identity["workflowId"] = context.workflow_id
+        if context.workflow_node_id:
+            identity["workflowNodeId"] = context.workflow_node_id
         try:
             reserved_agent = await self._reserve_agent()
         except BudgetExceeded as error:
@@ -244,12 +249,18 @@ class SubagentRuntime:
         forwarded_events = 0
         child_sequence = 0
         write_claim = None
+        lease_renewal_task: asyncio.Task[None] | None = None
         try:
             write_claim = self._source_registry.write_intents.acquire(
-                session_id,
+                context.write_owner_id or session_id,
                 resolved_write_scopes,
                 owner_label=description,
             )
+            if write_claim is not None:
+                identity["writeLease"] = write_claim.metadata()
+                lease_renewal_task = asyncio.create_task(
+                    self._renew_write_claim(write_claim)
+                )
             await self._emit(context, RunEvent(
                 type="agent_started",
                 item_id=agent_id,
@@ -265,6 +276,7 @@ class SubagentRuntime:
                 session_id=session_id,
                 agent_id=agent_id,
                 delegation_depth=delegation_depth,
+                write_owner_id=context.write_owner_id or session_id,
                 emit_event=None,
             )
             messages = [ChatMessageRequest(role="user", content=prompt)]
@@ -288,6 +300,8 @@ class SubagentRuntime:
                 ),
             )
             async for event in stream:
+                if lease_renewal_task is not None and lease_renewal_task.done():
+                    lease_renewal_task.result()
                 child_sequence += 1
                 if event.type == "text_reset":
                     answer_parts.clear()
@@ -410,6 +424,9 @@ class SubagentRuntime:
                 },
             )
         finally:
+            if lease_renewal_task is not None:
+                lease_renewal_task.cancel()
+                await asyncio.gather(lease_renewal_task, return_exceptions=True)
             self._source_registry.write_intents.release(write_claim)
             await self._release_agent()
 
@@ -474,6 +491,16 @@ class SubagentRuntime:
             return
         async with self._active_agents_lock:
             self._active_agents = max(0, self._active_agents - 1)
+
+    async def _renew_write_claim(self, claim: WriteIntentClaim) -> None:
+        while True:
+            await asyncio.sleep(
+                self._source_registry.write_intents.renew_interval_seconds
+            )
+            await asyncio.to_thread(
+                self._source_registry.write_intents.renew,
+                claim,
+            )
 
     @staticmethod
     def _wrap_child_event(

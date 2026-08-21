@@ -334,6 +334,11 @@ class PromptContextRequest(BaseModel):
         alias="agentSessions",
         max_length=200,
     )
+    workflow_snapshots: list[dict[str, object]] = Field(
+        default_factory=list,
+        alias="workflowSnapshots",
+        max_length=100,
+    )
     execution_budget: ExecutionBudgetRequest = Field(
         default_factory=ExecutionBudgetRequest,
         alias="executionBudget",
