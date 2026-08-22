@@ -23,6 +23,10 @@ public interface ConversationService {
 
     void activateBranch(String taskId, String messageId);
 
+    void assertRunMessagesRevertible(String taskId, String runId);
+
+    void revertRunMessages(String taskId, String runId);
+
     /**
      * 保存新的用户消息，并异步流式生成助手回答。
      *

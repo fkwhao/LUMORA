@@ -66,6 +66,7 @@ import type { MessageAttachment } from "./attachment-contract";
 
 export interface ChatMessage {
   messageId?: string;
+  runId?: string;
   /** Renderer-only identity kept stable while an optimistic message is persisted. */
   runtimeId?: string;
   sequence?: number;
@@ -270,6 +271,44 @@ export interface ConversationRunEvent {
   occurredAt: string;
 }
 
+export type RunChangeSetStatus =
+  | "TRACKING"
+  | "COLLIDED"
+  | "CAPTURED"
+  | "REVERTED"
+  | "UNAVAILABLE";
+
+export type ConversationFileChangeStatus =
+  | "ADDED"
+  | "MODIFIED"
+  | "DELETED"
+  | "RENAMED"
+  | "COPIED";
+
+export interface ConversationFileChange {
+  path: string;
+  previousPath: string;
+  status: ConversationFileChangeStatus;
+  additions: number;
+  deletions: number;
+  binary: boolean;
+  patch: string;
+  patchTruncated: boolean;
+}
+
+export interface ConversationRunChanges {
+  runId: string;
+  status: RunChangeSetStatus;
+  repositoryRoot: string;
+  reason: string;
+  additions: number;
+  deletions: number;
+  revertible: boolean;
+  files: ConversationFileChange[];
+  capturedAt?: string;
+  revertedAt?: string;
+}
+
 export type ConversationInputTarget = "NEXT_TURN" | "NEXT_STEP";
 export type ConversationInputStatus =
   | "PENDING"
@@ -371,6 +410,8 @@ export interface LumoraModelApi {
   pauseRun(taskId: string, runId: string): Promise<ConversationRunSnapshot>;
   resumeRun(taskId: string, runId: string): Promise<ConversationRunSnapshot>;
   cancelRun(taskId: string, runId: string): Promise<ConversationRunSnapshot>;
+  getRunChanges(taskId: string, runId: string): Promise<ConversationRunChanges>;
+  revertRun(taskId: string, runId: string): Promise<ConversationRunChanges>;
   subscribeRun(
     taskId: string,
     runId: string,

@@ -1281,6 +1281,8 @@ function createModelApi(): LumoraModelApi {
     pauseRun: vi.fn(),
     resumeRun: vi.fn(),
     cancelRun: vi.fn(),
+    getRunChanges: vi.fn(),
+    revertRun: vi.fn(),
     subscribeRun: vi.fn(() => () => undefined),
     streamMessage: vi.fn(() => () => undefined),
     regenerateMessage: vi.fn(() => () => undefined),

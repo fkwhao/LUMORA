@@ -55,6 +55,7 @@ import { useStore } from "zustand";
 
 import type {
   ChatMessage,
+  ConversationRunChanges,
   LumoraModelApi,
   ModelSettings,
   PermissionMode,
@@ -81,6 +82,7 @@ import { ApprovalDock } from "../components/ApprovalDock";
 import { ToolApprovalDialog } from "../components/ToolApprovalDialog";
 import { AgentRunSummary } from "../components/AgentRunSummary";
 import { DiffReviewPane, type FileChange } from "../components/DiffReviewPane";
+import { RunChangesCard } from "../components/RunChangesCard";
 import { ConversationUsagePane } from "../components/ConversationUsagePane";
 import {
   SubagentSessionPane,
@@ -122,15 +124,20 @@ interface TaskPageProps {
 }
 
 interface TaskMessageRenderContextValue {
+  activeRunId?: string;
   chatStartedAt?: number;
   chatWasStopped: boolean;
   displayMessages: ChatMessage[];
   isChatting: boolean;
   isCompacting: boolean;
   lastChatDurationMs?: number;
+  loadRunChanges(runId: string): Promise<ConversationRunChanges>;
   onOpenArtifact(artifactId: string): void;
   onOpenAgent(agentId: string): void;
-  onReviewChange(item: WorkLogItem): void;
+  onReviewChange(item?: WorkLogItem, runId?: string): void;
+  onReviewRun(runId: string, filePath?: string): void;
+  onRevertRun(runId: string): Promise<void>;
+  revertingRunId?: string;
   taskEvents: TaskEvent[];
 }
 
@@ -146,6 +153,7 @@ const TaskMessageRenderContext = createContext<
 
 const TASK_THREAD_COMPONENTS = {
   AssistantMessageBefore: TaskAssistantMessageRunSummary,
+  AssistantMessageAfter: TaskAssistantMessageChanges,
   AssistantIndicator: TaskAssistantProcessingIndicator,
 };
 
@@ -200,6 +208,11 @@ export const TaskPage = memo(function TaskPage({
     loadContextPaneWidth,
   );
   const [selectedChangeId, setSelectedChangeId] = useState<string>();
+  const [reviewRunId, setReviewRunId] = useState<string>();
+  const [runChanges, setRunChanges] = useState<ConversationRunChanges>();
+  const [changesLoading, setChangesLoading] = useState(false);
+  const [changesError, setChangesError] = useState<string>();
+  const [revertingRunId, setRevertingRunId] = useState<string>();
   const [modelSettings, setModelSettings] = useState<ModelSettings>();
   const [selectedModel, setSelectedModel] = useState("");
   const [reasoningEffort, setReasoningEffort] =
@@ -291,16 +304,89 @@ export const TaskPage = memo(function TaskPage({
   const openContextTab = useCallback(() => {
     dispatchRightSidebar({ type: "open", tabId: "context" });
   }, []);
-  const openChangeReview = useCallback((item: WorkLogItem) => {
-    setSelectedChangeId(item.itemId);
+  const openChangeReview = useCallback((
+    item?: WorkLogItem,
+    runId?: string,
+    filePath?: string,
+  ) => {
+    const targetRunId = runId ?? activeRun?.runId;
+    const requestedPath = filePath ?? stringValue(item?.arguments?.path);
+    setSelectedChangeId(item?.itemId);
+    setReviewRunId(targetRunId);
+    setRunChanges(undefined);
+    setChangesError(undefined);
     dispatchRightSidebar({ type: "open", tabId: "review" });
-  }, []);
+    if (!targetRunId || !task?.taskId || !modelApi) return;
+    setChangesLoading(true);
+    void modelApi.getRunChanges(task.taskId, targetRunId)
+      .then((result) => {
+        setRunChanges(result);
+        const selected = result.files.find((file) =>
+          requestedPath && (
+            file.path === requestedPath
+            || file.path.replaceAll("\\", "/").endsWith(
+              requestedPath.replaceAll("\\", "/"),
+            )
+          ));
+        setSelectedChangeId(
+          selected
+            ? `${result.runId}:${selected.path}`
+            : undefined,
+        );
+      })
+      .catch((error: unknown) => {
+        setChangesError(
+          error instanceof Error ? error.message : "读取 Git 变更失败",
+        );
+      })
+      .finally(() => setChangesLoading(false));
+  }, [activeRun?.runId, modelApi, task?.taskId]);
+  const loadRunChanges = useCallback(async (runId: string) => {
+    if (!task?.taskId || !modelApi) {
+      throw new Error("当前任务无法读取 Git 变更");
+    }
+    return modelApi.getRunChanges(task.taskId, runId);
+  }, [modelApi, task?.taskId]);
+  const reviewRun = useCallback((runId: string, filePath?: string) => {
+    openChangeReview(undefined, runId, filePath);
+  }, [openChangeReview]);
   const openAgentSession = useCallback((agentId: string) => {
     dispatchRightSidebar({ type: "open", tabId: `agent:${agentId}` });
   }, []);
 
+  const revertRun = useCallback(async (runId: string) => {
+    const taskId = task?.taskId;
+    if (!taskId || !modelApi) {
+      return;
+    }
+    if (!globalThis.confirm(
+      "撤销会把工作区恢复到本轮执行前，并从当前对话分支隐藏本轮消息。是否继续？",
+    )) return;
+    setRevertingRunId(runId);
+    setChangesError(undefined);
+    try {
+      const reverted = await modelApi.revertRun(taskId, runId);
+      if (reviewRunId === runId) setRunChanges(reverted);
+      await store.getState().openTask(taskId);
+      notify("本轮文件与对话已撤销", "success");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "撤销本轮失败";
+      setChangesError(message);
+      notify(message, "info");
+    } finally {
+      setRevertingRunId(undefined);
+    }
+  }, [modelApi, notify, reviewRunId, store, task?.taskId]);
+  const revertReviewedRun = useCallback(async () => {
+    if (!reviewRunId || !runChanges?.revertible) return;
+    await revertRun(reviewRunId);
+  }, [revertRun, reviewRunId, runChanges?.revertible]);
+
   useEffect(() => {
     dispatchRightSidebar({ type: "reset" });
+    setReviewRunId(undefined);
+    setRunChanges(undefined);
+    setChangesError(undefined);
   }, [task?.taskId]);
 
   useEffect(() => {
@@ -877,7 +963,20 @@ export const TaskPage = memo(function TaskPage({
     requestAnimationFrame(() => followUpInputRef.current?.focus());
   }, [runtime]);
 
-  const fileChanges = fileChangesFromMessages(displayMessages);
+  const fileChanges = runChanges
+    ? runChanges.files.map((change) => ({
+        changeId: `${runChanges.runId}:${change.path}`,
+        path: change.path,
+        previousPath: change.previousPath || undefined,
+        status: change.status,
+        additions: change.additions,
+        deletions: change.deletions,
+        binary: change.binary,
+        patch: change.patch,
+        patchTruncated: change.patchTruncated,
+        previewAvailable: !change.binary && Boolean(change.patch),
+      }))
+    : fileChangesFromMessages(displayMessages);
   const questionEntries = displayMessages.flatMap((message, messageIndex) => {
     if (message.role !== "user") {
       return [];
@@ -1262,27 +1361,37 @@ export const TaskPage = memo(function TaskPage({
 
   const messageRenderContext = useMemo<TaskMessageRenderContextValue>(
     () => ({
+      activeRunId: activeRun?.runId,
       chatStartedAt,
       chatWasStopped,
       displayMessages,
       isChatting,
       isCompacting,
       lastChatDurationMs,
+      loadRunChanges,
       onOpenArtifact: openArtifact,
       onOpenAgent: openAgentSession,
       onReviewChange: openChangeReview,
+      onReviewRun: reviewRun,
+      onRevertRun: revertRun,
+      revertingRunId,
       taskEvents,
     }),
     [
+      activeRun?.runId,
       chatStartedAt,
       chatWasStopped,
       displayMessages,
       isChatting,
       isCompacting,
       lastChatDurationMs,
+      loadRunChanges,
       openArtifact,
       openAgentSession,
       openChangeReview,
+      reviewRun,
+      revertRun,
+      revertingRunId,
       taskEvents,
     ],
   );
@@ -1943,8 +2052,13 @@ export const TaskPage = memo(function TaskPage({
           {rightSidebar.activeTabId === "review" && (
             <DiffReviewPane
               changes={fileChanges}
+              runChanges={runChanges}
               selectedChangeId={selectedChangeId}
+              loading={changesLoading}
+              reverting={revertingRunId === reviewRunId}
+              error={changesError}
               onSelectChange={setSelectedChangeId}
+              onRevert={revertReviewedRun}
             />
           )}
           {activeAgentId && (
@@ -1978,6 +2092,10 @@ function TaskAssistantMessageRunSummary() {
   const originalMessage = context.displayMessages[index];
 
   if (!originalMessage) return null;
+  const runId = originalMessage.runId
+    ?? (index === context.displayMessages.length - 1
+      ? context.activeRunId
+      : undefined);
 
   return (
     <AgentRunSummary
@@ -2003,9 +2121,64 @@ function TaskAssistantMessageRunSummary() {
         context.chatWasStopped &&
         index === context.displayMessages.length - 1
       }
-      onReviewChange={context.onReviewChange}
+      onReviewChange={(item) => context.onReviewChange(item, runId)}
       onOpenArtifact={context.onOpenArtifact}
       onOpenAgent={context.onOpenAgent}
+    />
+  );
+}
+
+function TaskAssistantMessageChanges() {
+  const context = useTaskMessageRenderContext();
+  const index = useAuiState((state) => state.message.index);
+  const originalMessage = context.displayMessages[index];
+  const [changes, setChanges] = useState<ConversationRunChanges>();
+  const running = Boolean(originalMessage) && (
+    (context.isChatting || context.isCompacting)
+    && index === context.displayMessages.length - 1
+  );
+  const runId = originalMessage?.runId
+    ?? (index === context.displayMessages.length - 1
+      ? context.activeRunId
+      : undefined);
+
+  useEffect(() => {
+    setChanges(undefined);
+    if (!runId || running) return;
+    let cancelled = false;
+    let retryTimer: number | undefined;
+
+    const readChanges = async (attempt: number) => {
+      try {
+        const result = await context.loadRunChanges(runId);
+        if (cancelled) return;
+        if (result.status === "TRACKING" && attempt < 4) {
+          retryTimer = window.setTimeout(() => {
+            void readChanges(attempt + 1);
+          }, 500);
+          return;
+        }
+        setChanges(result);
+      } catch {
+        if (!cancelled) setChanges(undefined);
+      }
+    };
+
+    void readChanges(0);
+    return () => {
+      cancelled = true;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+    };
+  }, [context.loadRunChanges, runId, running]);
+
+  if (!runId || !changes || changes.files.length === 0) return null;
+
+  return (
+    <RunChangesCard
+      changes={changes}
+      reverting={context.revertingRunId === runId}
+      onReview={(filePath) => context.onReviewRun(runId, filePath)}
+      onRevert={() => context.onRevertRun(runId)}
     />
   );
 }
@@ -2075,11 +2248,20 @@ function fileChangeFromWorkLog(item: WorkLogItem): FileChange | undefined {
   return {
     changeId: item.itemId,
     path,
+    status: item.toolName === "write_file" ? "ADDED" : "MODIFIED",
+    additions: lineCount(newText),
+    deletions: lineCount(oldText),
+    binary: false,
+    patch: "",
     oldText,
     newText,
     previewAvailable:
       newText !== unavailableMarker && oldText !== unavailableMarker,
   };
+}
+
+function lineCount(value: string): number {
+  return value ? value.split(/\r?\n/).length : 0;
 }
 
 function stringValue(value: unknown): string {

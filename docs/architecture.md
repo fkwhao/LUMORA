@@ -36,6 +36,8 @@ Python Agent Runtime
 - 使用 MyBatis-Plus 管理基础数据库访问，复杂查询再使用明确 SQL。
 - SQLite 保存任务、会话、消息、计划步骤、审批、模型/MCP 配置、Memory、上下文摘要、Artifact 索引和详细 TokenUsage 等本地状态。
 - Java 是任务、审批、工具调用和审计状态的最终权威。
+- Java 也负责 Run 级 Git ChangeSet：在不修改用户真实 index 的前提下保存工作区前后 tree，
+  生成真实 Diff，并在满足后续未改动等安全条件时撤回单个 Run。
 - 对 Electron 和 Python 分别使用独立 DTO，不暴露数据库实体。
 
 ### Python Agent Runtime
@@ -331,7 +333,7 @@ Provider 只负责供应商请求和响应适配；最多二十轮的模型—�
 
 ```text
 Electron：临时界面状态和本机显示偏好
-Java：任务、会话、消息、审批、工具调用、审计和业务投影
+Java：任务、会话、消息、审批、Git Run ChangeSet、工具调用、审计和业务投影
 Python：Agent 编排状态、模型适配和 Harness Checkpoint
 ```
 
@@ -346,6 +348,32 @@ Python：Agent 编排状态、模型适配和 Harness Checkpoint
 当前已能恢复耐久 Agent Session、DAG 节点和可判定的 Effect 状态，但仍不会在进程重启后
 继续一次执行到一半的模型流或工具调用。已开始但副作用未确认的 Effect 需人工核验，不会被
 自动重放或描述为 exactly-once。
+
+### Run 级 Git 变更与撤回
+
+Phase A/B 已实现 Run 级 Git 文件快照、真实 Diff 和整轮撤回。Run 获得执行槽位时，Core
+使用临时 `GIT_INDEX_FILE` 从真实 index tree 建立 `before`；Run 完成、失败或取消时建立
+`after`。暂停与继续保持同一个基线。初始未提交状态属于 `before`，因此撤回会回到 Agent
+开始执行之前，而不是回到 `HEAD`。
+
+Desktop 通过白名单 IPC 调用以下 Core API。每轮有文件改动的 Assistant 回答会在正文末尾
+追加变更摘要卡，展示文件总数、增删行统计、默认 3 个文件以及展开/收起、整轮撤销和审核入口；
+审核或点击单个文件会打开任务右侧 Changes 面板，展示完整文件列表、行级 unified Diff、统计、
+不可撤回原因和撤回入口：
+
+```text
+GET  /api/v1/tasks/{taskId}/runs/{runId}/changes
+POST /api/v1/tasks/{taskId}/runs/{runId}/revert
+```
+
+自动撤回要求 Run 已结束且仍是最新可见回答，当前工作区 tree、`HEAD` 和真实 index 必须与
+Run 的 `after` 一致，Run 内也不能修改过 `HEAD` 或 index。Core 先恢复并验证文件，再在事务中
+隐藏该 `run_id` 所属的活动消息。非 Git 工作区照常执行，但状态为 `UNAVAILABLE`。
+
+本阶段没有 worktree。若同一 Git 仓库出现并发 Run，所有相关 Run 的追踪都会标为
+`COLLIDED` 并禁用撤回，避免跨任务错误归因。后续 Phase C 才会在第二个同仓库写入 Run
+到达时按需创建临时 worktree，单任务仍直接使用主工作区。完整状态机、安全条件和后续阶段见
+[Run 级 Git 变更与撤回设计](git-run-changes-design.md)。
 
 ### 模型供应商配置
 

@@ -138,6 +138,19 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     @Override
+    public void assertRunMessagesRevertible(String taskId, String runId) {
+        if (activeRuns.containsKey(taskId)) {
+            throw new IllegalStateException("任务运行期间不能撤回历史执行");
+        }
+        persistenceService.assertRunMessagesRevertible(taskId, runId);
+    }
+
+    @Override
+    public void revertRunMessages(String taskId, String runId) {
+        persistenceService.revertRunMessages(taskId, runId);
+    }
+
+    @Override
     public void streamMessage(
             String taskId,
             String content,
@@ -161,16 +174,13 @@ public class ConversationServiceImpl implements ConversationService {
                 reasoningEffort,
                 workspacePath,
                 permissionMode,
-                () -> normalizedAttachments.isEmpty()
-                        ? persistenceService.prepareNewMessage(
-                                taskId, normalizedContent, workspacePath
-                        )
-                        : persistenceService.prepareNewMessage(
-                                taskId,
-                                normalizedContent,
-                                normalizedAttachments,
-                                workspacePath
-                        ),
+                () -> persistenceService.prepareNewMessage(
+                        taskId,
+                        normalizedContent,
+                        normalizedAttachments,
+                        workspacePath,
+                        logicalRunId(correlationId)
+                ),
                 eventConsumer,
                 completionCallback,
                 errorCallback
@@ -203,20 +213,14 @@ public class ConversationServiceImpl implements ConversationService {
                 reasoningEffort,
                 workspacePath,
                 permissionMode,
-                () -> normalizedAttachments.isEmpty()
-                        ? persistenceService.prepareRegeneration(
-                                taskId,
-                                normalizedMessageId,
-                                normalizedContent,
-                                workspacePath
-                        )
-                        : persistenceService.prepareRegeneration(
-                                taskId,
-                                normalizedMessageId,
-                                normalizedContent,
-                                normalizedAttachments,
-                                workspacePath
-                        ),
+                () -> persistenceService.prepareRegeneration(
+                        taskId,
+                        normalizedMessageId,
+                        normalizedContent,
+                        normalizedAttachments,
+                        workspacePath,
+                        logicalRunId(correlationId)
+                ),
                 eventConsumer,
                 completionCallback,
                 errorCallback
@@ -243,7 +247,7 @@ public class ConversationServiceImpl implements ConversationService {
                 workspacePath,
                 permissionMode,
                 () -> persistenceService.prepareContinuation(
-                        taskId, workspacePath
+                        taskId, workspacePath, logicalRunId(correlationId)
                 ),
                 eventConsumer,
                 completionCallback,
@@ -703,6 +707,13 @@ public class ConversationServiceImpl implements ConversationService {
     private static boolean isTerminalEvent(ChatStreamEvent event) {
         return event.getType() == ChatStreamEventType.COMPLETED
                 || event.getType() == ChatStreamEventType.PAUSED;
+    }
+
+    private static String logicalRunId(String runtimeTurnId) {
+        int separator = runtimeTurnId.indexOf(':');
+        return separator < 0
+                ? runtimeTurnId
+                : runtimeTurnId.substring(0, separator);
     }
 
     private static int number(Object value) {

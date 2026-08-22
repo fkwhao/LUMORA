@@ -7,6 +7,7 @@ import type {
   ChatStreamEvent,
   ConversationRunEvent,
   ConversationRunSnapshot,
+  ConversationRunChanges,
   ConversationInput,
   CreateConversationInput,
   UpdateConversationInput,
@@ -284,6 +285,25 @@ export class RestModelGateway implements ModelGateway {
 
   cancelRun(taskId: string, runId: string): Promise<ConversationRunSnapshot> {
     return this.runAction(taskId, runId, "cancel");
+  }
+
+  getRunChanges(
+    taskId: string,
+    runId: string,
+  ): Promise<ConversationRunChanges> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/runs/${encodeURIComponent(runId)}/changes`,
+      {},
+      30_000,
+    );
+  }
+
+  revertRun(taskId: string, runId: string): Promise<ConversationRunChanges> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/runs/${encodeURIComponent(runId)}/revert`,
+      { method: "POST" },
+      60_000,
+    );
   }
 
   subscribeRun(

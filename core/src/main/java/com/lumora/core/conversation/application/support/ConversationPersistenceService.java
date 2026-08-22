@@ -61,6 +61,45 @@ public class ConversationPersistenceService {
         );
     }
 
+    public synchronized void assertRunMessagesRevertible(
+            String taskId,
+            String runId
+    ) {
+        taskService.getTask(taskId);
+        Conversation conversation = findConversation(taskId);
+        if (conversation == null) return;
+        assertLatestVisibleRun(
+                loadAllMessages(conversation.getConversationId()), runId
+        );
+    }
+
+    public synchronized void revertRunMessages(
+            String taskId,
+            String runId
+    ) {
+        transactionTemplate.executeWithoutResult(status -> {
+            taskService.getTask(taskId);
+            Conversation conversation = findConversation(taskId);
+            if (conversation == null) return;
+            List<ConversationMessage> messages = loadAllMessages(
+                    conversation.getConversationId()
+            );
+            assertLatestVisibleRun(messages, runId);
+            boolean changed = false;
+            for (ConversationMessage message : messages) {
+                if (runId.equals(message.getRunId())
+                        && message.isActivePath()) {
+                    message.setActivePath(false);
+                    messageMapper.updateById(message);
+                    changed = true;
+                }
+            }
+            if (changed) {
+                touchConversation(conversation, taskId, clock.instant());
+            }
+        });
+    }
+
     public ConversationRunContext prepareNewMessage(
             String taskId,
             String content
@@ -82,10 +121,22 @@ public class ConversationPersistenceService {
             List<MessageAttachment> attachments,
             String workspacePath
     ) {
+        return prepareNewMessage(
+                taskId, content, attachments, workspacePath, ""
+        );
+    }
+
+    public synchronized ConversationRunContext prepareNewMessage(
+            String taskId,
+            String content,
+            List<MessageAttachment> attachments,
+            String workspacePath,
+            String runId
+    ) {
         // 用户消息和后续模型上下文必须在同一事务内生成，避免消息已落库但上下文不完整。
         ConversationRunContext context = transactionTemplate.execute(
                 status -> prepareNewMessageInTransaction(
-                        taskId, content, attachments, workspacePath
+                        taskId, content, attachments, workspacePath, runId
                 )
         );
         if (context == null) {
@@ -120,6 +171,19 @@ public class ConversationPersistenceService {
             List<MessageAttachment> attachments,
             String workspacePath
     ) {
+        return prepareRegeneration(
+                taskId, messageId, content, attachments, workspacePath, ""
+        );
+    }
+
+    public synchronized ConversationRunContext prepareRegeneration(
+            String taskId,
+            String messageId,
+            String content,
+            List<MessageAttachment> attachments,
+            String workspacePath,
+            String runId
+    ) {
         // 重新生成会删除旧回答，必须和用户消息更新保持原子性。
         ConversationRunContext context = transactionTemplate.execute(
                 status -> prepareRegenerationInTransaction(
@@ -127,7 +191,8 @@ public class ConversationPersistenceService {
                         messageId,
                         content,
                         attachments,
-                        workspacePath
+                        workspacePath,
+                        runId
                 )
         );
         if (context == null) {
@@ -140,9 +205,17 @@ public class ConversationPersistenceService {
             String taskId,
             String workspacePath
     ) {
+        return prepareContinuation(taskId, workspacePath, "");
+    }
+
+    public synchronized ConversationRunContext prepareContinuation(
+            String taskId,
+            String workspacePath,
+            String runId
+    ) {
         ConversationRunContext context = transactionTemplate.execute(
                 status -> prepareContinuationInTransaction(
-                        taskId, workspacePath
+                        taskId, workspacePath, runId
                 )
         );
         if (context == null) {
@@ -305,7 +378,8 @@ public class ConversationPersistenceService {
             String taskId,
             String content,
             List<MessageAttachment> attachments,
-            String workspacePath
+            String workspacePath,
+            String runId
     ) {
         // 1. 确认任务存在，并取得任务唯一会话。
         taskService.getTask(taskId);
@@ -327,17 +401,20 @@ public class ConversationPersistenceService {
                 attachments,
                 now
         );
+        userMessage.setRunId(runId);
         messageMapper.insert(userMessage);
         touchConversation(conversation, taskId, now);
 
         // 3. 只保留模型上下文上限内的最近消息，防止请求无限膨胀。
-        return createRunContext(
+        ConversationRunContext context = createRunContext(
                 taskId,
                 conversation.getConversationId(),
                 history,
                 userMessage,
                 workspacePath
         );
+        context.assignRunId(runId);
+        return context;
     }
 
     /**
@@ -348,7 +425,8 @@ public class ConversationPersistenceService {
             String messageId,
             String content,
             List<MessageAttachment> attachments,
-            String workspacePath
+            String workspacePath,
+            String runId
     ) {
         // 1. 找到并校验允许编辑的最后一条用户消息。
         taskService.getTask(taskId);
@@ -379,6 +457,7 @@ public class ConversationPersistenceService {
                     attachments,
                     now
             );
+            currentUser.setRunId(runId);
             messageMapper.insert(currentUser);
         }
         touchConversation(conversation, taskId, now);
@@ -388,18 +467,21 @@ public class ConversationPersistenceService {
                 .filter(message -> message.getMessageDepth()
                         < target.getMessageDepth())
                 .toList();
-        return createRunContext(
+        ConversationRunContext context = createRunContext(
                 taskId,
                 conversation.getConversationId(),
                 precedingMessages,
                 currentUser,
                 workspacePath
         );
+        context.assignRunId(runId);
+        return context;
     }
 
     private ConversationRunContext prepareContinuationInTransaction(
             String taskId,
-            String workspacePath
+            String workspacePath,
+            String runId
     ) {
         taskService.getTask(taskId);
         Conversation conversation = requireConversation(taskId);
@@ -443,7 +525,7 @@ public class ConversationPersistenceService {
         String projectScopeId = memoryService.resolveProjectScopeId(
                 workspacePath
         );
-        return new ConversationRunContext(
+        ConversationRunContext context = new ConversationRunContext(
                 taskId,
                 conversation.getConversationId(),
                 modelMessages,
@@ -463,6 +545,8 @@ public class ConversationPersistenceService {
                 parent.getMessageId(),
                 System.nanoTime()
         );
+        context.assignRunId(runId);
+        return context;
     }
 
     /**
@@ -502,6 +586,7 @@ public class ConversationPersistenceService {
                 durationMs,
                 now
         );
+        assistantMessage.setRunId(context.getRunId());
         assistantMessage.setWorkLogJson(serializeWorkLog(
                 accumulator,
                 protocolMarkerId
@@ -548,6 +633,7 @@ public class ConversationPersistenceService {
                 List.of(),
                 now
         );
+        message.setRunId(context.getRunId());
         messageMapper.insert(message);
         context.advanceAssistantParentMessageId(message.getMessageId());
         Conversation conversation = conversationMapper.selectById(
@@ -610,6 +696,7 @@ public class ConversationPersistenceService {
                 parent.getMessageId(),
                 System.nanoTime()
         );
+        context.assignRunId(logicalRunId(runtimeTurnId));
         insertAssistant(context, accumulator, protocolMarkerId);
     }
 
@@ -649,6 +736,7 @@ public class ConversationPersistenceService {
                 durationMs,
                 now
         );
+        usageRecord.setRunId(context.getRunId());
         ConversationMessage parent = messageMapper.selectById(
                 context.getCurrentUserMessageId()
         );
@@ -687,6 +775,7 @@ public class ConversationPersistenceService {
                 0L,
                 now
         );
+        usageRecord.setRunId(context.getRunId());
         ConversationMessage parent = messageMapper.selectById(
                 context.getCurrentUserMessageId()
         );
@@ -872,6 +961,38 @@ public class ConversationPersistenceService {
             throw new IllegalArgumentException("只能编辑最后一条用户消息");
         }
         return target;
+    }
+
+    private void assertLatestVisibleRun(
+            List<ConversationMessage> messages,
+            String runId
+    ) {
+        int latestOwnedSequence = messages.stream()
+                .filter(message -> runId.equals(message.getRunId()))
+                .filter(ConversationMessage::isActivePath)
+                .mapToInt(ConversationMessage::getSequence)
+                .max()
+                .orElse(-1);
+        if (latestOwnedSequence < 0) return;
+        boolean laterVisibleMessage = messages.stream().anyMatch(
+                message -> message.isActivePath()
+                        && !message.isUsageRecordOnly()
+                        && message.getSequence() > latestOwnedSequence
+                        && !runId.equals(message.getRunId())
+        );
+        if (laterVisibleMessage) {
+            throw new IllegalStateException(
+                    "本轮之后已有新的对话，不能撤回较早的执行"
+            );
+        }
+    }
+
+    private static String logicalRunId(String runtimeTurnId) {
+        if (runtimeTurnId == null || runtimeTurnId.isBlank()) return "";
+        int separator = runtimeTurnId.indexOf(':');
+        return separator < 0
+                ? runtimeTurnId.trim()
+                : runtimeTurnId.substring(0, separator).trim();
     }
 
     private ConversationMessage newUserMessage(

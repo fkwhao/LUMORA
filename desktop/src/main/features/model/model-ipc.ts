@@ -45,6 +45,8 @@ export const modelIpcChannels = {
   pauseRun: "model:pause-run",
   resumeRun: "model:resume-run",
   cancelRun: "model:cancel-run",
+  getRunChanges: "model:get-run-changes",
+  revertRun: "model:revert-run",
   listInputs: "model:list-inputs",
   createInput: "model:create-input",
   updateInput: "model:update-input",
@@ -193,6 +195,20 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
       requireText(runId, "运行 ID"),
     ),
   );
+  ipcMain.handle(
+    modelIpcChannels.getRunChanges,
+    (_event, taskId: string, runId: string) => gateway.getRunChanges(
+      requireText(taskId, "任务 ID"),
+      requireText(runId, "运行 ID"),
+    ),
+  );
+  ipcMain.handle(
+    modelIpcChannels.revertRun,
+    (_event, taskId: string, runId: string) => gateway.revertRun(
+      requireText(taskId, "任务 ID"),
+      requireText(runId, "运行 ID"),
+    ),
+  );
   ipcMain.on(modelIpcChannels.streamStart, (event, input: StreamStartInput) => {
     const taskId = requireText(input?.taskId, "任务 ID");
     const content = input?.runId
@@ -316,6 +332,8 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
     ipcMain.removeHandler(modelIpcChannels.pauseRun);
     ipcMain.removeHandler(modelIpcChannels.resumeRun);
     ipcMain.removeHandler(modelIpcChannels.cancelRun);
+    ipcMain.removeHandler(modelIpcChannels.getRunChanges);
+    ipcMain.removeHandler(modelIpcChannels.revertRun);
     ipcMain.removeAllListeners(modelIpcChannels.streamStart);
     ipcMain.removeAllListeners(modelIpcChannels.streamCancel);
     for (const cancel of subscriptions.values()) {

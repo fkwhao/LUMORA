@@ -5,6 +5,7 @@ import type {
   ChatStreamEvent,
   ConversationRunEvent,
   ConversationRunSnapshot,
+  ConversationRunChanges,
   ConversationInput,
   CreateConversationInput,
   UpdateConversationInput,
@@ -55,6 +56,8 @@ export interface ModelGateway {
   pauseRun(taskId: string, runId: string): Promise<ConversationRunSnapshot>;
   resumeRun(taskId: string, runId: string): Promise<ConversationRunSnapshot>;
   cancelRun(taskId: string, runId: string): Promise<ConversationRunSnapshot>;
+  getRunChanges(taskId: string, runId: string): Promise<ConversationRunChanges>;
+  revertRun(taskId: string, runId: string): Promise<ConversationRunChanges>;
   subscribeRun(
     taskId: string,
     runId: string,

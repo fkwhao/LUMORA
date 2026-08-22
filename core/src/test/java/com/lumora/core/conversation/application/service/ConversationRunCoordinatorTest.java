@@ -2,8 +2,10 @@ package com.lumora.core.conversation.application.service;
 
 import com.lumora.core.conversation.application.support.ConversationRunEventStreamRegistry;
 import com.lumora.core.conversation.application.support.ConversationRunEventJournal;
+import com.lumora.core.conversation.application.support.GitRunChangeService;
 import com.lumora.core.conversation.application.support.ConversationRunStore;
 import com.lumora.core.conversation.application.support.ConversationInputStore;
+import com.lumora.core.conversation.api.dto.response.ConversationRunChangesResponse;
 import com.lumora.core.conversation.domain.entity.ConversationInput;
 import com.lumora.core.conversation.domain.entity.ConversationRun;
 import com.lumora.core.conversation.domain.model.ChatStreamEvent;
@@ -15,6 +17,7 @@ import com.lumora.core.conversation.domain.model.ConversationInputTarget;
 import com.lumora.core.task.application.service.TaskService;
 import com.lumora.core.task.domain.entity.AgentTask;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -30,6 +33,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -57,6 +61,7 @@ class ConversationRunCoordinatorTest {
                 mock(ConversationRunEventStreamRegistry.class),
                 mock(ConversationRunEventJournal.class),
                 taskService,
+                mock(GitRunChangeService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
                         ZoneOffset.UTC
@@ -91,6 +96,7 @@ class ConversationRunCoordinatorTest {
                 mock(ConversationRunEventStreamRegistry.class),
                 mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
+                mock(GitRunChangeService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
                         ZoneOffset.UTC
@@ -157,6 +163,7 @@ class ConversationRunCoordinatorTest {
                 conversationService, runStore, inputStore, streams,
                 mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
+                mock(GitRunChangeService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
                         ZoneOffset.UTC
@@ -245,6 +252,7 @@ class ConversationRunCoordinatorTest {
                 conversationService, runStore, inputStore, streams,
                 mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
+                mock(GitRunChangeService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
                         ZoneOffset.UTC
@@ -306,6 +314,7 @@ class ConversationRunCoordinatorTest {
                 streams,
                 mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
+                mock(GitRunChangeService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
                         ZoneOffset.UTC
@@ -360,6 +369,7 @@ class ConversationRunCoordinatorTest {
                 mock(ConversationRunEventStreamRegistry.class),
                 mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
+                mock(GitRunChangeService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
                         ZoneOffset.UTC
@@ -422,6 +432,7 @@ class ConversationRunCoordinatorTest {
                 streams,
                 mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
+                mock(GitRunChangeService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
                         ZoneOffset.UTC
@@ -485,6 +496,7 @@ class ConversationRunCoordinatorTest {
                 streams,
                 mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
+                mock(GitRunChangeService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
                         ZoneOffset.UTC
@@ -561,6 +573,7 @@ class ConversationRunCoordinatorTest {
                 streams,
                 mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
+                mock(GitRunChangeService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
                         ZoneOffset.UTC
@@ -575,6 +588,56 @@ class ConversationRunCoordinatorTest {
                 "task-1", "run-legacy:0", List.of(pausing)
         );
         verify(runStore).markRecoveredPaused("run-legacy");
+    }
+
+    @Test
+    void revertsFilesBeforeHidingTheRunMessages() {
+        ConversationService conversationService = mock(
+                ConversationService.class
+        );
+        ConversationRunStore runStore = mock(ConversationRunStore.class);
+        GitRunChangeService gitChanges = mock(GitRunChangeService.class);
+        Map<String, ConversationRun> runs = new LinkedHashMap<>();
+        stubRunStore(runStore, runs);
+        ConversationRun run = new ConversationRun();
+        run.setRunId("run-completed");
+        run.setTaskId("task-1");
+        run.setStatus(ConversationRunStatus.COMPLETED);
+        runs.put(run.getRunId(), run);
+        ConversationRunChangesResponse response =
+                new ConversationRunChangesResponse(
+                        run.getRunId(), "REVERTED", "F:/project/demo", "",
+                        0, 0, false, List.of(), null,
+                        Instant.parse("2026-08-15T00:00:00Z")
+                );
+        when(gitChanges.revert("task-1", run.getRunId()))
+                .thenReturn(response);
+        ConversationRunCoordinator coordinator = new ConversationRunCoordinator(
+                conversationService,
+                runStore,
+                mock(ConversationInputStore.class),
+                mock(ConversationRunEventStreamRegistry.class),
+                mock(ConversationRunEventJournal.class),
+                mock(TaskService.class),
+                gitChanges,
+                Clock.fixed(
+                        Instant.parse("2026-08-15T00:00:00Z"),
+                        ZoneOffset.UTC
+                ),
+                1
+        );
+
+        assertThat(coordinator.revert("task-1", run.getRunId()))
+                .isSameAs(response);
+
+        InOrder order = inOrder(conversationService, gitChanges);
+        order.verify(conversationService).assertRunMessagesRevertible(
+                "task-1", run.getRunId()
+        );
+        order.verify(gitChanges).revert("task-1", run.getRunId());
+        order.verify(conversationService).revertRunMessages(
+                "task-1", run.getRunId()
+        );
     }
 
     private void stubRunStore(

@@ -349,6 +349,42 @@ describe("Java REST model gateway", () => {
     ]);
   });
 
+  it("loads and reverts Git changes owned by a durable run", async () => {
+    const requests: Array<{ method: string; path: string }> = [];
+    const response = {
+      runId: "run-1",
+      status: "CAPTURED",
+      repositoryRoot: "C:/project",
+      reason: "",
+      additions: 2,
+      deletions: 1,
+      revertible: true,
+      files: [],
+    };
+    const baseUrl = await listen(async (request) => {
+      requests.push({
+        method: request.method ?? "",
+        path: request.url ?? "",
+      });
+      return request.method === "POST"
+        ? { ...response, status: "REVERTED", revertible: false }
+        : response;
+    });
+    const gateway = new RestModelGateway({
+      baseUrl,
+      sessionToken: "test-token",
+    });
+
+    expect((await gateway.getRunChanges("task-1", "run-1")).status)
+      .toBe("CAPTURED");
+    expect((await gateway.revertRun("task-1", "run-1")).status)
+      .toBe("REVERTED");
+    expect(requests).toEqual([
+      { method: "GET", path: "/api/v1/tasks/task-1/runs/run-1/changes" },
+      { method: "POST", path: "/api/v1/tasks/task-1/runs/run-1/revert" },
+    ]);
+  });
+
   it("replays durable run events after the requested sequence", async () => {
     let receivedPath = "";
     const server = createServer((request, response) => {

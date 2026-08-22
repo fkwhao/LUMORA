@@ -7,6 +7,7 @@ import com.lumora.core.conversation.domain.model.MessageAttachment;
 public class ConversationMessageResponse {
 
     private final String messageId;
+    private final String runId;
     private final int sequence;
     private final String parentMessageId;
     private final int messageDepth;
@@ -24,6 +25,7 @@ public class ConversationMessageResponse {
 
     public ConversationMessageResponse(
             String messageId,
+            String runId,
             int sequence,
             String parentMessageId,
             int messageDepth,
@@ -40,6 +42,7 @@ public class ConversationMessageResponse {
             Instant createdAt
     ) {
         this.messageId = messageId;
+        this.runId = runId == null ? "" : runId;
         this.sequence = sequence;
         this.parentMessageId = parentMessageId;
         this.messageDepth = messageDepth;
@@ -59,6 +62,8 @@ public class ConversationMessageResponse {
     public String getMessageId() {
         return messageId;
     }
+
+    public String getRunId() { return runId; }
 
     public int getSequence() {
         return sequence;

@@ -78,6 +78,7 @@ export type ThreadGroupPart = MessagePrimitive.GroupedParts.GroupPart;
 export type ThreadComponents = {
   AssistantMessage?: ComponentType | undefined;
   AssistantMessageBefore?: ComponentType | undefined;
+  AssistantMessageAfter?: ComponentType | undefined;
   AssistantIndicator?: ComponentType | undefined;
   Welcome?: ComponentType | undefined;
   ToolFallback?: ToolCallMessagePartComponent | undefined;
@@ -490,6 +491,7 @@ const MessageError: FC = () => {
 export const AssistantMessage: FC = () => {
   const {
     AssistantMessageBefore,
+    AssistantMessageAfter,
     AssistantIndicator,
     ToolFallback: ToolFallbackComponent = ToolFallback,
     ToolGroup,
@@ -586,6 +588,12 @@ export const AssistantMessage: FC = () => {
         </MessagePrimitive.GroupedParts>
         <MessageError />
       </div>
+
+      {AssistantMessageAfter && (
+        <div data-slot="aui_assistant-message-after" className="px-2">
+          <AssistantMessageAfter />
+        </div>
+      )}
 
       <div
         data-slot="aui_assistant-message-footer"

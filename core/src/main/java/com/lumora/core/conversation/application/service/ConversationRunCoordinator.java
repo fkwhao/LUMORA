@@ -4,6 +4,8 @@ import com.lumora.core.conversation.application.support.ConversationRunEventStre
 import com.lumora.core.conversation.application.support.ConversationRunEventJournal;
 import com.lumora.core.conversation.application.support.ConversationRunStore;
 import com.lumora.core.conversation.application.support.ConversationInputStore;
+import com.lumora.core.conversation.application.support.GitRunChangeService;
+import com.lumora.core.conversation.api.dto.response.ConversationRunChangesResponse;
 import com.lumora.core.conversation.domain.entity.ConversationInput;
 import com.lumora.core.conversation.domain.entity.ConversationRun;
 import com.lumora.core.conversation.domain.model.ChatStreamEvent;
@@ -49,6 +51,7 @@ public class ConversationRunCoordinator {
     private final ConversationRunEventStreamRegistry eventStreams;
     private final ConversationRunEventJournal eventJournal;
     private final TaskService taskService;
+    private final GitRunChangeService gitRunChangeService;
     private final Clock clock;
     private final int maxConcurrentRuns;
     private final ArrayDeque<String> queuedRunIds = new ArrayDeque<>();
@@ -62,6 +65,7 @@ public class ConversationRunCoordinator {
             ConversationRunEventStreamRegistry eventStreams,
             ConversationRunEventJournal eventJournal,
             TaskService taskService,
+            GitRunChangeService gitRunChangeService,
             Clock clock,
             @Value("${lumora.runs.max-concurrent:3}") int maxConcurrentRuns
     ) {
@@ -71,6 +75,7 @@ public class ConversationRunCoordinator {
         this.eventStreams = eventStreams;
         this.eventJournal = eventJournal;
         this.taskService = taskService;
+        this.gitRunChangeService = gitRunChangeService;
         this.clock = clock;
         if (maxConcurrentRuns < 1) {
             throw new IllegalArgumentException(
@@ -152,6 +157,33 @@ public class ConversationRunCoordinator {
     public ConversationRun get(String taskId, String runId) {
         taskService.getTask(taskId);
         return runStore.requireForTask(taskId, runId);
+    }
+
+    public ConversationRunChangesResponse changes(
+            String taskId,
+            String runId
+    ) {
+        get(taskId, runId);
+        return gitRunChangeService.changes(taskId, runId);
+    }
+
+    public synchronized ConversationRunChangesResponse revert(
+            String taskId,
+            String runId
+    ) {
+        ConversationRun run = get(taskId, runId);
+        if (!run.getStatus().isTerminal()) {
+            throw new IllegalStateException("只有已结束的运行可以撤回");
+        }
+        if (runStore.findActiveForTask(taskId) != null) {
+            throw new IllegalStateException("当前任务仍有活动运行，不能撤回");
+        }
+        conversationService.assertRunMessagesRevertible(taskId, runId);
+        ConversationRunChangesResponse result = gitRunChangeService.revert(
+                taskId, runId
+        );
+        conversationService.revertRunMessages(taskId, runId);
+        return result;
     }
 
     public synchronized List<ConversationInput> listInputs(String taskId) {
@@ -456,6 +488,7 @@ public class ConversationRunCoordinator {
             run = runStore.updateStatus(
                     runId, ConversationRunStatus.CANCELLED, ""
             );
+            gitRunChangeService.captureTerminal(run);
             publishLifecycle(runId, "任务已取消", "CANCELLED");
             eventStreams.complete(runId);
             releaseExecution(runId);
@@ -671,6 +704,7 @@ public class ConversationRunCoordinator {
                 continue;
             }
             executingRunIds.add(runId);
+            gitRunChangeService.begin(run);
             runStore.updateStatus(runId, ConversationRunStatus.RUNNING, "");
             if (run.getTriggerType() == ConversationRunTrigger.RESUME) {
                 publishLifecycle(
@@ -830,6 +864,10 @@ public class ConversationRunCoordinator {
             );
         }
         eventStreams.complete(runId);
+        ConversationRun settled = runStore.require(runId);
+        if (settled.getStatus().isTerminal()) {
+            gitRunChangeService.captureTerminal(settled);
+        }
         releaseExecution(runId);
         if (!paused && runStore.require(runId).getStatus()
                 == ConversationRunStatus.COMPLETED) {
@@ -882,6 +920,7 @@ public class ConversationRunCoordinator {
         runStore.updateStatus(
                 runId, ConversationRunStatus.FAILED, message
         );
+        gitRunChangeService.captureTerminal(runStore.require(runId));
         releaseExecution(runId);
         drainQueue();
     }

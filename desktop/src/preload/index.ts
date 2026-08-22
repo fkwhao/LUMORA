@@ -221,6 +221,18 @@ const api: LumoraApi = {
         validateTaskId(taskId),
         validateMessageId(runId),
       ),
+    getRunChanges: (taskId, runId) =>
+      ipcRenderer.invoke(
+        "model:get-run-changes",
+        validateTaskId(taskId),
+        validateMessageId(runId),
+      ),
+    revertRun: (taskId, runId) =>
+      ipcRenderer.invoke(
+        "model:revert-run",
+        validateTaskId(taskId),
+        validateMessageId(runId),
+      ),
     subscribeRun: (
       untrustedTaskId,
       untrustedRunId,

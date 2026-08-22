@@ -68,7 +68,11 @@ class ConversationPermissionServiceTest {
                 System.nanoTime()
         );
         when(persistence.prepareNewMessage(
-                "task-1", "检查仓库", "F:/project/demo"
+                "task-1",
+                "检查仓库",
+                List.of(),
+                "F:/project/demo",
+                "correlation-original"
         ))
                 .thenReturn(context);
 

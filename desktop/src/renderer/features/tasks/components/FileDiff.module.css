@@ -1,0 +1,243 @@
+.diff {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 5%), 0 8px 24px rgb(0 0 0 / 3%);
+  font-family: var(--ui-font, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+}
+
+.diffHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 39px;
+  padding: 0 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  font-size: 11px;
+}
+
+.diffFileWrap {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.diffIcon {
+  display: block;
+  width: 15px;
+  height: 15px;
+  flex: none;
+  color: var(--subtle);
+}
+
+.diffFile {
+  display: inline-flex;
+  min-width: 0;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.diffDirectory {
+  overflow: hidden;
+  color: var(--subtle);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diffName {
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: 570;
+  text-overflow: ellipsis;
+}
+
+.diffStat {
+  display: inline-flex;
+  margin-left: auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.diffStat .add { color: #159467; }
+.diffStat .del { color: #d24848; }
+
+.diffBody {
+  position: relative;
+  overflow: auto;
+  padding: 4px 0;
+  font-family: var(--code-font, "Cascadia Code", "SFMono-Regular", Consolas, monospace);
+  font-size: 11px;
+  line-height: 20px;
+  overscroll-behavior: contain;
+}
+
+.diffBody::before {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  bottom: 0;
+  left: 46px;
+  width: 1px;
+  background: color-mix(in srgb, var(--line) 82%, transparent);
+  content: "";
+}
+
+.diffRow {
+  position: relative;
+  display: grid;
+  min-width: max-content;
+  grid-template-columns: 46px 18px minmax(260px, 1fr);
+  align-items: stretch;
+}
+
+.diffRow .ln,
+.diffRow .sign {
+  color: var(--subtle);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.diffRow .ln {
+  padding: 0 7px;
+  text-align: right;
+}
+
+.diffRow .sign { text-align: center; }
+
+.diffRow code {
+  padding: 0 12px 0 8px;
+  color: var(--muted);
+  white-space: pre;
+}
+
+.gap {
+  z-index: 2;
+  display: block;
+  width: calc(100% - 10px);
+  min-width: calc(100% - 10px);
+  margin: 7px 5px;
+  padding: 3px 9px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ink) 8%, var(--surface));
+  color: var(--muted);
+  font-family: var(--ui-font, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  font-size: 11px;
+  line-height: 24px;
+}
+
+.diffRow.add::before,
+.diffRow.del::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3px;
+  content: "";
+}
+
+.diffRow.add::before { background: #159467; }
+
+.diffRow.del::before {
+  background: repeating-linear-gradient(
+    45deg,
+    #d24848 0,
+    #d24848 1.5px,
+    transparent 1.5px,
+    transparent 3px
+  );
+}
+
+.diffRow.add { background: rgb(26 127 55 / 9%); }
+.diffRow.add .sign,
+.diffRow.add .ln { color: #159467; }
+.diffRow.add code { color: var(--ink); }
+
+.diffRow.del { background: rgb(207 34 46 / 9%); }
+.diffRow.del .sign,
+.diffRow.del .ln { color: #d24848; }
+.diffRow.del code { color: var(--ink); }
+
+.empty {
+  padding: 28px 18px;
+  color: var(--subtle);
+  font-family: inherit;
+  font-size: 11px;
+  text-align: center;
+}
+
+.truncated {
+  padding: 7px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  color: var(--subtle);
+  font-family: inherit;
+  font-size: 10px;
+  text-align: center;
+}
+
+:global([data-theme="dark"]) .diff {
+  box-shadow: 0 1px 2px rgb(0 0 0 / 36%), 0 10px 30px rgb(0 0 0 / 18%);
+}
+
+:global([data-theme="dark"]) .diffStat .add { color: #34d399; }
+:global([data-theme="dark"]) .diffStat .del { color: #f87171; }
+:global([data-theme="dark"]) .diffRow.add { background: rgb(63 185 80 / 15%); }
+:global([data-theme="dark"]) .diffRow.add::before { background: #34d399; }
+:global([data-theme="dark"]) .diffRow.add .sign,
+:global([data-theme="dark"]) .diffRow.add .ln { color: #34d399; }
+:global([data-theme="dark"]) .diffRow.del { background: rgb(248 81 73 / 15%); }
+:global([data-theme="dark"]) .diffRow.del::before {
+  background: repeating-linear-gradient(
+    45deg,
+    #f87171 0,
+    #f87171 1.5px,
+    transparent 1.5px,
+    transparent 3px
+  );
+}
+:global([data-theme="dark"]) .diffRow.del .sign,
+:global([data-theme="dark"]) .diffRow.del .ln { color: #f87171; }
+
+.preview {
+  border: 0;
+  border-radius: inherit;
+  background: color-mix(in oklab, var(--color-background) 94%, var(--color-muted));
+  box-shadow: none;
+}
+
+.headerless {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.headerless .diffBody {
+  padding: 5px 0 8px;
+}
+
+.preview .diffHead {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  min-height: 44px;
+  padding: 0 16px 0 18px;
+  background: color-mix(in oklab, var(--color-muted) 34%, var(--color-background));
+  font-size: 12.5px;
+}
+
+.preview .diffBody {
+  padding: 6px 0;
+  font-size: 11.5px;
+  line-height: 21px;
+}
+
+.preview .diffStat {
+  font-size: 12px;
+}

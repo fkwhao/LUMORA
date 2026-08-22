@@ -64,7 +64,9 @@ class ConversationFailedUsageServiceTest {
                 null,
                 System.nanoTime()
         );
-        when(persistence.prepareNewMessage("task-1", "hello", null))
+        when(persistence.prepareNewMessage(
+                "task-1", "hello", List.of(), null, "correlation-1"
+        ))
                 .thenReturn(context);
         doAnswer(invocation -> {
             @SuppressWarnings("unchecked")
@@ -124,7 +126,9 @@ class ConversationFailedUsageServiceTest {
                 null,
                 System.nanoTime()
         );
-        when(persistence.prepareNewMessage("task-1", "hello", null))
+        when(persistence.prepareNewMessage(
+                "task-1", "hello", List.of(), null, "correlation-1"
+        ))
                 .thenReturn(context);
         doAnswer(invocation -> {
             @SuppressWarnings("unchecked")
@@ -182,7 +186,9 @@ class ConversationFailedUsageServiceTest {
                 null,
                 System.nanoTime()
         );
-        when(persistence.prepareNewMessage("task-1", "hello", null))
+        when(persistence.prepareNewMessage(
+                "task-1", "hello", List.of(), null, "correlation-1"
+        ))
                 .thenReturn(context);
         CountDownLatch streamStarted = new CountDownLatch(1);
         doAnswer(invocation -> {
@@ -274,7 +280,7 @@ class ConversationFailedUsageServiceTest {
                 System.nanoTime()
         );
         when(persistence.prepareNewMessage(
-                "task-1", "remember this", null
+                "task-1", "remember this", List.of(), null, "correlation-1"
         )).thenReturn(context);
         doAnswer(invocation -> {
             @SuppressWarnings("unchecked")

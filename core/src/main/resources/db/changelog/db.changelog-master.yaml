@@ -271,3 +271,12 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 031-run-git-changes
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V31__run_git_changes.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

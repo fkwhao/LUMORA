@@ -12,6 +12,7 @@ public class ConversationRunContext {
 
     private final String taskId;
     private final String conversationId;
+    private String runId = "";
     private final List<ChatMessage> modelMessages;
     private final String currentUserMessageId;
     private volatile String assistantParentMessageId;
@@ -109,6 +110,12 @@ public class ConversationRunContext {
 
     public String getConversationId() {
         return conversationId;
+    }
+
+    public String getRunId() { return runId; }
+
+    public void assignRunId(String runId) {
+        this.runId = runId == null ? "" : runId.trim();
     }
 
     public List<ChatMessage> getModelMessages() {

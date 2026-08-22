@@ -17,6 +17,8 @@ public class ConversationMessage {
     private String messageId;
     @TableField("conversation_id")
     private String conversationId;
+    @TableField("run_id")
+    private String runId;
     @TableField("sequence")
     private int sequence;
     @TableField("parent_message_id")
@@ -139,6 +141,11 @@ public class ConversationMessage {
 
     public void setConversationId(String conversationId) {
         this.conversationId = conversationId;
+    }
+
+    public String getRunId() { return runId; }
+    public void setRunId(String runId) {
+        this.runId = runId == null ? "" : runId;
     }
 
     public int getSequence() {

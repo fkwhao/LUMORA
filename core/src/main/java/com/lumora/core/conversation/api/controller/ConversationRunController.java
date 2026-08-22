@@ -1,6 +1,7 @@
 package com.lumora.core.conversation.api.controller;
 
 import com.lumora.core.conversation.api.dto.response.ConversationRunResponse;
+import com.lumora.core.conversation.api.dto.response.ConversationRunChangesResponse;
 import com.lumora.core.conversation.application.service.ConversationRunCoordinator;
 import com.lumora.core.conversation.application.support.ConversationRunEventStreamRegistry;
 import com.lumora.core.conversation.domain.entity.ConversationRun;
@@ -42,6 +43,22 @@ public class ConversationRunController {
         return ConversationRunResponse.from(
                 runCoordinator.get(taskId, runId)
         );
+    }
+
+    @GetMapping(ApiPathConstants.TASK_RUN_CHANGES)
+    public ConversationRunChangesResponse changes(
+            @PathVariable String taskId,
+            @PathVariable String runId
+    ) {
+        return runCoordinator.changes(taskId, runId);
+    }
+
+    @PostMapping(ApiPathConstants.TASK_RUN_REVERT)
+    public ConversationRunChangesResponse revert(
+            @PathVariable String taskId,
+            @PathVariable String runId
+    ) {
+        return runCoordinator.revert(taskId, runId);
     }
 
     @GetMapping(

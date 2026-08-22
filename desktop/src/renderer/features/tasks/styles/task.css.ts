@@ -1173,7 +1173,16 @@ globalStyle(".agent-run", {
 });
 
 globalStyle(".agent-run-heading", {
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  gap: "10px",
   borderBottom: "1px solid var(--line)",
+});
+
+const reviewFileExpand = keyframes({
+  from: { opacity: 0, transform: "translateY(-2px)" },
+  to: { opacity: 1, transform: "translateY(0)" },
 });
 
 globalStyle(".agent-run-toggle", {
@@ -2824,11 +2833,11 @@ globalStyle(".approval-actions button.allow", {
 });
 
 globalStyle(".review-pane-content", {
-  display: "grid",
+  display: "flex",
   width: "100%",
   height: "100%",
   minHeight: "0",
-  gridTemplateRows: "44px auto minmax(0, 1fr)",
+  flexDirection: "column",
   background: "var(--surface)",
 });
 
@@ -4024,10 +4033,28 @@ globalStyle(".review-header button:hover", {
 
 globalStyle(".review-toolbar", {
   display: "flex",
+  minHeight: "48px",
   alignItems: "center",
   justifyContent: "space-between",
   padding: "0 15px",
   borderBottom: "1px solid var(--line)",
+});
+
+globalStyle(".review-toolbar-copy", {
+  display: "inline-flex",
+  minWidth: "0",
+  alignItems: "baseline",
+  gap: "7px",
+});
+
+globalStyle(".review-toolbar-copy strong", {
+  color: "var(--ink)",
+  fontSize: "13px",
+  fontWeight: "650",
+});
+
+globalStyle(".review-toolbar-copy svg", {
+  color: "var(--muted)",
 });
 
 globalStyle(".review-toolbar button", {
@@ -4045,13 +4072,173 @@ globalStyle(".review-toolbar button.active", {
 
 globalStyle(".review-toolbar span", {
   color: "var(--subtle)",
+  fontSize: "12px",
+});
+
+globalStyle(".review-toolbar .review-total-add", { color: "#159467" });
+globalStyle(".review-toolbar .review-total-del", { color: "#d24848" });
+
+globalStyle(".review-toolbar .review-revert-button", {
+  display: "inline-flex",
+  minHeight: "26px",
+  alignItems: "center",
+  gap: "5px",
+  padding: "0 8px",
+  color: "var(--ink)",
+  border: "1px solid var(--line)",
+  borderRadius: "7px",
+  background: "var(--surface-soft)",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: "10.5px",
+});
+
+globalStyle(".review-toolbar .review-revert-button:hover:not(:disabled)", {
+  borderColor: "color-mix(in srgb, #d24848 40%, var(--line))",
+  color: "#d24848",
+});
+
+globalStyle(".review-toolbar .review-revert-button:disabled", {
+  opacity: "0.42",
+  cursor: "not-allowed",
+});
+
+globalStyle(".review-state", {
+  display: "flex",
+  minHeight: "0",
+  flex: "1 1 auto",
+  alignItems: "center",
+  justifyContent: "center",
+  flexDirection: "column",
+  gap: "10px",
+  padding: "28px",
+  color: "var(--muted)",
+  fontSize: "10px",
+  textAlign: "center",
+});
+
+globalStyle(".review-state.is-error", { color: "#d24848" });
+
+globalStyle(".review-notice", {
+  display: "flex",
+  alignItems: "flex-start",
+  gap: "7px",
+  padding: "9px 12px",
+  color: "color-mix(in srgb, #c87b22 78%, var(--ink))",
+  borderBottom: "1px solid var(--line)",
+  background: "color-mix(in srgb, #c87b22 7%, var(--surface))",
   fontSize: "9px",
+  lineHeight: "1.5",
+});
+
+globalStyle(".review-notice svg", { flex: "0 0 auto", marginTop: "1px" });
+
+globalStyle(".review-file-accordion", {
+  minHeight: "0",
+  flex: "1 1 auto",
+  overflow: "auto",
+  overscrollBehavior: "contain",
+  scrollbarGutter: "stable",
+});
+
+globalStyle(".review-file-item", {
+  borderBottom: "1px solid color-mix(in srgb, var(--line) 78%, transparent)",
+  background: "color-mix(in srgb, var(--surface) 97%, var(--ink) 3%)",
+});
+
+globalStyle(".review-file-trigger", {
+  display: "grid",
+  width: "100%",
+  minHeight: "41px",
+  gridTemplateColumns: "14px 26px minmax(0, 1fr) auto",
+  alignItems: "center",
+  gap: "7px",
+  padding: "0 13px 0 10px",
+  color: "var(--ink)",
+  border: "0",
+  background: "transparent",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  textAlign: "left",
+  transition: "background 120ms ease",
+});
+
+globalStyle(".review-file-trigger:hover", {
+  background: "color-mix(in srgb, var(--ink) 4.5%, transparent)",
+});
+
+globalStyle(".review-file-trigger:focus-visible", {
+  outline: "2px solid color-mix(in srgb, var(--blue) 64%, transparent)",
+  outlineOffset: "-2px",
+});
+
+globalStyle(".review-file-chevron", {
+  color: "var(--subtle)",
+  transition: "transform 150ms cubic-bezier(0.2, 0.72, 0.22, 1)",
+});
+
+globalStyle(".review-file-item.is-expanded .review-file-chevron", {
+  transform: "rotate(90deg)",
+});
+
+globalStyle(".review-file-type", {
+  display: "inline-grid",
+  width: "25px",
+  height: "19px",
+  placeItems: "center",
+  borderRadius: "5px",
+  background: "color-mix(in srgb, var(--blue) 16%, var(--surface-soft))",
+  color: "color-mix(in srgb, var(--blue) 80%, var(--ink))",
+  fontSize: "7px",
+  fontWeight: "700",
+  letterSpacing: "-0.02em",
+});
+
+globalStyle(".review-file-path", {
+  display: "inline-flex",
+  minWidth: "0",
+  overflow: "hidden",
+  alignItems: "baseline",
+  fontSize: "12.5px",
+  lineHeight: "1.25",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(".review-file-path .review-file-directory", {
+  minWidth: "18px",
+  flex: "1 1 auto",
+});
+
+globalStyle(".review-file-path .review-file-name", {
+  flex: "0 1 auto",
+});
+
+globalStyle(".review-file-stats", {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "flex-end",
+  gap: "5px",
+  fontSize: "12px",
+  fontVariantNumeric: "tabular-nums",
+  fontWeight: "600",
+});
+
+globalStyle(".review-file-stats span:first-child", { color: "#159467" });
+globalStyle(".review-file-stats span:last-child", { color: "#d24848" });
+
+globalStyle(".review-file-panel", {
+  overflow: "hidden",
+  borderTop: "1px solid color-mix(in srgb, var(--line) 68%, transparent)",
+  background: "color-mix(in srgb, var(--canvas) 76%, var(--surface-soft))",
+  animation: `${reviewFileExpand} 150ms cubic-bezier(0.2, 0.72, 0.22, 1) both`,
+  "@media": {
+    "(prefers-reduced-motion: reduce)": { animation: "none" },
+  },
 });
 
 globalStyle(".review-file-list", {
   display: "flex",
   minWidth: "0",
-  gridRow: "2",
   gap: "3px",
   padding: "7px 10px",
   overflowX: "auto",
@@ -4116,7 +4303,7 @@ globalStyle(".review-file-list::-webkit-scrollbar", {
 
 globalStyle(".review-file-list button", {
   display: "inline-flex",
-  maxWidth: "190px",
+  maxWidth: "320px",
   flex: "0 0 auto",
   alignItems: "center",
   gap: "6px",
@@ -4130,10 +4317,33 @@ globalStyle(".review-file-list button", {
   fontSize: "10px",
 });
 
-globalStyle(".review-file-list button span", {
+globalStyle(".review-file-list button > span", {
+  display: "inline-flex",
+  minWidth: "0",
   overflow: "hidden",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(".review-file-directory", {
+  overflow: "hidden",
+  color: "var(--subtle)",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
+});
+
+globalStyle(".review-file-name", {
+  minWidth: "0",
+  overflow: "hidden",
+  flex: "0 1 auto",
+  color: "var(--ink)",
+  fontWeight: "570",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(".review-file-list button small", {
+  color: "var(--subtle)",
+  fontSize: "8px",
 });
 
 globalStyle(".review-file-list button.active", {
@@ -4144,18 +4354,40 @@ globalStyle(".review-file-list button.active", {
 globalStyle(".review-change-preview", {
   display: "grid",
   minHeight: "0",
-  gridRow: "3",
+  flex: "1 1 auto",
   gridTemplateRows: "55px minmax(0, 1fr)",
 });
 
 globalStyle(".review-change-preview > header", {
   display: "flex",
   minWidth: "0",
-  justifyContent: "center",
-  flexDirection: "column",
-  gap: "3px",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "10px",
   padding: "0 15px",
   borderBottom: "1px solid var(--line)",
+});
+
+globalStyle(".review-change-preview > header > div", {
+  display: "flex",
+  minWidth: "0",
+  flexDirection: "column",
+  gap: "3px",
+});
+
+globalStyle(".review-change-preview > header em", {
+  flex: "0 0 auto",
+  color: "var(--subtle)",
+  fontSize: "8px",
+  fontStyle: "normal",
+});
+
+globalStyle(".review-file-diff-shell", {
+  minHeight: "0",
+  padding: "12px 10px 26px",
+  overflow: "auto",
+  overscrollBehavior: "contain",
+  background: "color-mix(in srgb, var(--surface-soft) 28%, transparent)",
 });
 
 globalStyle(".review-change-preview > header strong", {
@@ -4183,6 +4415,24 @@ globalStyle(".review-diff", {
   scrollbarColor:
     "color-mix(in srgb, var(--muted) 34%, transparent) transparent",
   background: "color-mix(in srgb, var(--surface-soft) 28%, transparent)",
+});
+
+globalStyle(".review-selected-file-path", {
+  display: "inline-flex",
+  minWidth: "0",
+  alignItems: "baseline",
+  fontFamily:
+    'var(--ui-font, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif)',
+});
+
+globalStyle(".review-selected-file-path .review-file-directory", {
+  color: "var(--subtle)",
+  fontWeight: "400",
+});
+
+globalStyle(".review-selected-file-path .review-file-name", {
+  color: "var(--ink)",
+  fontWeight: "600",
 });
 
 globalStyle(".review-diff-block + .review-diff-block", {
@@ -4250,9 +4500,9 @@ globalStyle(".review-empty", {
   alignItems: "center",
   justifyContent: "center",
   flexDirection: "column",
+  flex: "1 1 auto",
   padding: "30px",
   textAlign: "center",
-  gridRow: "2 / 4",
 });
 
 globalStyle(".review-empty > span", {
