@@ -1,12 +1,15 @@
 package com.lumora.core.task.api.controller;
 
 import com.lumora.core.task.api.converter.TaskResponseConverter;
+import com.lumora.core.task.api.dto.request.CreateTaskRequest;
+import com.lumora.core.task.api.dto.request.WorkspaceHandoffRequest;
 import com.lumora.core.task.domain.entity.AgentTask;
 import com.lumora.core.task.domain.entity.TaskPlanStep;
 import com.lumora.core.task.domain.model.TaskStatus;
 import com.lumora.core.shared.api.advice.RestExceptionHandler;
 import com.lumora.core.task.domain.exception.TaskNotFoundException;
 import com.lumora.core.task.application.service.TaskService;
+import com.lumora.core.task.application.support.TaskCreationCoordinator;
 import com.lumora.core.task.domain.model.TaskDetails;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -15,6 +18,12 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.Instant;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -27,6 +36,38 @@ class TaskControllerTest {
 
     private static final String TASK_ID = "task-1";
     private static final String CORRELATION_ID = "correlation-123";
+
+    @Test
+    void rejectsAutoApplyForAnExistingWorktreeBeforeCreatingTheTask() {
+        TaskService taskService = org.mockito.Mockito.mock(TaskService.class);
+        TaskCreationCoordinator creation = org.mockito.Mockito.mock(
+                TaskCreationCoordinator.class
+        );
+        when(creation.createTask(
+                any(), any(), any(), any(), any(), any()
+        )).thenThrow(new IllegalArgumentException(
+                "现有 Worktree 由用户管理，不能开启自动应用"
+        ));
+        TaskController controller = new TaskController(
+                taskService, new TaskResponseConverter(), creation
+        );
+        WorkspaceHandoffRequest selection = new WorkspaceHandoffRequest();
+        selection.setTarget("EXISTING_WORKTREE");
+        selection.setWorktreePath("F:/project/external");
+        selection.setAutoApplyWhenClean(true);
+        CreateTaskRequest request = new CreateTaskRequest();
+        request.setGoal("inspect external tree");
+        request.setWorkspacePath("F:/project/local");
+        request.setEnvironmentSelection(selection);
+
+        assertThatThrownBy(() -> controller.createTask(
+                request, CORRELATION_ID
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("不能开启自动应用");
+        verify(taskService, never()).createTask(
+                anyString(), anyString(), anyString()
+        );
+    }
 
     @Test
     void createsATaskWithAResponseDto() throws Exception {
@@ -138,10 +179,26 @@ class TaskControllerTest {
     private static MockMvc mockMvc(TaskService service) {
         return standaloneSetup(new TaskController(
                 service,
-                new TaskResponseConverter()
+                new TaskResponseConverter(),
+                creationCoordinator(service)
         ))
                 .setControllerAdvice(new RestExceptionHandler())
                 .build();
+    }
+
+    private static TaskCreationCoordinator creationCoordinator(
+            TaskService taskService
+    ) {
+        TaskCreationCoordinator result = org.mockito.Mockito.mock(
+                TaskCreationCoordinator.class
+        );
+        doAnswer(invocation -> taskService.createTask(
+                invocation.getArgument(0), invocation.getArgument(1),
+                invocation.getArgument(2)
+        )).when(result).createTask(
+                any(), any(), any(), any(), any(), any()
+        );
+        return result;
     }
 
     private static TaskDetails taskDetails() {

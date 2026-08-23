@@ -16,6 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -101,6 +102,45 @@ class ConversationRunEventJournalTest {
             journal.append("run-1", event("auto"));
 
             assertThat(published.await(2L, TimeUnit.SECONDS)).isTrue();
+            verify(streams).publish(
+                    org.mockito.ArgumentMatchers.any(
+                            ConversationRunEventEnvelope.class
+                    )
+            );
+        } finally {
+            journal.close();
+        }
+    }
+
+    @Test
+    void publishFailureDoesNotRequeueAlreadyPersistedEvents() {
+        ConversationRunStore runStore = mock(ConversationRunStore.class);
+        ConversationRunEventStreamRegistry streams = mock(
+                ConversationRunEventStreamRegistry.class
+        );
+        ChatStreamEvent event = event("durable");
+        when(runStore.appendEvents(eq("run-1"), anyList())).thenReturn(
+                List.of(new ConversationRunEventEnvelope(
+                        "run-1", 1L, event,
+                        Instant.parse("2026-08-17T00:00:00Z")
+                ))
+        );
+        doThrow(new IllegalStateException("subscriber failed"))
+                .when(streams).publish(
+                        org.mockito.ArgumentMatchers.any(
+                                ConversationRunEventEnvelope.class
+                        )
+                );
+        ConversationRunEventJournal journal =
+                new ConversationRunEventJournal(
+                        runStore, streams, 60_000L
+                );
+        try {
+            journal.append("run-1", event);
+            journal.flush("run-1");
+            journal.flush("run-1");
+
+            verify(runStore).appendEvents(eq("run-1"), anyList());
             verify(streams).publish(
                     org.mockito.ArgumentMatchers.any(
                             ConversationRunEventEnvelope.class

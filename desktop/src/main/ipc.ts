@@ -13,6 +13,7 @@ import {
   validateTaskPreferencesInput,
   validateTaskWorkspaceInput,
   validateWorkspacePath,
+  validateWorkspaceEnvironmentSelection,
 } from "../shared/validation";
 
 const channels = {
@@ -34,10 +35,12 @@ export function registerTaskIpc(gateway: TaskGateway): () => void {
     _event,
     goal: unknown,
     workspacePath: unknown,
+    environmentSelection: unknown,
   ) =>
     gateway.create(
       validateGoal(goal),
       validateWorkspacePath(workspacePath),
+      validateWorkspaceEnvironmentSelection(environmentSelection),
     ),
   );
   ipcMain.handle(channels.list, () => gateway.list());

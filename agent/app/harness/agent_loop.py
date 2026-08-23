@@ -4,6 +4,7 @@ import json
 import random
 import uuid
 from collections.abc import AsyncIterator, Awaitable
+from dataclasses import replace
 from typing import Any
 
 import httpx
@@ -138,11 +139,41 @@ class AgentLoopRunner:
             blocked_call_signatures,
             run_control,
         )
+        registry.begin_workspace_run(tool_context)
 
         for _iteration in range(self._max_tool_iterations):
             if _pause_requested(run_control):
                 yield _paused_event(resolved_model)
                 return
+            workspace_revision, external_changes = (
+                registry.consume_workspace_updates(tool_context)
+            )
+            iteration_tool_context = replace(
+                tool_context,
+                workspace_revision=workspace_revision,
+            )
+            if external_changes:
+                request_messages.append({
+                    "role": "system",
+                    "content": _workspace_update_notice(
+                        workspace_revision,
+                        external_changes,
+                    ),
+                })
+                yield RunEvent(
+                    type="progress_message",
+                    title="已同步其他任务的工作区修改",
+                    delta=(
+                        f"工作区已更新到 revision {workspace_revision}；"
+                        "后续写入会基于最新文件版本校验"
+                    ),
+                    metadata={
+                        "category": "workspace_revision_observed",
+                        "workspaceRevision": workspace_revision,
+                        "workspaceChanges": external_changes,
+                    },
+                    model=resolved_model,
+                )
             budget = tool_context.execution_budget
             if budget is not None:
                 try:
@@ -515,7 +546,7 @@ class AgentLoopRunner:
             )
             async for item in scheduler.stream(
                 turn.tool_calls,
-                tool_context,
+                iteration_tool_context,
                 resolved_model,
                 settings,
                 permission_policy,
@@ -749,6 +780,28 @@ def _latest_user_request(messages: list[dict[str, Any]]) -> str:
         if isinstance(content, str) and content.strip():
             return content[-20_000:]
     return ""
+
+
+def _workspace_update_notice(
+    revision: int,
+    changes: tuple[dict[str, Any], ...],
+) -> str:
+    visible = changes[-20:]
+    lines = [
+        f"[Workspace revision {revision}] 其他并行任务刚刚发布了文件修改："
+    ]
+    for change in visible:
+        owner = str(change.get("taskId") or change.get("runId") or "other")
+        path = str(change.get("path") or "unknown")
+        lines.append(f"- {path}（任务 {owner}，revision {change.get('revision')}）")
+    if len(changes) > len(visible):
+        lines.append(f"- 另有 {len(changes) - len(visible)} 项修改未展开")
+    lines.append(
+        "这些内容已经存在于共享 Local。继续修改相关文件前必须重新读取；"
+        "若写入返回 stale_workspace_version，请基于最新内容重新生成补丁，"
+        "不要盲目重放旧的完整文件内容。"
+    )
+    return "\n".join(lines)
 
 
 def _pause_requested(run_control: RunControl | None) -> bool:

@@ -14,6 +14,7 @@ import type { LumoraMcpApi } from "../shared/mcp-contract";
 import type { LumoraSkillApi } from "../shared/skill-contract";
 import type { LumoraTaskApi } from "../shared/task-contract";
 import type { ProjectDirectory } from "../shared/window-contract";
+import type { LumoraWorkspaceApi } from "../shared/workspace-contract";
 import { AppSidebar } from "./components/AppSidebar";
 import { WindowChrome } from "./components/WindowChrome";
 import {
@@ -50,6 +51,7 @@ interface AppProps {
   memoryApi?: LumoraMemoryApi;
   mcpApi?: LumoraMcpApi;
   skillApi?: LumoraSkillApi;
+  workspaceApi?: LumoraWorkspaceApi;
 }
 
 type AppView = "work" | "conversationHub" | "settings" | PrototypeView;
@@ -65,12 +67,20 @@ interface NavigationState {
   index: number;
 }
 
-export function App({ api, modelApi, memoryApi, mcpApi, skillApi }: AppProps) {
+export function App({
+  api,
+  modelApi,
+  memoryApi,
+  mcpApi,
+  skillApi,
+  workspaceApi,
+}: AppProps) {
   const resolvedTaskApi = api ?? window.lumora?.tasks;
   const resolvedModelApi = modelApi ?? window.lumora?.model;
   const resolvedMemoryApi = memoryApi ?? window.lumora?.memory;
   const resolvedMcpApi = mcpApi ?? window.lumora?.mcp;
   const resolvedSkillApi = skillApi ?? window.lumora?.skill;
+  const resolvedWorkspaceApi = workspaceApi ?? window.lumora?.workspace;
   if (!resolvedTaskApi) {
     return <DesktopBridgeError />;
   }
@@ -81,6 +91,7 @@ export function App({ api, modelApi, memoryApi, mcpApi, skillApi }: AppProps) {
       memoryApi={resolvedMemoryApi}
       mcpApi={resolvedMcpApi}
       skillApi={resolvedSkillApi}
+      workspaceApi={resolvedWorkspaceApi}
     />
   );
 }
@@ -91,11 +102,13 @@ function ConnectedApp({
   memoryApi,
   mcpApi,
   skillApi,
+  workspaceApi,
 }: Required<Pick<AppProps, "api">> & {
   modelApi?: LumoraModelApi;
   memoryApi?: LumoraMemoryApi;
   mcpApi?: LumoraMcpApi;
   skillApi?: LumoraSkillApi;
+  workspaceApi?: LumoraWorkspaceApi;
 }) {
   // Store 与能力边界绑定，切换测试 API 时不会泄漏旧任务订阅。
   const store = useMemo(
@@ -528,6 +541,7 @@ function ConnectedApp({
           store={store}
           modelApi={modelApi}
           skillApi={skillApi}
+          workspaceApi={workspaceApi}
           notify={notify}
           composerMotion={
             composerMotion === "to-task" ? "from-center" : undefined
@@ -538,6 +552,7 @@ function ConnectedApp({
           key={homeRevision}
           store={store}
           notify={notify}
+          workspaceApi={workspaceApi}
           composerMotion={
             composerMotion === "to-home" ? "from-bottom" : undefined
           }

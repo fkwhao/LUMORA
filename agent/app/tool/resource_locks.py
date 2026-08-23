@@ -200,13 +200,30 @@ class ResourceObservationStore:
 
 
 def workspace_resource_key(path: Path) -> str:
-    normalized = os.path.normcase(str(path.expanduser().resolve()))
+    normalized = os.path.normcase(str(_workspace_identity(path)))
     return f"workspace:{normalized}"
 
 
 def file_resource_key(path: Path) -> str:
     normalized = os.path.normcase(str(path.expanduser().resolve()))
     return f"file:{normalized}"
+
+
+def _workspace_identity(path: Path) -> Path:
+    """Use the enclosing Git worktree as the shared Local lock domain.
+
+    Two tasks may select different subdirectories of one repository.  Locking
+    those literal subdirectories independently would let a Shell command in one
+    task race a file write in the other.  A linked Worktree has its own `.git`
+    file and therefore remains a separate domain as intended.
+    """
+
+    resolved = path.expanduser().resolve()
+    current = resolved if resolved.is_dir() else resolved.parent
+    for candidate in (current, *current.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return current
 
 
 def _normalize_accesses(

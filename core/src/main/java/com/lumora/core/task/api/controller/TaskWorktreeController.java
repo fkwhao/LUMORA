@@ -1,18 +1,24 @@
 package com.lumora.core.task.api.controller;
 
 import com.lumora.core.shared.api.constant.ApiPathConstants;
+import com.lumora.core.shared.infrastructure.git.GitWorkspaceMutationGate;
 import com.lumora.core.task.api.dto.request.CreateWorktreeBranchRequest;
+import com.lumora.core.task.api.dto.request.UpdateWorktreeSettingsRequest;
+import com.lumora.core.task.api.dto.request.WorkspaceHandoffRequest;
 import com.lumora.core.task.api.dto.response.TaskWorktreeChangesResponse;
 import com.lumora.core.task.api.dto.response.TaskWorktreeResponse;
+import com.lumora.core.task.api.dto.response.WorkspaceContextResponse;
 import com.lumora.core.task.application.service.TaskService;
 import com.lumora.core.task.application.support.TaskWorktreeChangeService;
 import com.lumora.core.task.application.support.TaskWorktreeService;
+import com.lumora.core.task.application.support.WorkspaceGitService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -25,6 +31,8 @@ public class TaskWorktreeController {
     private final TaskService taskService;
     private final TaskWorktreeService worktreeService;
     private final TaskWorktreeChangeService worktreeChangeService;
+    private final WorkspaceGitService workspaceGitService;
+    private final GitWorkspaceMutationGate mutationGate;
 
     @GetMapping(ApiPathConstants.TASK_WORKTREE)
     public ResponseEntity<TaskWorktreeResponse> status(
@@ -48,6 +56,40 @@ public class TaskWorktreeController {
         return response == null
                 ? ResponseEntity.noContent().build()
                 : ResponseEntity.ok(response);
+    }
+
+    @PostMapping(ApiPathConstants.TASK_WORKSPACE_HANDOFF)
+    public WorkspaceContextResponse handoff(
+            @PathVariable String taskId,
+            @Valid @RequestBody WorkspaceHandoffRequest request
+    ) {
+        return mutationGate.execute(() -> {
+            var task = taskService.getTask(taskId);
+            workspaceGitService.assertExpectedRevision(
+                    taskId, request.getExpectedRevision()
+            );
+            worktreeService.handoff(
+                    taskId,
+                    task.getWorkspacePath(),
+                    request.getTarget(),
+                    request.getWorktreePath()
+            );
+            return workspaceGitService.contextForTask(taskId);
+        });
+    }
+
+    @PutMapping(ApiPathConstants.TASK_WORKTREE_SETTINGS)
+    public WorkspaceContextResponse settings(
+            @PathVariable String taskId,
+            @Valid @RequestBody UpdateWorktreeSettingsRequest request
+    ) {
+        taskService.getTask(taskId);
+        worktreeService.updateSettings(
+                taskId,
+                request.getAutoApplyWhenClean(),
+                request.getExpectedSettingsRevision()
+        );
+        return workspaceGitService.contextForTask(taskId);
     }
 
     @PostMapping(ApiPathConstants.TASK_WORKTREE_APPLY)

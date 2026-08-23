@@ -4,6 +4,8 @@ import {
   validateApprovalDecisionInput,
   validateGoal,
   validateTaskId,
+  validateGitReviewScope,
+  validateWorkspaceEnvironmentSelection,
 } from "../../src/shared/validation";
 
 describe("process-boundary validation", () => {
@@ -36,5 +38,32 @@ describe("process-boundary validation", () => {
         channel: "arbitrary",
       }),
     ).toThrow("审批参数格式无效");
+  });
+
+  it("requires concrete references for commit and branch review scopes", () => {
+    expect(validateGitReviewScope({
+      scope: "COMMIT",
+      commitSha: "abc123",
+    })).toEqual({ scope: "COMMIT", commitSha: "abc123" });
+    expect(() => validateGitReviewScope({ scope: "COMMIT" }))
+      .toThrow("缺少 Commit");
+    expect(() => validateGitReviewScope({ scope: "BRANCH_COMPARE" }))
+      .toThrow("缺少基准分支");
+  });
+
+  it("defaults new tasks to Local and bounds existing Worktree paths", () => {
+    expect(validateWorkspaceEnvironmentSelection(undefined))
+      .toEqual({ target: "LOCAL" });
+    expect(validateWorkspaceEnvironmentSelection({
+      target: "EXISTING_WORKTREE",
+      worktreePath: " F:\\worktrees\\auth ",
+      autoApplyWhenClean: true,
+    })).toEqual({
+      target: "EXISTING_WORKTREE",
+      worktreePath: "F:\\worktrees\\auth",
+    });
+    expect(() => validateWorkspaceEnvironmentSelection({
+      target: "EXISTING_WORKTREE",
+    })).toThrow("请选择已有 Worktree");
   });
 });

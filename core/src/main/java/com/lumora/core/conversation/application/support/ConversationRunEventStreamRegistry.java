@@ -3,7 +3,6 @@ package com.lumora.core.conversation.application.support;
 import com.lumora.core.conversation.api.dto.response.ConversationRunEventResponse;
 import com.lumora.core.conversation.domain.entity.ConversationRun;
 import com.lumora.core.conversation.domain.entity.ConversationRunEvent;
-import com.lumora.core.conversation.domain.model.ChatStreamEventType;
 import com.lumora.core.conversation.domain.model.ConversationRunEventEnvelope;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -107,11 +106,6 @@ public class ConversationRunEventStreamRegistry {
                     remove(envelope.runId(), subscriber);
                     subscriber.emitter.completeWithError(error);
                 }
-            }
-            if (envelope.event().getType() == ChatStreamEventType.COMPLETED
-                    || envelope.event().getType()
-                    == ChatStreamEventType.FAILED) {
-                complete(envelope.runId());
             }
         }
     }

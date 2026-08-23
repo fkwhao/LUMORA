@@ -2,6 +2,7 @@ package com.lumora.core.task.api.dto.request;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.Valid;
 
 public class CreateTaskRequest {
 
@@ -11,6 +12,9 @@ public class CreateTaskRequest {
 
     @Size(max = 4096, message = "工作区路径不能超过 4096 个字符")
     private String workspacePath;
+
+    @Valid
+    private WorkspaceHandoffRequest environmentSelection;
 
     public CreateTaskRequest() {
     }
@@ -29,5 +33,15 @@ public class CreateTaskRequest {
 
     public void setWorkspacePath(String workspacePath) {
         this.workspacePath = workspacePath;
+    }
+
+    public WorkspaceHandoffRequest getEnvironmentSelection() {
+        return environmentSelection;
+    }
+
+    public void setEnvironmentSelection(
+            WorkspaceHandoffRequest environmentSelection
+    ) {
+        this.environmentSelection = environmentSelection;
     }
 }

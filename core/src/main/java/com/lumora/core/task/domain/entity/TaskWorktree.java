@@ -35,6 +35,12 @@ public class TaskWorktree {
     private String branchName;
     @TableField("reason")
     private String reason;
+    @TableField("auto_apply_when_clean")
+    private boolean autoApplyWhenClean;
+    @TableField("settings_revision")
+    private long settingsRevision;
+    @TableField("managed_by_lumora")
+    private boolean managedByLumora;
     @TableField(value = "created_at", typeHandler = SqliteInstantTypeHandler.class)
     private Instant createdAt;
     @TableField(value = "updated_at", typeHandler = SqliteInstantTypeHandler.class)
@@ -66,6 +72,18 @@ public class TaskWorktree {
     public void setBranchName(String branchName) { this.branchName = branchName; }
     public String getReason() { return reason; }
     public void setReason(String reason) { this.reason = reason; }
+    public boolean isAutoApplyWhenClean() { return autoApplyWhenClean; }
+    public void setAutoApplyWhenClean(boolean autoApplyWhenClean) {
+        this.autoApplyWhenClean = autoApplyWhenClean;
+    }
+    public long getSettingsRevision() { return settingsRevision; }
+    public void setSettingsRevision(long settingsRevision) {
+        this.settingsRevision = settingsRevision;
+    }
+    public boolean isManagedByLumora() { return managedByLumora; }
+    public void setManagedByLumora(boolean managedByLumora) {
+        this.managedByLumora = managedByLumora;
+    }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

@@ -19,6 +19,7 @@ import type {
   TaskSnapshot,
   TaskSummary,
 } from "../../../../shared/task-contract";
+import type { WorkspaceEnvironmentSelection } from "../../../../shared/workspace-contract";
 import {
   applyChatEvent,
   cancelSupplementalUsageRefresh,
@@ -70,7 +71,7 @@ export interface TaskState {
   createTask(
     goal: string,
     projectPath?: string,
-    options?: ChatRequestOptions,
+    options?: CreateTaskOptions,
   ): Promise<TaskSnapshot>;
   sendMessage(content: string, options?: ChatRequestOptions): Promise<void>;
   enqueueInput(
@@ -105,6 +106,10 @@ export interface TaskState {
   deleteAllArchivedTasks(): void;
   clearActiveTask(): void;
   clearError(): void;
+}
+
+export interface CreateTaskOptions extends ChatRequestOptions {
+  environmentSelection?: WorkspaceEnvironmentSelection;
 }
 
 export type TaskStore = ReturnType<typeof createTaskStore>;
@@ -608,7 +613,11 @@ export function createTaskStore(
 
       set({ isCreating: true, error: undefined });
       try {
-        const task = await api.create(normalizedGoal, projectPath);
+        const task = await api.create(
+          normalizedGoal,
+          projectPath,
+          options?.environmentSelection ?? { target: "LOCAL" },
+        );
         unsubscribe?.();
         unsubscribe = api.subscribe(task.taskId, (event) => {
           applyEvent(event, get, set);
@@ -654,8 +663,10 @@ export function createTaskStore(
         });
         saveArchivedTaskIds(get().archivedTaskIds);
         saveDeletedTaskIds(get().deletedTaskIds);
+        const { environmentSelection: _environmentSelection, ...chatOptions } =
+          options ?? {};
         await get().sendMessage(normalizedGoal, {
-          ...options,
+          ...chatOptions,
           workspacePath: options?.workspacePath ?? projectPath,
         });
         return task;

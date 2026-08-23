@@ -67,6 +67,14 @@ import type {
 } from "../../../../shared/model-contract";
 import type { TaskEvent } from "../../../../shared/task-contract";
 import type { LumoraSkillApi, SkillSummary } from "../../../../shared/skill-contract";
+import type {
+  GitCommitSummary,
+  GitBranchSummary,
+  GitReviewChanges,
+  GitReviewScope,
+  LumoraWorkspaceApi,
+  WorkspaceContext,
+} from "../../../../shared/workspace-contract";
 import {
   executionPlanFromWorkLog,
   isExecutionPlanComplete,
@@ -95,6 +103,7 @@ import {
 } from "../components/TaskRightSidebar";
 import { ConversationInputQueue } from "../components/ConversationInputQueue";
 import { PlanTodoList } from "../components/PlanTodoList";
+import { WorkspaceControls } from "../components/WorkspaceControls";
 import {
   attachmentReferences,
   completeAttachments,
@@ -121,6 +130,7 @@ interface TaskPageProps {
   store: TaskStore;
   modelApi?: LumoraModelApi;
   skillApi?: LumoraSkillApi;
+  workspaceApi?: LumoraWorkspaceApi;
   composerMotion?: "from-center";
   notify(message: string, tone?: "info" | "success"): void;
 }
@@ -166,6 +176,7 @@ export const TaskPage = memo(function TaskPage({
   store,
   modelApi,
   skillApi,
+  workspaceApi,
   composerMotion,
   notify,
 }: TaskPageProps) {
@@ -215,6 +226,12 @@ export const TaskPage = memo(function TaskPage({
   const [taskWorktree, setTaskWorktree] = useState<TaskWorktreeStatus>();
   const [taskWorktreeChanges, setTaskWorktreeChanges] =
     useState<TaskWorktreeChanges>();
+  const [workspaceContext, setWorkspaceContext] = useState<WorkspaceContext>();
+  const [workspaceRefreshToken, setWorkspaceRefreshToken] = useState(0);
+  const [reviewScope, setReviewScope] = useState<GitReviewScope>();
+  const [scopedChanges, setScopedChanges] = useState<GitReviewChanges>();
+  const [gitHistory, setGitHistory] = useState<GitCommitSummary[]>([]);
+  const [gitBranches, setGitBranches] = useState<GitBranchSummary[]>([]);
   const [worktreeAction, setWorktreeAction] = useState<
     "apply" | "branch" | "discard"
   >();
@@ -255,12 +272,24 @@ export const TaskPage = memo(function TaskPage({
     [],
   );
   const lastAutoScrolledQuestionRef = useRef<string | undefined>(undefined);
+  const refreshedReviewRevisionRef = useRef(0);
+  const reviewRefreshGenerationRef = useRef(0);
   const runtimeMessageCacheRef = useRef(
     new Map<string, RuntimeMessageCacheEntry>(),
   );
   const workspacePath = useStore(store, (state) =>
     task?.taskId ? state.taskProjectPaths[task.taskId] : undefined,
   );
+  const workspaceControlsDisabled = isPausing || Boolean(
+    activeRun
+    && activeRun.status !== "COMPLETED"
+    && activeRun.status !== "FAILED"
+    && activeRun.status !== "CANCELLED",
+  );
+  const acceptWorkspaceContext = useCallback((context: WorkspaceContext) => {
+    setWorkspaceContext(context);
+    setGitBranches(context.branches);
+  }, []);
 
   useEffect(() => {
     if (!skillApi) return;
@@ -307,6 +336,18 @@ export const TaskPage = memo(function TaskPage({
     }
     return undefined;
   }, [messages]);
+  const observedWorkspaceRevision = useMemo(() => {
+    let latest = 0;
+    for (const message of messages) {
+      for (const item of message.workLog ?? []) {
+        const value = item.metadata?.workspaceRevision;
+        if (typeof value === "number" && Number.isFinite(value)) {
+          latest = Math.max(latest, value);
+        }
+      }
+    }
+    return latest;
+  }, [messages]);
   const contextTabActive = rightSidebar.visible
     && rightSidebar.activeTabId === "context";
   const openContextTab = useCallback(() => {
@@ -324,9 +365,24 @@ export const TaskPage = memo(function TaskPage({
     setRunChanges(undefined);
     setTaskWorktree(undefined);
     setTaskWorktreeChanges(undefined);
+    setReviewScope(targetRunId
+      ? { scope: "LAST_RUN", runId: targetRunId }
+      : undefined);
+    setScopedChanges(undefined);
     setChangesError(undefined);
     dispatchRightSidebar({ type: "open", tabId: "review" });
     if (!targetRunId || !task?.taskId || !modelApi) return;
+    if (workspaceApi) {
+      void Promise.all([
+        workspaceApi.listHistory({ taskId: task.taskId, limit: 40 }),
+        workspaceApi.listBranches(task.taskId),
+      ]).then(([history, branches]) => {
+        setGitHistory(history.commits);
+        setGitBranches(branches);
+      }).catch(() => {
+        // Run diff remains available even when repository metadata cannot load.
+      });
+    }
     setChangesLoading(true);
     void Promise.all([
       modelApi.getRunChanges(task.taskId, targetRunId),
@@ -340,7 +396,7 @@ export const TaskPage = memo(function TaskPage({
         setRunChanges(result);
         setTaskWorktree(worktree);
         setTaskWorktreeChanges(aggregate);
-        const reviewedFiles = aggregate?.files ?? result.files;
+        const reviewedFiles = result.files;
         const selected = reviewedFiles.find((file) =>
           requestedPath && (
             file.path === requestedPath
@@ -350,7 +406,7 @@ export const TaskPage = memo(function TaskPage({
           ));
         setSelectedChangeId(
           selected
-            ? `${aggregate ? `task:${aggregate.taskId}` : result.runId}:${selected.path}`
+            ? `${result.runId}:${selected.path}`
             : undefined,
         );
       })
@@ -360,7 +416,7 @@ export const TaskPage = memo(function TaskPage({
         );
       })
       .finally(() => setChangesLoading(false));
-  }, [activeRun?.runId, modelApi, task?.taskId]);
+  }, [activeRun?.runId, modelApi, task?.taskId, workspaceApi]);
   const loadRunChanges = useCallback(async (runId: string) => {
     if (!task?.taskId || !modelApi) {
       throw new Error("当前任务无法读取 Git 变更");
@@ -370,6 +426,96 @@ export const TaskPage = memo(function TaskPage({
   const reviewRun = useCallback((runId: string, filePath?: string) => {
     openChangeReview(undefined, runId, filePath);
   }, [openChangeReview]);
+  const selectReviewScope = useCallback(async (scope: GitReviewScope) => {
+    const taskId = task?.taskId;
+    if (!taskId) return;
+    const generation = ++reviewRefreshGenerationRef.current;
+    setReviewScope(scope);
+    setSelectedChangeId(undefined);
+    setChangesLoading(true);
+    setChangesError(undefined);
+    try {
+      if (workspaceApi) {
+        const next = await workspaceApi.getChanges({ taskId, scope });
+        if (generation !== reviewRefreshGenerationRef.current) return;
+        setScopedChanges(next);
+      } else if (
+        modelApi
+        && scope.scope === "LAST_RUN"
+        && scope.runId
+      ) {
+        const next = await modelApi.getRunChanges(taskId, scope.runId);
+        if (generation !== reviewRefreshGenerationRef.current) return;
+        setRunChanges(next);
+        setScopedChanges(undefined);
+      } else {
+        throw new Error("当前 Core 版本不支持这个审阅范围");
+      }
+    } catch (error) {
+      if (generation !== reviewRefreshGenerationRef.current) return;
+      setChangesError(
+        error instanceof Error ? error.message : "读取 Git 变更失败",
+      );
+    } finally {
+      if (generation === reviewRefreshGenerationRef.current) {
+        setChangesLoading(false);
+      }
+    }
+  }, [modelApi, task?.taskId, workspaceApi]);
+
+  useEffect(() => {
+    const taskId = task?.taskId;
+    if (
+      !taskId
+      || !workspaceApi
+      || !reviewScope
+      || !rightSidebar.visible
+      || rightSidebar.activeTabId !== "review"
+      || observedWorkspaceRevision <= refreshedReviewRevisionRef.current
+    ) return;
+
+    const revision = observedWorkspaceRevision;
+    const generation = ++reviewRefreshGenerationRef.current;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      const scopedRequest = workspaceApi.getChanges({ taskId, scope: reviewScope });
+      const runRequest = reviewScope.scope === "LAST_RUN"
+        && reviewScope.runId
+        && modelApi
+        ? modelApi.getRunChanges(taskId, reviewScope.runId)
+        : Promise.resolve(undefined);
+      void Promise.all([scopedRequest, runRequest])
+        .then(([nextScopedChanges, nextRunChanges]) => {
+          if (cancelled || generation !== reviewRefreshGenerationRef.current) return;
+          setScopedChanges(nextScopedChanges);
+          if (nextRunChanges) setRunChanges(nextRunChanges);
+          refreshedReviewRevisionRef.current = Math.max(
+            refreshedReviewRevisionRef.current,
+            revision,
+          );
+          setChangesError(undefined);
+        })
+        .catch((error: unknown) => {
+          if (cancelled || generation !== reviewRefreshGenerationRef.current) return;
+          setChangesError(
+            error instanceof Error ? error.message : "刷新 Git 变更失败",
+          );
+        });
+    }, 180);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    modelApi,
+    observedWorkspaceRevision,
+    reviewScope,
+    rightSidebar.activeTabId,
+    rightSidebar.visible,
+    task?.taskId,
+    workspaceApi,
+  ]);
   const openAgentSession = useCallback((agentId: string) => {
     dispatchRightSidebar({ type: "open", tabId: `agent:${agentId}` });
   }, []);
@@ -387,15 +533,21 @@ export const TaskPage = memo(function TaskPage({
     try {
       const reverted = await modelApi.revertRun(taskId, runId);
       if (reviewRunId === runId) setRunChanges(reverted);
-      const worktree = await modelApi.getTaskWorktree(taskId);
-      setTaskWorktree(worktree);
-      setTaskWorktreeChanges(
-        worktree?.workspaceMode === "WORKTREE"
-          && isTaskChangesVisible(worktree)
-          ? await modelApi.getTaskWorktreeChanges(taskId)
-          : undefined,
-      );
-      await store.getState().openTask(taskId);
+      setWorkspaceRefreshToken((value) => value + 1);
+      try {
+        const worktree = await modelApi.getTaskWorktree(taskId);
+        setTaskWorktree(worktree);
+        setTaskWorktreeChanges(
+          worktree?.workspaceMode === "WORKTREE"
+            && isTaskChangesVisible(worktree)
+            ? await modelApi.getTaskWorktreeChanges(taskId)
+            : undefined,
+        );
+        await store.getState().openTask(taskId);
+      } catch {
+        setChangesError("撤回已完成，但界面状态刷新失败；重新打开任务即可同步");
+      }
+      if (reviewScope) await selectReviewScope(reviewScope);
       notify("本轮文件与对话已撤销", "success");
     } catch (error) {
       const message = error instanceof Error ? error.message : "撤销本轮失败";
@@ -404,7 +556,15 @@ export const TaskPage = memo(function TaskPage({
     } finally {
       setRevertingRunId(undefined);
     }
-  }, [modelApi, notify, reviewRunId, store, task?.taskId]);
+  }, [
+    modelApi,
+    notify,
+    reviewRunId,
+    reviewScope,
+    selectReviewScope,
+    store,
+    task?.taskId,
+  ]);
   const revertReviewedRun = useCallback(async () => {
     if (!reviewRunId || !runChanges?.revertible) return;
     await revertRun(reviewRunId);
@@ -430,14 +590,20 @@ export const TaskPage = memo(function TaskPage({
           ? await modelApi.createTaskWorktreeBranch(taskId, branchName ?? "")
           : await modelApi.discardTaskWorktree(taskId);
       setTaskWorktree(result);
-      if (result.worktreeState === "REMOVED"
-          || result.worktreeState === "RELEASED") {
-        setTaskWorktreeChanges(undefined);
-      } else {
-        setTaskWorktreeChanges(
-          await modelApi.getTaskWorktreeChanges(taskId),
-        );
+      setWorkspaceRefreshToken((value) => value + 1);
+      try {
+        if (result.worktreeState === "REMOVED"
+            || result.worktreeState === "RELEASED") {
+          setTaskWorktreeChanges(undefined);
+        } else {
+          setTaskWorktreeChanges(
+            await modelApi.getTaskWorktreeChanges(taskId),
+          );
+        }
+      } catch {
+        setChangesError("操作已完成，但审阅内容刷新失败；重新打开审阅栏即可同步");
       }
+      if (reviewScope) await selectReviewScope(reviewScope);
       if (result.worktreeState === "CONFLICTED") {
         notify("Local 与 Worktree 修改存在冲突，隔离内容已完整保留", "info");
       } else if (result.worktreeState === "CLEANUP_PENDING") {
@@ -458,7 +624,14 @@ export const TaskPage = memo(function TaskPage({
     } finally {
       setWorktreeAction(undefined);
     }
-  }, [modelApi, notify, task?.taskId, worktreeAction]);
+  }, [
+    modelApi,
+    notify,
+    reviewScope,
+    selectReviewScope,
+    task?.taskId,
+    worktreeAction,
+  ]);
   const applyReviewedWorktree = useCallback(() => {
     void runWorktreeAction("apply");
   }, [runWorktreeAction]);
@@ -475,6 +648,13 @@ export const TaskPage = memo(function TaskPage({
     setRunChanges(undefined);
     setTaskWorktree(undefined);
     setTaskWorktreeChanges(undefined);
+    setWorkspaceContext(undefined);
+    setReviewScope(undefined);
+    setScopedChanges(undefined);
+    setGitHistory([]);
+    setGitBranches([]);
+    refreshedReviewRevisionRef.current = 0;
+    reviewRefreshGenerationRef.current += 1;
     setWorktreeAction(undefined);
     setChangesError(undefined);
   }, [task?.taskId]);
@@ -1053,14 +1233,30 @@ export const TaskPage = memo(function TaskPage({
     requestAnimationFrame(() => followUpInputRef.current?.focus());
   }, [runtime]);
 
-  const reviewedChanges = taskWorktreeChanges ?? runChanges;
-  const fallbackChangeMessages = reviewedChanges ? undefined : displayMessages;
+  const reviewedChanges = scopedChanges
+    ?? (reviewScope?.scope === "LAST_RUN"
+      ? runChanges
+      : reviewScope
+        ? undefined
+        : taskWorktreeChanges ?? runChanges);
+  const fallbackChangeMessages = reviewedChanges || reviewScope
+    ? undefined
+    : displayMessages;
+  const reviewedChangesId = scopedChanges
+    ? [
+        "scope",
+        reviewScope?.scope ?? "UNKNOWN",
+        reviewScope?.runId
+          ?? reviewScope?.commitSha
+          ?? `${reviewScope?.baseRef ?? ""}..${reviewScope?.headRef ?? ""}`,
+      ].join(":")
+    : !reviewScope && taskWorktreeChanges
+      ? `task:${taskWorktreeChanges.taskId}`
+      : runChanges?.runId;
   const fileChanges = useMemo(
     () => reviewedChanges
       ? reviewedChanges.files.map((change) => ({
-          changeId: `${taskWorktreeChanges
-            ? `task:${taskWorktreeChanges.taskId}`
-            : runChanges?.runId}:${change.path}`,
+          changeId: `${reviewedChangesId}:${change.path}`,
           path: change.path,
           previousPath: change.previousPath || undefined,
           status: change.status,
@@ -1075,8 +1271,7 @@ export const TaskPage = memo(function TaskPage({
     [
       fallbackChangeMessages,
       reviewedChanges,
-      runChanges?.runId,
-      taskWorktreeChanges?.taskId,
+      reviewedChangesId,
     ],
   );
   const questionEntries = displayMessages.flatMap((message, messageIndex) => {
@@ -1517,6 +1712,15 @@ export const TaskPage = memo(function TaskPage({
           <div className="task-title-copy">
             <h1>{task.goal}</h1>
           </div>
+          <WorkspaceControls
+            api={workspaceApi}
+            taskId={task.taskId}
+            workspacePath={workspacePath}
+            refreshToken={workspaceRefreshToken}
+            disabled={workspaceControlsDisabled}
+            onContextChange={acceptWorkspaceContext}
+            notify={notify}
+          />
         </div>
 
         <div className="task-actions" ref={taskActionsRef}>
@@ -2157,6 +2361,12 @@ export const TaskPage = memo(function TaskPage({
               runChanges={runChanges}
               taskChanges={taskWorktreeChanges}
               taskWorktree={taskWorktree}
+              scope={reviewScope}
+              scopeChanges={scopedChanges}
+              lastRunId={reviewRunId}
+              branches={gitBranches}
+              commits={gitHistory}
+              currentBranch={workspaceContext?.branch?.name}
               selectedChangeId={selectedChangeId}
               loading={changesLoading}
               reverting={revertingRunId === reviewRunId}
@@ -2167,6 +2377,7 @@ export const TaskPage = memo(function TaskPage({
               onApplyWorktree={applyReviewedWorktree}
               onCreateWorktreeBranch={createReviewedWorktreeBranch}
               onDiscardWorktree={discardReviewedWorktree}
+              onScopeChange={(scope) => void selectReviewScope(scope)}
             />
           )}
           {activeAgentId && (

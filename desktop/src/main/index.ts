@@ -9,10 +9,12 @@ import { registerMemoryIpc } from "./memory-ipc";
 import { registerMcpIpc } from "./mcp-ipc";
 import { registerSkillIpc } from "./skill-ipc";
 import { registerWorkspaceIpc } from "./workspace-ipc";
+import { registerWorkspaceGitIpc } from "./workspace-git-ipc";
 import { RestModelGateway } from "./rest-model-gateway";
 import { RestMemoryGateway } from "./rest-memory-gateway";
 import { RestMcpGateway } from "./rest-mcp-gateway";
 import { RestTaskGateway } from "./rest-task-gateway";
+import { RestWorkspaceGateway } from "./rest-workspace-gateway";
 import type { TaskGateway } from "./task-gateway";
 import { createMainWindowOptions } from "./window-options";
 import {
@@ -49,6 +51,10 @@ const mcpGateway = new RestMcpGateway({
   baseUrl: devConfig.coreUrl,
   sessionToken: devConfig.startupToken,
 });
+const workspaceGateway = new RestWorkspaceGateway({
+  baseUrl: devConfig.coreUrl,
+  sessionToken: devConfig.startupToken,
+});
 // BrowserWindow 必须保留强引用，否则窗口可能在函数返回后被垃圾回收。
 const mainWindow = new WindowReference<BrowserWindow>();
 let unregisterIpc: (() => void) | undefined;
@@ -59,6 +65,7 @@ let unregisterSkillIpc: (() => void) | undefined;
 let unregisterAppearanceIpc: (() => void) | undefined;
 let unregisterAttachmentIpc: (() => void) | undefined;
 let unregisterWorkspaceIpc: (() => void) | undefined;
+let unregisterWorkspaceGitIpc: (() => void) | undefined;
 
 async function createWindow(): Promise<BrowserWindow> {
   const preloadPath = path.join(__dirname, "preload.js");
@@ -115,6 +122,7 @@ app.whenReady().then(async () => {
   unregisterAppearanceIpc = registerAppearanceIpc();
   unregisterAttachmentIpc = registerAttachmentIpc();
   unregisterWorkspaceIpc = registerWorkspaceIpc();
+  unregisterWorkspaceGitIpc = registerWorkspaceGitIpc(workspaceGateway);
   await createWindow();
 
   app.on("activate", async () => {
@@ -139,6 +147,7 @@ app.on("before-quit", () => {
   unregisterAppearanceIpc?.();
   unregisterAttachmentIpc?.();
   unregisterWorkspaceIpc?.();
+  unregisterWorkspaceGitIpc?.();
   gateway.dispose();
 });
 

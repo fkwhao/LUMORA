@@ -16,11 +16,13 @@ import com.lumora.core.conversation.domain.model.ConversationInputStatus;
 import com.lumora.core.conversation.domain.model.ConversationInputTarget;
 import com.lumora.core.conversation.domain.model.MessageAttachment;
 import com.lumora.core.conversation.application.support.MessageAttachmentJson;
+import com.lumora.core.shared.infrastructure.git.GitWorkspaceMutationGate;
 import com.lumora.core.task.application.service.TaskService;
 import com.lumora.core.task.application.support.TaskWorktreeService;
 import com.lumora.core.task.domain.entity.AgentTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -54,12 +56,14 @@ public class ConversationRunCoordinator {
     private final TaskService taskService;
     private final GitRunChangeService gitRunChangeService;
     private final TaskWorktreeService taskWorktreeService;
+    private final GitWorkspaceMutationGate mutationGate;
     private final Clock clock;
     private final int maxConcurrentRuns;
     private final ArrayDeque<String> queuedRunIds = new ArrayDeque<>();
     private final Set<String> executingRunIds = new HashSet<>();
     private final Set<String> pausedTurnRunIds = new HashSet<>();
 
+    @Autowired
     public ConversationRunCoordinator(
             ConversationService conversationService,
             ConversationRunStore runStore,
@@ -69,6 +73,7 @@ public class ConversationRunCoordinator {
             TaskService taskService,
             GitRunChangeService gitRunChangeService,
             TaskWorktreeService taskWorktreeService,
+            GitWorkspaceMutationGate mutationGate,
             Clock clock,
             @Value("${lumora.runs.max-concurrent:3}") int maxConcurrentRuns
     ) {
@@ -80,6 +85,7 @@ public class ConversationRunCoordinator {
         this.taskService = taskService;
         this.gitRunChangeService = gitRunChangeService;
         this.taskWorktreeService = taskWorktreeService;
+        this.mutationGate = mutationGate;
         this.clock = clock;
         if (maxConcurrentRuns < 1) {
             throw new IllegalArgumentException(
@@ -87,6 +93,27 @@ public class ConversationRunCoordinator {
             );
         }
         this.maxConcurrentRuns = maxConcurrentRuns;
+    }
+
+    /** Test-compatible constructor; production injects the shared gate. */
+    public ConversationRunCoordinator(
+            ConversationService conversationService,
+            ConversationRunStore runStore,
+            ConversationInputStore inputStore,
+            ConversationRunEventStreamRegistry eventStreams,
+            ConversationRunEventJournal eventJournal,
+            TaskService taskService,
+            GitRunChangeService gitRunChangeService,
+            TaskWorktreeService taskWorktreeService,
+            Clock clock,
+            int maxConcurrentRuns
+    ) {
+        this(
+                conversationService, runStore, inputStore, eventStreams,
+                eventJournal, taskService, gitRunChangeService,
+                taskWorktreeService, new GitWorkspaceMutationGate(), clock,
+                maxConcurrentRuns
+        );
     }
 
     public ConversationRun startMessage(
@@ -175,20 +202,21 @@ public class ConversationRunCoordinator {
             String taskId,
             String runId
     ) {
-        ConversationRun run = get(taskId, runId);
-        if (!run.getStatus().isTerminal()) {
-            throw new IllegalStateException("只有已结束的运行可以撤回");
-        }
-        if (runStore.findActiveForTask(taskId) != null) {
-            throw new IllegalStateException("当前任务仍有活动运行，不能撤回");
-        }
-        conversationService.assertRunMessagesRevertible(taskId, runId);
-        ConversationRunChangesResponse result = gitRunChangeService.revert(
-                taskId, runId
-        );
-        taskWorktreeService.onRunReverted(run);
-        conversationService.revertRunMessages(taskId, runId);
-        return result;
+        return mutationGate.execute(() -> {
+            ConversationRun run = get(taskId, runId);
+            if (!run.getStatus().isTerminal()) {
+                throw new IllegalStateException("只有已结束的运行可以撤回");
+            }
+            if (runStore.findActiveForTask(taskId) != null) {
+                throw new IllegalStateException("当前任务仍有活动运行，不能撤回");
+            }
+            conversationService.assertRunMessagesRevertible(taskId, runId);
+            ConversationRunChangesResponse result =
+                    gitRunChangeService.revert(taskId, runId);
+            taskWorktreeService.onRunReverted(run);
+            conversationService.revertRunMessages(taskId, runId);
+            return result;
+        });
     }
 
     public synchronized List<ConversationInput> listInputs(String taskId) {
@@ -492,11 +520,14 @@ public class ConversationRunCoordinator {
             pausedTurnRunIds.remove(runId);
             eventJournal.flush(runId);
             inputStore.cancelOpenForTask(taskId);
-            run = runStore.updateStatus(
-                    runId, ConversationRunStatus.CANCELLED, ""
-            );
-            gitRunChangeService.captureTerminal(run);
-            taskWorktreeService.onRunTerminal(run);
+            run = mutationGate.execute(() -> {
+                ConversationRun cancelled = runStore.updateStatus(
+                        runId, ConversationRunStatus.CANCELLED, ""
+                );
+                gitRunChangeService.captureTerminal(cancelled);
+                taskWorktreeService.onRunTerminal(cancelled);
+                return cancelled;
+            });
             publishLifecycle(runId, "任务已取消", "CANCELLED");
             eventStreams.complete(runId);
             releaseExecution(runId);
@@ -577,6 +608,25 @@ public class ConversationRunCoordinator {
     }
 
     private synchronized ConversationRun createAndEnqueue(
+            String taskId,
+            ConversationRunTrigger trigger,
+            String sourceMessageId,
+            String content,
+            List<MessageAttachment> attachments,
+            String model,
+            String reasoningEffort,
+            String workspacePath,
+            String permissionMode,
+            String correlationId
+    ) {
+        return mutationGate.execute(() -> createAndEnqueueUnderGate(
+                taskId, trigger, sourceMessageId, content, attachments,
+                model, reasoningEffort, workspacePath, permissionMode,
+                correlationId
+        ));
+    }
+
+    private ConversationRun createAndEnqueueUnderGate(
             String taskId,
             ConversationRunTrigger trigger,
             String sourceMessageId,
@@ -675,6 +725,10 @@ public class ConversationRunCoordinator {
     }
 
     private void enqueueNextTurn(String taskId) {
+        mutationGate.execute(() -> enqueueNextTurnUnderGate(taskId));
+    }
+
+    private void enqueueNextTurnUnderGate(String taskId) {
         if (runStore.findActiveForTask(taskId) != null) {
             return;
         }
@@ -718,25 +772,7 @@ public class ConversationRunCoordinator {
             }
             executingRunIds.add(runId);
             try {
-                String effectiveWorkspace =
-                        taskWorktreeService.acquireForRun(run);
-                if (effectiveWorkspace == null
-                        || effectiveWorkspace.isBlank()) {
-                    effectiveWorkspace = run.getWorkspacePath();
-                }
-                ConversationRun updatedRun = runStore.updateWorkspacePath(
-                        runId, effectiveWorkspace
-                );
-                if (updatedRun != null) {
-                    run = updatedRun;
-                } else {
-                    // Defensive fallback for alternative store adapters.
-                    run.setWorkspacePath(effectiveWorkspace);
-                }
-                gitRunChangeService.begin(run);
-                runStore.updateStatus(
-                        runId, ConversationRunStatus.RUNNING, ""
-                );
+                run = mutationGate.execute(() -> bindAndActivateRun(runId));
                 if (run.getTriggerType() == ConversationRunTrigger.RESUME) {
                     publishLifecycle(
                             runId, "正在恢复执行现场", "RUNNING"
@@ -747,6 +783,28 @@ public class ConversationRunCoordinator {
                 fail(runId, error);
             }
         }
+    }
+
+    private ConversationRun bindAndActivateRun(String runId) {
+        ConversationRun run = runStore.require(runId);
+        String effectiveWorkspace = taskWorktreeService.acquireForRun(run);
+        if (effectiveWorkspace == null || effectiveWorkspace.isBlank()) {
+            effectiveWorkspace = run.getWorkspacePath();
+        }
+        ConversationRun updatedRun = runStore.updateWorkspacePath(
+                runId, effectiveWorkspace
+        );
+        if (updatedRun != null) {
+            run = updatedRun;
+        } else {
+            // Defensive fallback for alternative store adapters.
+            run.setWorkspacePath(effectiveWorkspace);
+        }
+        gitRunChangeService.begin(run);
+        ConversationRun running = runStore.updateStatus(
+                runId, ConversationRunStatus.RUNNING, ""
+        );
+        return running == null ? run : running;
     }
 
     private void startWorker(ConversationRun run) {
@@ -886,19 +944,26 @@ public class ConversationRunCoordinator {
         if (paused && !run.getStatus().isTerminal()) {
             runStore.updateStatus(runId, ConversationRunStatus.PAUSED, "");
             publishLifecycle(runId, "任务已暂停", "PAUSED");
-        } else if (!run.getStatus().isTerminal()
-                && run.getStatus() != ConversationRunStatus.PAUSED) {
-            inputStore.moveOpenSteersToNextTurn(runId);
-            runStore.updateStatus(
-                    runId, ConversationRunStatus.COMPLETED, ""
-            );
+        } else {
+            mutationGate.execute(() -> {
+                ConversationRun current = runStore.require(runId);
+                if (!current.getStatus().isTerminal()
+                        && current.getStatus()
+                        != ConversationRunStatus.PAUSED) {
+                    inputStore.moveOpenSteersToNextTurn(runId);
+                    runStore.updateStatus(
+                            runId, ConversationRunStatus.COMPLETED, ""
+                    );
+                }
+                ConversationRun settled = runStore.require(runId);
+                if (settled.getStatus().isTerminal()) {
+                    gitRunChangeService.captureTerminal(settled);
+                    taskWorktreeService.onRunTerminal(settled);
+                }
+            });
         }
-        eventStreams.complete(runId);
         ConversationRun settled = runStore.require(runId);
-        if (settled.getStatus().isTerminal()) {
-            gitRunChangeService.captureTerminal(settled);
-            taskWorktreeService.onRunTerminal(settled);
-        }
+        eventStreams.complete(runId);
         releaseExecution(runId);
         if (!paused && runStore.require(runId).getStatus()
                 == ConversationRunStatus.COMPLETED) {
@@ -948,11 +1013,15 @@ public class ConversationRunCoordinator {
                 ChatStreamEventType.FAILED, "", run.getModel(), null, message
         );
         eventJournal.appendImmediately(runId, failed);
-        runStore.updateStatus(
-                runId, ConversationRunStatus.FAILED, message
-        );
-        gitRunChangeService.captureTerminal(runStore.require(runId));
-        taskWorktreeService.onRunTerminal(runStore.require(runId));
+        mutationGate.execute(() -> {
+            runStore.updateStatus(
+                    runId, ConversationRunStatus.FAILED, message
+            );
+            ConversationRun failedRun = runStore.require(runId);
+            gitRunChangeService.captureTerminal(failedRun);
+            taskWorktreeService.onRunTerminal(failedRun);
+        });
+        eventStreams.complete(runId);
         releaseExecution(runId);
         drainQueue();
     }

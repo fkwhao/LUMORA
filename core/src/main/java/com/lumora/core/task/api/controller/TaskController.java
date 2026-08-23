@@ -8,6 +8,7 @@ import com.lumora.core.task.api.dto.request.UpdateTaskPreferencesRequest;
 import com.lumora.core.task.api.dto.request.UpdateTaskWorkspaceRequest;
 import com.lumora.core.task.api.dto.response.TaskResponse;
 import com.lumora.core.task.application.service.TaskService;
+import com.lumora.core.task.application.support.TaskCreationCoordinator;
 import com.lumora.core.task.domain.model.TaskDetails;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -34,6 +35,7 @@ public class TaskController {
 
     private final TaskService taskService;
     private final TaskResponseConverter responseConverter;
+    private final TaskCreationCoordinator taskCreationCoordinator;
 
     @PostMapping
     public ResponseEntity<TaskResponse> createTask(
@@ -41,10 +43,15 @@ public class TaskController {
             @RequestHeader(HttpContractConstants.CORRELATION_ID_HEADER)
             String correlationId
     ) {
-        TaskDetails task = taskService.createTask(
+        var selection = request.getEnvironmentSelection();
+        TaskDetails task = taskCreationCoordinator.createTask(
                 request.getGoal(),
                 request.getWorkspacePath(),
-                correlationId
+                correlationId,
+                selection == null ? null : selection.getTarget(),
+                selection == null ? null : selection.getWorktreePath(),
+                selection == null
+                        ? null : selection.getAutoApplyWhenClean()
         );
         return ResponseEntity
                 .status(HttpStatus.CREATED)

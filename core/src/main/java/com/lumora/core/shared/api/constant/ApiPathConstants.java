@@ -7,6 +7,7 @@ public final class ApiPathConstants {
 
     public static final String API_PREFIX = "/api/v1";
     public static final String API_SCOPE_PREFIX = API_PREFIX + "/";
+    public static final String WORKSPACE_INSPECT = "/workspaces/inspect";
     public static final String HEALTH = API_PREFIX + "/health";
     public static final String TASKS = API_PREFIX + "/tasks";
     public static final String MODEL_SETTINGS =
@@ -22,12 +23,24 @@ public final class ApiPathConstants {
     public static final String TASK_EVENTS = TASK_BY_ID + "/events";
     public static final String TASK_PREFERENCES = TASK_BY_ID + "/preferences";
     public static final String TASK_WORKSPACE = TASK_BY_ID + "/workspace";
+    public static final String TASK_WORKSPACE_HANDOFF =
+            TASK_WORKSPACE + "/handoff";
+    public static final String TASK_WORKTREE_SETTINGS =
+            TASK_WORKSPACE + "/worktree-settings";
     public static final String TASK_WORKTREE = TASK_BY_ID + "/worktree";
     public static final String TASK_WORKTREE_CHANGES =
             TASK_WORKTREE + "/changes";
     public static final String TASK_WORKTREE_APPLY = TASK_WORKTREE + "/apply";
     public static final String TASK_WORKTREE_BRANCH = TASK_WORKTREE + "/branch";
     public static final String TASK_WORKTREE_DISCARD = TASK_WORKTREE + "/discard";
+    public static final String TASK_GIT = TASK_BY_ID + "/git";
+    public static final String TASK_GIT_BRANCHES = TASK_GIT + "/branches";
+    public static final String TASK_GIT_CHECKOUT = TASK_GIT + "/checkout";
+    public static final String TASK_GIT_HISTORY = TASK_GIT + "/history";
+    public static final String TASK_GIT_CHANGES = TASK_GIT + "/changes";
+    public static final String TASK_GIT_WORKTREES = TASK_GIT + "/worktrees";
+    public static final String TASK_GIT_WORKTREES_PRUNE =
+            TASK_GIT_WORKTREES + "/prune";
     public static final String TASK_MESSAGES = TASK_BY_ID + "/messages";
     public static final String TASK_MESSAGE_STREAM =
             TASK_MESSAGES + "/stream";

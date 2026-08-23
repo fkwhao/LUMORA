@@ -2,7 +2,14 @@
 
 ## 1. 范围
 
-本阶段实现不同任务之间的 Run 并发、同一模型步骤内的安全工具并发，以及这些调用访问同一工作区时的资源冲突保护。同一任务仍只有一个活动 Run，后续问题继续由现有耐久问题队列串行推进；多 Agent 编排不在本阶段范围内。每任务常驻 Agent Driver 也明确延期到多 Agent 阶段：当前队列、Steer 和暂停恢复已经由 Core 的耐久 Run 状态承载，不需要为这些能力长期保留 Python Runner 或协程。
+本设计覆盖不同任务之间的 Run 并发、同一模型步骤内的安全工具并发，以及普通多会话共享
+Local 时的写入排序、陈旧修改拒绝和实时变更感知。同一任务仍只有一个活动 Run，后续问题继续
+由现有耐久问题队列串行推进。
+
+最终 Workspace 策略是“共享 Local 默认、用户显式 Worktree”。系统不得因为出现第二个任务、
+并发数量、改动规模或风险等级自动创建 Worktree；Agent、子 Agent、Supervisor 和工具都无权
+自行选择或切换 Workspace。每任务常驻 Agent Driver 仍延期到多 Agent 阶段，现有队列、Steer
+和暂停恢复继续由 Core 的耐久 Run 状态承载。
 
 ## 2. DeepSeek Harness 对照
 
@@ -12,17 +19,44 @@ DeepSeek Harness 的并发边界由三层组成：
 2. `followup` 只负责进入 Session Inbox。当前活动达到 quiescence 后，Driver 再领取下一条输入；保留 Inbox 的取消不会提前并发启动同一 Session 的替代 Turn。
 3. 文件系统对写操作按目标路径串行，并通过读取版本和原子条件写入拒绝陈旧修改。文件读取可以并发；单步骤工具并行采用显式安全声明和独占屏障。
 
-LUMORA 采用相同边界，同时保留 Core 的全局有界 Run 池，并在 Agent Loop 中加入单步骤工具滚动并发池。
+DeepSeek Harness 的公开实现本质是共享目录上的乐观并发控制：Session 使用 Workspace 的同一
+`cwd`，子 Agent 继承父 Session 的工作目录；工具写入发现版本陈旧时拒绝，并要求重新读取后
+重试。它没有通过原生 Git Worktree 或任务结束三方合并来解决普通多 Session 并发，也不会把
+其他 Session 的完整 Diff 主动注入模型上下文。
+
+LUMORA 借鉴“共享目录 + 版本守卫”，并采用 Workspace/文件两级锁域，补充
+`workspaceRevision`、安全边界通知和逐工具文件归属。Git 继续负责 Diff、撤回和显式 Worktree，
+不承担普通多会话的日常合并。
 
 参考实现：
 
-- [DeepSeek Harness ReactLoopAgent](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/core/agent-loop/src/agent.ts)
-- [DeepSeek Harness 单步骤工具并发设计](https://github.com/deepseek-ai/deepseek-harness/blob/master/.agents/notes/implemented/feature/2026-07-10-parallel-tool-call-execution.md)
-- [DeepSeek Harness 多 Session 隔离测试](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/acp/acp/tests/multi-session.spec.ts)
-- [DeepSeek Harness 文件观察策略](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/fs/fs-observation-policy/src/index.ts)
-- [DeepSeek Harness 本地文件原子写与目标锁](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/fs/fs-local/src/index.ts)
+- [DeepSeek Harness Workspace](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/subsystems/workspace.md)
+- [DeepSeek Harness Subagent](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/subsystems/subagent.md)
+- [DeepSeek Harness Filesystem](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/subsystems/filesystem.md)
+- [DeepSeek Harness 文件观察策略](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/fs/fs-observation-policy/README.md)
+- [DeepSeek Harness 本地文件原子写与目标锁](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/fs/fs-local/README.md)
 
-## 3. Run 调度
+该参考也有边界：版本守卫是可选插件，观察状态不跨 Session 恢复持久化，Shell 写入不经过文件
+工具的观察链，目标锁只在单进程内生效。LUMORA 不能把这些限制照搬为安全承诺。
+
+## 3. 最终 Workspace 决策
+
+每个任务持久化 `workspaceMode`、`sourceWorkspacePath` 和 `effectiveWorkspacePath`：
+
+- 新任务默认 `workspaceMode=LOCAL`，并直接使用项目 Local 路径；多个 Local 任务可以并发。
+- 只有用户在任务标题栏显式创建或选择 Worktree，任务才使用 `workspaceMode=WORKTREE`。
+- Workspace 模式一旦用于启动活动 Run，在该 Run 安全结束前不可切换。
+- Supervisor、Worker、子 Agent、可续接 Session、DAG 节点和所有工具只继承
+  `effectiveWorkspacePath`，协议中不提供自主创建或切换入口。
+- Shell 的直接 Git mutation、元数据路径、常见命令包装器和脚本入口在执行前拒绝，执行后继续
+  校验 HEAD、index、refs、Worktree 与仓库配置；这是应用层控制面，不宣称替代操作系统沙箱。
+- 标题栏分别提供 Workspace 控件与 Branch 控件。Workspace 决定物理目录，Branch 只描述或
+  切换该目录的 Git 分支；两个控件不能合并为一个菜单。
+- Local 存在活动写入时禁止切换分支。Worktree 的应用、建分支、放弃也只能由用户或用户预先
+  显式开启的“无冲突自动应用”策略触发。
+- 本次交付不改聊天输入框，不在模型选择器或审批控件旁加入 Workspace 入口。
+
+## 4. Run 调度
 
 `ConversationRunCoordinator` 继续作为唯一调度入口：
 
@@ -48,9 +82,11 @@ Run 时，界面先原样恢复缓存快照，以 Core 返回的 `startedAt`（�
 也不会先清空步骤再重建。如果 Core 表明该 Run 已暂停、失败或完成，则放弃运行中快照并以
 持久化消息为准。
 
-## 4. 资源访问模型
+## 5. 资源访问模型
 
-Python `ToolRegistry` 持有进程级 `ResourceLockManager`。请求级 Registry 副本和 MCP 动态 Registry 选择视图复用同一管理器，避免锁只在一个 HTTP 请求内生效。
+Python `ToolRegistry` 持有进程级 `ResourceLockManager`。请求级 Registry 副本和 MCP 动态
+Registry 选择视图复用同一管理器，避免锁只在一个 HTTP 请求内生效。Local 的规范 Workspace
+key 是所有工具共享的读写域，精确文件 key 同时用于版本观察和目标写入串行化。
 
 资源采用写优先的异步读写锁。一个工具可以声明多个 `ResourceAccess(key, mode)`；获取顺序稳定，写模式覆盖同 key 的读模式。当前内置工具声明如下：
 
@@ -66,18 +102,20 @@ Python `ToolRegistry` 持有进程级 `ResourceLockManager`。请求级 Registry
 由此得到以下行为：
 
 - 同一文件的多个读取可以并发。
-- 不同文件的修改可以并发。
-- 同一文件的写入互斥，读写不会交叉。
+- 不同文件的精确写入可以短暂并行；同一文件的写入由 file WRITE 串行，并继续做版本/hash 校验。
+- revision 在副作用捕获后按工具调用形成稳定发布顺序，不要求模型推理或无关文件写入串行。
 - Shell 无法可靠静态判断具体文件，因此在执行期间占用工作区写锁，作为所有内置文件操作的保守屏障。
-- 未声明资源且标记为非并发安全的旧工具继续使用稳定 key 的独占锁，默认失败关闭。
+- 未声明资源的扩展工具按副作用属性 fail closed：明确只读使用 Workspace READ，其他工具使用
+  Workspace WRITE，并用执行前后快照核对真实副作用。
 
 锁等待时间、是否真实发生竞争、发生竞争的资源 key，以及实际资源声明都会写入
 Tool Result metadata（`resourceWaitMs`、`resourceContended`、
 `resourceContendedKeys`、`resourceAccess`），便于后续诊断资源竞争；metadata 不进入
 模型上下文。竞争状态由锁在原子获取点记录，不依赖毫秒阈值推测，因此即使等待时间因取整
-显示为 `0ms`，也不会漏掉实际冲突。
+显示为 `0ms`，也不会漏掉实际冲突。锁只决定执行顺序，不代替陈旧版本检查：任务可能在等待锁
+之前已经基于旧内容完成推理，获得锁后仍必须验证预期版本。
 
-## 5. 单任务工具调用并发
+## 6. 单任务工具调用并发
 
 一个模型步骤返回多个兄弟工具调用时，Agent Loop 按模型顺序逐项分类：
 
@@ -89,42 +127,84 @@ Tool Result metadata（`resourceWaitMs`、`resourceContended`、
 - 暂停后立即停止补充新调用，已经启动的调用安全收敛，尚未启动的调用写入 `ABORTED_BEFORE_DISPATCH` 占位结果。
 - 同步文件与 Skill 工具主体通过工作线程执行，避免阻塞 Agent 事件循环；原生异步工具继续直接 await。
 
-这与跨任务资源层是两个独立维度：调度器决定哪些兄弟调用可以重叠，资源锁继续验证实际工作区/文件冲突。当前内置并发安全工具均为只读能力；写文件、Shell 和计划更新保持独占。
+这与跨任务资源层是两个独立维度：调度器决定哪些兄弟调用可以重叠，Workspace 锁继续验证
+实际发布顺序。当前内置并发安全工具均为只读能力；写文件、Shell 和计划更新保持独占。
 
-## 6. 陈旧写入保护
+## 7. 陈旧写入保护
 
-仅有互斥锁不能阻止“任务 A 读取旧内容、任务 B 修改、任务 A 稍后完整覆盖”的逻辑丢失更新。因此 `read_file` 和 `search_in_file` 会按 `task_id + canonical file key` 保存读取版本。`write_file` 覆盖已有文件前必须满足：
+仅有互斥锁不能阻止“任务 A 读取旧内容、任务 B 修改、任务 A 稍后完整覆盖”的逻辑丢失更新。
+因此 `read_file` 和 `search_in_file` 会按 Session/任务与 canonical file key 保存文件系统版本、
+内容 hash 和观察时的 `workspaceRevision`。`write_file` 覆盖已有文件前必须满足：
 
 1. 当前任务已经观察过该文件；
 2. 文件的设备、inode、大小和纳秒级修改/变更时间仍与观察版本一致；
-3. 读取期间版本没有变化。
+3. 目标内容 hash 与预期一致；
+4. 读取期间目标文件没有变化。
 
 不满足时拒绝覆盖并要求重新读取。成功写入后更新该任务的观察版本。新文件仍可直接创建；若其他任务抢先创建，后来的盲写会被拒绝。
 
 `apply_patch` 在文件写锁内读取当前内容，并以唯一 `oldText` 作为比较条件；目标文本消失或变得不唯一时拒绝修改。最终写入使用同目录的唯一临时文件，完整写入并 `fsync` 后才发布，避免暴露半写文件，也避免另一个 Runtime 或崩溃遗留文件与固定临时文件名碰撞。覆盖已有文件会保留原权限位，并在最终替换前再次核对读取版本；新文件通过同目录硬链接原子执行 create-if-absent，若其他任务或进程已经抢先创建则拒绝覆盖。
 
 文件资源 key 以解析后的规范路径生成。因此同一 Runtime 内，经由现有符号链接访问同一目标
-文件会进入相同的锁域；不存在的新文件也会先解析其现有父目录，避免目录符号链接产生两个
+文件会进入相同的观察域；不存在的新文件也会先解析其现有父目录，避免目录符号链接产生两个
 逻辑身份。Shell 仍以工作区写锁覆盖重命名、符号链接调整和目录级修改。
 
-## 7. 取消、暂停和队列
+## 8. Workspace revision、事件与逐工具文件归属
+
+每个物理 Workspace 在 Core 持久化一条单调递增的 `workspaceRevision`。Python Runtime 另有
+同进程 revision 流用于活动 Run 通知；两者都表达“安全发布顺序”，不等同于 Git commit，也不因
+纯读取增加。一次工具调用无论修改多少文件，只形成一个 Core revision：
+
+```text
+获得声明的 Workspace/文件资源锁
+  → 记录 beforeRevision 与工具前快照
+  → 执行并验证文件副作用
+  → 生成逐工具文件归属
+  → Core 持久化 afterRevision = beforeRevision + 1
+  → Runtime 通知其他活动 Run
+  → 释放写锁
+```
+
+逐工具归属至少包含：`taskId`、`runId`、`toolCallId`、`agentId`、revision 和每个文件的规范相对
+路径、操作类型、前后 hash、增删行和有界 patch。
+`apply_patch`、`write_file` 使用工具自身的前后内容；Shell 必须通过执行前后的 Workspace 快照
+计算实际 ChangeSet。工具声明与真实 Diff 不一致时以真实 Diff 为准并记录诊断。
+
+Runtime 事件包含 revision、来源 task/run/agent 和变更文件摘要。同一 Python Runtime 中共享
+Local 的其他活动 Session 在下一个安全步骤边界消费；事件只通知“哪些已安全变化”，不把完整
+patch 注入模型请求，也不打断已经发布到供应商的单次模型调用。Core 同时把同一工具事件投影到
+`workspace_revision`、`workspace_run_attribution` 和 `workspace_change_event`，用于重启后的
+审计、Run Diff 和撤回；当前没有新增独立的仓库级 Renderer SSE/replay API。
+
+Session 收到事件后，对命中的已观察文件清除旧版本，并在下一次写入前重新读取。若 revision
+变化只涉及不相交文件，目标文件版本/hash 仍匹配的局部修改可以继续发布；这样避免把所有并发
+退化成每次 Workspace 变化都让全部任务重新规划。
+
+## 9. 取消、暂停和队列
 
 资源等待可取消。Run 在等待锁期间收到暂停或取消后，不会在稍后获得锁时继续执行工具。已经开始的工具仍遵循现有安全收敛协议。
 
 暂停只作用于当前 Run。原问题队列保持耐久状态，Run 完成暂停封存后释放执行槽位，其他任务可以继续；恢复操作重新进入全局 Run 队列。当前任务的下一轮问题不会与暂停 Turn 同时运行。
 
-## 8. 已知限制
+## 10. 已知限制
 
 - 资源锁只协调同一个 Python Agent Runtime 进程；未来若部署多个 Runtime 进程，需要把资源协调提升为跨进程锁或由单一工作区 Worker 承载。
 - 新文件发布具备跨进程 create-if-absent 语义；已有文件的最终版本复核与替换在普通文件系统 API 下并不是一个跨进程原子 CAS。若多个 Runtime 会同时写同一工作区，仍需跨进程租约或单工作区 Worker 才能完全关闭这段极短竞争窗口。
-- `shell_command background=true` 返回后，后台进程可能继续修改工作区，无法长期持有本次工具调用的工作区锁。完整覆盖仍会由版本检查发现多数外部修改；后台进程的长期资源租约需要独立设计。
+- `shell_command background=true` 若可能修改共享 Local，必须把 Workspace 写租约转移给受跟踪的
+  后台进程并持有到终态；无法可靠跟踪时拒绝该模式，不能在返回后无租约继续写入。
 - 文件观察记录当前只保存在进程内。Runtime 重启后，覆盖已有文件必须重新读取，这属于安全失败。
 - 并发分类是单调用声明，不比较兄弟调用参数；依赖“两个目标不同才安全”的写操作必须继续声明为独占，由资源层提供第二道保护。
 - 当前没有任务级常驻 Driver。多 Agent 阶段将把它设计为可重建的 `SessionActor`，用于长期 Inbox、Supervisor/Worker 协作和运行中路由；Run、事件与 Checkpoint 仍由 Core 持久化，不能形成第二套暂停或队列状态机。
 
-## 9. 验证要求
+## 11. 验证要求
 
 - Core：不同任务在上限内同时 RUNNING，超过上限保持 QUEUED；释放槽位后 FIFO 启动下一项。
-- Agent：Registry 副本共享资源锁；读/读重叠；同资源写入互斥；竞争元数据精确记录；符号链接别名落入同一文件锁；不同任务的陈旧完整写被拒绝，重新读取后可成功；新文件抢先创建与最终发布前的外部修改均被拒绝且不遗留临时文件。
+- Agent：Registry 副本共享 Workspace/文件锁域；读/读及不同目标文件可重叠；Shell 形成全局写
+  屏障；竞争 metadata 精确记录；符号链接别名落入同一观察域；不同任务的陈旧完整写被拒绝，
+  重新读取后可成功；新文件抢先创建与最终发布前的外部修改均被拒绝且不遗留临时文件。
+- Core：每个已完整捕获的成功副作用对应唯一连续 revision 和逐工具文件归属；失败但有部分副作用
+  仍记账，取消、无修改和不完整捕获不会伪装成可安全撤回。
+- Desktop：普通新任务始终默认 Local；只有标题栏显式选择才进入 Worktree；Workspace 与 Branch
+  控件独立，输入框不发生结构变化。
 - Agent Loop：安全兄弟调用重叠、独占屏障生效、滚动池不超过配置上限、乱序完成按模型顺序提交、暂停不补充新调用。
 - 既有回归：问题队列、Steer、暂停/继续、Agent Loop、Desktop Store 和协议测试全部通过。

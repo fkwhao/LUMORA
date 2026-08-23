@@ -233,14 +233,17 @@ def test_full_file_write_rejects_a_stale_cross_task_observation(
         )
     )
 
-    with pytest.raises(ValueError, match="其他任务修改"):
-        asyncio.run(
-            registry.execute(
-                "write_file",
-                first_context,
-                {"path": "shared.txt", "content": "first stale"},
-            )
+    stale = asyncio.run(
+        registry.execute(
+            "write_file",
+            first_context,
+            {"path": "shared.txt", "content": "first stale"},
         )
+    )
+    assert stale.is_error is True
+    assert stale.metadata["failureKind"] == "stale_workspace_version"
+    assert stale.metadata["retryable"] is True
+    assert stale.metadata["toolExecutionState"] == "not_started"
 
     assert target.read_text(encoding="utf-8") == "second"
     asyncio.run(
@@ -289,14 +292,17 @@ def test_full_file_write_isolates_observations_between_sibling_agents(
         )
     )
 
-    with pytest.raises(ValueError, match="其他 Agent 修改"):
-        asyncio.run(
-            registry.execute(
-                "write_file",
-                first_context,
-                {"path": target.name, "content": "stale first"},
-            )
+    stale = asyncio.run(
+        registry.execute(
+            "write_file",
+            first_context,
+            {"path": target.name, "content": "stale first"},
         )
+    )
+    assert stale.is_error is True
+    assert stale.metadata["failureKind"] == "stale_workspace_version"
+    assert stale.metadata["retryable"] is True
+    assert stale.metadata["toolExecutionState"] == "not_started"
 
     assert target.read_text(encoding="utf-8") == "second"
 

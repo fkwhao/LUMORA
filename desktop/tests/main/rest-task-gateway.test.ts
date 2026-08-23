@@ -93,6 +93,7 @@ describe("Java REST task gateway", () => {
     expect(JSON.parse(receivedBody)).toEqual({
       goal: "整理下载目录",
       workspacePath: "F:\\project\\test",
+      environmentSelection: { target: "LOCAL" },
     });
   });
 

@@ -3,6 +3,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  type ReactNode,
 } from "react";
 import {
   AlertTriangle,
@@ -10,6 +11,8 @@ import {
   ChevronRight,
   FileDiff as FileDiffIcon,
   GitBranch,
+  GitCommitHorizontal,
+  Layers3,
   LoaderCircle,
   RotateCcw,
   Trash2,
@@ -20,6 +23,17 @@ import type {
   TaskWorktreeChanges,
   TaskWorktreeStatus,
 } from "../../../../shared/model-contract";
+import type {
+  GitBranchSummary,
+  GitCommitSummary,
+  GitReviewChanges,
+  GitReviewScope,
+} from "../../../../shared/workspace-contract";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "../../../components/ui/popover";
 import { FileDiff, rowsFromPatch, splitFilePath } from "./FileDiff";
 
 interface DiffReviewPaneProps {
@@ -27,6 +41,12 @@ interface DiffReviewPaneProps {
   runChanges?: ConversationRunChanges;
   taskChanges?: TaskWorktreeChanges;
   taskWorktree?: TaskWorktreeStatus;
+  scope?: GitReviewScope;
+  scopeChanges?: GitReviewChanges;
+  lastRunId?: string;
+  branches?: GitBranchSummary[];
+  commits?: GitCommitSummary[];
+  currentBranch?: string;
   selectedChangeId?: string;
   loading?: boolean;
   reverting?: boolean;
@@ -37,6 +57,7 @@ interface DiffReviewPaneProps {
   onApplyWorktree?(): void;
   onCreateWorktreeBranch?(branchName: string): void;
   onDiscardWorktree?(): void;
+  onScopeChange?(scope: GitReviewScope): void;
 }
 
 export interface FileChange {
@@ -60,6 +81,12 @@ export const DiffReviewPane = memo(function DiffReviewPane({
   runChanges,
   taskChanges,
   taskWorktree,
+  scope,
+  scopeChanges,
+  lastRunId,
+  branches = [],
+  commits = [],
+  currentBranch,
   selectedChangeId,
   loading = false,
   reverting = false,
@@ -70,14 +97,22 @@ export const DiffReviewPane = memo(function DiffReviewPane({
   onApplyWorktree,
   onCreateWorktreeBranch,
   onDiscardWorktree,
+  onScopeChange,
 }: DiffReviewPaneProps) {
   const [expandedChangeIds, setExpandedChangeIds] = useState<Set<string>>(
     () => new Set(selectedChangeId ? [selectedChangeId] : []),
   );
-  const additions = taskChanges?.additions ?? runChanges?.additions
+  const visibleSummary = scopeChanges
+    ?? (scope?.scope === "LAST_RUN" ? runChanges : taskChanges ?? runChanges);
+  const additions = visibleSummary?.additions
     ?? changes.reduce((sum, change) => sum + (change.additions ?? 0), 0);
-  const deletions = taskChanges?.deletions ?? runChanges?.deletions
+  const deletions = visibleSummary?.deletions
     ?? changes.reduce((sum, change) => sum + (change.deletions ?? 0), 0);
+  const reviewReason = scopeChanges
+    ? scopeChanges.reason
+    : isLastRunScope(scope)
+      ? runChanges?.reason
+      : taskChanges?.reason;
   const conflictPaths = useMemo(
     () => new Set(
       (taskWorktree?.conflictPaths ?? []).map((path) =>
@@ -110,12 +145,20 @@ export const DiffReviewPane = memo(function DiffReviewPane({
     <section className="review-pane-content" aria-label="变更审阅内容">
       <div className="review-toolbar">
         <div className="review-toolbar-copy">
-          <strong>{taskChanges ? "任务结果" : "上一轮"}</strong>
-          <ChevronDown size={13} aria-hidden="true" />
+          <ReviewScopePicker
+            scope={scope}
+            lastRunId={lastRunId}
+            branches={branches}
+            commits={commits}
+            currentBranch={currentBranch}
+            fallbackLabel={taskChanges ? "任务结果" : "本轮"}
+            disabled={!onScopeChange || loading}
+            onChange={onScopeChange}
+          />
           <span className="review-total-add">+{additions}</span>
           <span className="review-total-del">−{deletions}</span>
         </div>
-        {runChanges && onRevert && (
+        {runChanges && isLastRunScope(scope) && onRevert && (
           <button
             className="review-revert-button"
             type="button"
@@ -153,10 +196,10 @@ export const DiffReviewPane = memo(function DiffReviewPane({
           <span>{error}</span>
         </div>
       )}
-      {!loading && !error && runChanges?.reason && (
+      {!loading && !error && reviewReason && (
         <div className="review-notice">
           <AlertTriangle size={13} />
-          <span>{runChanges.reason}</span>
+          <span>{reviewReason}</span>
         </div>
       )}
 
@@ -239,15 +282,195 @@ export const DiffReviewPane = memo(function DiffReviewPane({
       {!loading && !error && changes.length === 0 && (
         <div className="review-empty">
           <span><FileDiffIcon size={22} /></span>
-          <strong>本轮没有文件改动</strong>
-          <p>{runChanges?.status === "UNAVAILABLE" || runChanges?.status === "COLLIDED"
+          <strong>{emptyScopeTitle(scope)}</strong>
+          <p>{isLastRunScope(scope)
+            && (runChanges?.status === "UNAVAILABLE" || runChanges?.status === "COLLIDED")
             ? "该 Run 未获得 Git 变更追踪。"
-            : "Agent 没有改变工作区内容。"}</p>
+            : emptyScopeMessage(scope)}</p>
         </div>
       )}
     </section>
   );
 });
+
+function ReviewScopePicker({
+  scope,
+  lastRunId,
+  branches,
+  commits,
+  currentBranch,
+  fallbackLabel,
+  disabled,
+  onChange,
+}: {
+  scope?: GitReviewScope;
+  lastRunId?: string;
+  branches: GitBranchSummary[];
+  commits: GitCommitSummary[];
+  currentBranch?: string;
+  fallbackLabel: string;
+  disabled: boolean;
+  onChange?(scope: GitReviewScope): void;
+}) {
+  const [open, setOpen] = useState(false);
+  const simpleScopes: Array<{ scope: GitReviewScope["scope"]; label: string }> = [
+    { scope: "UNCOMMITTED", label: "全部未提交" },
+    { scope: "UNSTAGED", label: "未暂存" },
+    { scope: "STAGED", label: "已暂存" },
+  ];
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        className="review-scope-trigger"
+        disabled={disabled}
+        aria-label={`审阅范围：${reviewScopeLabel(scope, commits, fallbackLabel)}`}
+      >
+        <strong>{reviewScopeLabel(scope, commits, fallbackLabel)}</strong>
+        <ChevronDown size={13} aria-hidden="true" />
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={7}
+        className="workspace-menu review-scope-menu"
+      >
+        <div className="review-scope-section" role="menu">
+          <span className="review-scope-section-title">工作区</span>
+          {lastRunId && (
+            <ScopeOption
+              active={isLastRunScope(scope)}
+              icon={<RotateCcw size={14} />}
+              label="本轮"
+              onClick={() => {
+                onChange?.({ scope: "LAST_RUN", runId: lastRunId });
+                setOpen(false);
+              }}
+            />
+          )}
+          {simpleScopes.map((item) => (
+            <ScopeOption
+              active={scope?.scope === item.scope}
+              icon={<Layers3 size={14} />}
+              key={item.scope}
+              label={item.label}
+              onClick={() => {
+                onChange?.({ scope: item.scope });
+                setOpen(false);
+              }}
+            />
+          ))}
+        </div>
+        <div className="review-scope-section" role="menu">
+          <span className="review-scope-section-title">某次提交</span>
+          {commits.length === 0 && <p className="review-scope-unavailable">暂无提交历史</p>}
+          {commits.slice(0, 12).map((commit) => (
+            <ScopeOption
+              active={scope?.scope === "COMMIT" && scope.commitSha === commit.sha}
+              icon={<GitCommitHorizontal size={14} />}
+              key={commit.sha}
+              label={commit.summary}
+              meta={commit.shortSha || commit.sha.slice(0, 8)}
+              onClick={() => {
+                onChange?.({ scope: "COMMIT", commitSha: commit.sha });
+                setOpen(false);
+              }}
+            />
+          ))}
+        </div>
+        <div className="review-scope-section" role="menu">
+          <span className="review-scope-section-title">分支比较</span>
+          {branches.length === 0 && <p className="review-scope-unavailable">暂无其他分支</p>}
+          {branches
+            .filter((branch) => branch.name !== currentBranch)
+            .map((branch) => (
+              <ScopeOption
+                active={scope?.scope === "BRANCH_COMPARE"
+                  && scope.baseRef === branch.name}
+                icon={<GitBranch size={14} />}
+                key={branch.name}
+                label={branch.name}
+                meta={`与 ${currentBranch || "HEAD"} 比较`}
+                onClick={() => {
+                  onChange?.({
+                    scope: "BRANCH_COMPARE",
+                    baseRef: branch.name,
+                    headRef: currentBranch,
+                  });
+                  setOpen(false);
+                }}
+              />
+            ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function ScopeOption({
+  active,
+  icon,
+  label,
+  meta,
+  onClick,
+}: {
+  active: boolean;
+  icon: ReactNode;
+  label: string;
+  meta?: string;
+  onClick(): void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitemradio"
+      aria-checked={active}
+      className="review-scope-option"
+      onClick={onClick}
+    >
+      {icon}
+      <span><strong>{label}</strong>{meta && <small>{meta}</small>}</span>
+      {active && <ChevronRight size={12} />}
+    </button>
+  );
+}
+
+function isLastRunScope(scope?: GitReviewScope): boolean {
+  return !scope || scope.scope === "LAST_RUN";
+}
+
+function reviewScopeLabel(
+  scope: GitReviewScope | undefined,
+  commits: GitCommitSummary[],
+  fallbackLabel = "本轮",
+): string {
+  if (!scope) return fallbackLabel;
+  if (scope.scope === "LAST_RUN") return "本轮";
+  if (scope.scope === "UNCOMMITTED") {
+    return "全部未提交";
+  }
+  if (scope.scope === "UNSTAGED") return "未暂存";
+  if (scope.scope === "STAGED") return "已暂存";
+  if (scope.scope === "COMMIT") {
+    const commit = commits.find((item) => item.sha === scope.commitSha);
+    return commit?.summary || `提交 ${scope.commitSha?.slice(0, 8) ?? ""}`;
+  }
+  return `比较 ${scope.baseRef ?? "分支"}`;
+}
+
+function emptyScopeMessage(scope?: GitReviewScope): string {
+  switch (scope?.scope) {
+    case "UNCOMMITTED":
+      return "当前环境没有未提交改动。";
+    case "UNSTAGED": return "当前环境没有未暂存改动。";
+    case "STAGED": return "当前环境没有已暂存改动。";
+    case "COMMIT": return "这个提交没有可展示的文本改动。";
+    case "BRANCH_COMPARE":
+    default: return "Agent 没有改变工作区内容。";
+  }
+}
+
+function emptyScopeTitle(scope?: GitReviewScope): string {
+  return isLastRunScope(scope) ? "本轮没有文件改动" : "当前范围没有文件改动";
+}
 
 function WorktreeActions({
   status,
@@ -371,7 +594,8 @@ function worktreeSummary(status: TaskWorktreeStatus): string {
       : "隔离结果与 Local 修改存在冲突。请审阅下方文件，或创建分支保留结果。";
   }
   if (status.worktreeState === "WAITING_REVIEW") {
-    return "隔离修改已经完成，可以应用到 Local、创建分支或放弃修改。";
+    return status.reason
+      || "隔离修改已经完成，可以应用到 Local、创建分支或放弃修改。";
   }
   return status.reason;
 }

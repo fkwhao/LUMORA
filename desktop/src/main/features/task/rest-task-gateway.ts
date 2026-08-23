@@ -19,7 +19,9 @@ import {
   validateTaskPreferencesInput,
   validateTaskWorkspaceInput,
   validateWorkspacePath,
+  validateWorkspaceEnvironmentSelection,
 } from "../../../shared/validation";
+import type { WorkspaceEnvironmentSelection } from "../../../shared/workspace-contract";
 
 type JavaError = {
   code?: string;
@@ -39,7 +41,11 @@ export class RestTaskGateway implements TaskGateway {
     this.eventStream = new JavaEventStream(connection, fetchImpl);
   }
 
-  create(goal: string, workspacePath?: string): Promise<TaskSnapshot> {
+  create(
+    goal: string,
+    workspacePath?: string,
+    environmentSelection?: WorkspaceEnvironmentSelection,
+  ): Promise<TaskSnapshot> {
     return this.request("/api/v1/tasks", {
       method: "POST",
       headers: {
@@ -48,6 +54,9 @@ export class RestTaskGateway implements TaskGateway {
       body: JSON.stringify({
         goal: validateGoal(goal),
         workspacePath: validateWorkspacePath(workspacePath),
+        environmentSelection: validateWorkspaceEnvironmentSelection(
+          environmentSelection,
+        ),
       }),
     });
   }

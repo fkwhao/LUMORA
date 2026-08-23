@@ -289,3 +289,12 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 033-cooperative-workspace
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V33__cooperative_workspace.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

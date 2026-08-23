@@ -332,6 +332,10 @@ export interface TaskWorktreeStatus {
   baseCommit: string;
   branchName: string;
   reason: string;
+  autoApplyWhenClean?: boolean;
+  settingsRevision?: number;
+  managedByLumora?: boolean;
+  canAutoApply?: boolean;
   conflictPaths?: string[];
   canApply: boolean;
   canCreateBranch: boolean;

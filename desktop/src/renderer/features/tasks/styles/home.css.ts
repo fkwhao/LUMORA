@@ -259,6 +259,37 @@ globalStyle(".project-mode,\n.project-branch", {
   fontSize: "10px",
 });
 
+globalStyle("button.project-environment-trigger", {
+  maxWidth: "150px",
+  padding: "4px 6px",
+  border: "0",
+  borderRadius: "7px",
+  outline: "none",
+  background: "transparent",
+  cursor: "pointer",
+  fontFamily: "inherit",
+});
+
+globalStyle("button.project-environment-trigger:hover:not(:disabled)", {
+  color: "var(--ink)",
+  background: "color-mix(in srgb, var(--ink) 5%, transparent)",
+});
+
+globalStyle("button.project-environment-trigger:focus-visible", {
+  boxShadow: "0 0 0 2px color-mix(in srgb, var(--blue) 16%, transparent)",
+});
+
+globalStyle("button.project-environment-trigger:disabled", {
+  opacity: "0.52",
+  cursor: "not-allowed",
+});
+
+globalStyle("button.project-environment-trigger > span", {
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+
 globalStyle(".project-branch", {
   maxWidth: "260px",
   overflow: "hidden",

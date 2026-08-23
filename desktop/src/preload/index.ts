@@ -29,6 +29,7 @@ import {
   validateTaskPreferencesInput,
   validateTaskWorkspaceInput,
   validateWorkspacePath,
+  validateWorkspaceEnvironmentSelection,
 } from "../shared/validation";
 import type { ResolvedAppearanceTheme } from "../shared/window-contract";
 import type { SaveMcpServerInput } from "../shared/mcp-contract";
@@ -38,6 +39,28 @@ import type {
   MaterializeClipboardImageInput,
   MessageAttachment,
 } from "../shared/attachment-contract";
+import type {
+  CreateGitBranchInput,
+  GetGitChangesInput,
+  GitCheckoutInput,
+  GitHistoryInput,
+  InspectWorkspaceInput,
+  ListWorktreesInput,
+  RemoveWorktreeInput,
+  SetWorktreeAutoApplyInput,
+  WorkspaceHandoffInput,
+} from "../shared/workspace-contract";
+import {
+  validateCreateGitBranchInput,
+  validateGetGitChangesInput,
+  validateGitCheckoutInput,
+  validateGitHistoryInput,
+  validateInspectWorkspaceInput,
+  validateListWorktreesInput,
+  validateRemoveWorktreeInput,
+  validateSetWorktreeAutoApplyInput,
+  validateWorkspaceHandoffInput,
+} from "../shared/validation";
 
 const api: LumoraApi = {
   attachments: {
@@ -73,10 +96,11 @@ const api: LumoraApi = {
       ipcRenderer.invoke("attachments:read-image-preview", attachment),
   },
   tasks: {
-    create: (goal, workspacePath) => ipcRenderer.invoke(
+    create: (goal, workspacePath, environmentSelection) => ipcRenderer.invoke(
       "tasks:create",
       validateGoal(goal),
       validateWorkspacePath(workspacePath),
+      validateWorkspaceEnvironmentSelection(environmentSelection),
     ),
     list: () => ipcRenderer.invoke("tasks:list"),
     get: (taskId) => ipcRenderer.invoke("tasks:get", validateTaskId(taskId)),
@@ -406,6 +430,60 @@ const api: LumoraApi = {
     },
     selectProjectDirectory: (): Promise<ProjectDirectory | undefined> =>
       ipcRenderer.invoke("workspace:select-project-directory"),
+  },
+  workspace: {
+    inspect: (input: InspectWorkspaceInput) =>
+      ipcRenderer.invoke(
+        "workspace-git:inspect",
+        validateInspectWorkspaceInput(input),
+      ),
+    handoff: (input: WorkspaceHandoffInput) =>
+      ipcRenderer.invoke(
+        "workspace-git:handoff",
+        validateWorkspaceHandoffInput(input),
+      ),
+    listBranches: (taskId: string) =>
+      ipcRenderer.invoke("workspace-git:list-branches", validateTaskId(taskId)),
+    checkoutBranch: (input: GitCheckoutInput) =>
+      ipcRenderer.invoke(
+        "workspace-git:checkout-branch",
+        validateGitCheckoutInput(input),
+      ),
+    createBranch: (input: CreateGitBranchInput) =>
+      ipcRenderer.invoke(
+        "workspace-git:create-branch",
+        validateCreateGitBranchInput(input),
+      ),
+    listHistory: (input: GitHistoryInput) =>
+      ipcRenderer.invoke(
+        "workspace-git:list-history",
+        validateGitHistoryInput(input),
+      ),
+    getChanges: (input: GetGitChangesInput) =>
+      ipcRenderer.invoke(
+        "workspace-git:get-changes",
+        validateGetGitChangesInput(input),
+      ),
+    listWorktrees: (input: ListWorktreesInput) =>
+      ipcRenderer.invoke(
+        "workspace-git:list-worktrees",
+        validateListWorktreesInput(input),
+      ),
+    removeWorktree: (input: RemoveWorktreeInput) =>
+      ipcRenderer.invoke(
+        "workspace-git:remove-worktree",
+        validateRemoveWorktreeInput(input),
+      ),
+    pruneWorktrees: (input: ListWorktreesInput) =>
+      ipcRenderer.invoke(
+        "workspace-git:prune-worktrees",
+        validateListWorktreesInput(input),
+      ),
+    setWorktreeAutoApply: (input: SetWorktreeAutoApplyInput) =>
+      ipcRenderer.invoke(
+        "workspace-git:set-worktree-auto-apply",
+        validateSetWorktreeAutoApplyInput(input),
+      ),
   },
 };
 

@@ -91,7 +91,11 @@ export interface TaskWorkspaceInput {
 
 // 这是 Renderer 能看到的完整能力面，不能加入通用 invoke 或任意 channel。
 export interface LumoraTaskApi {
-  create(goal: string, workspacePath?: string): Promise<TaskSnapshot>;
+  create(
+    goal: string,
+    workspacePath?: string,
+    environmentSelection?: WorkspaceEnvironmentSelection,
+  ): Promise<TaskSnapshot>;
   list(): Promise<TaskSummary[]>;
   get(taskId: string): Promise<TaskSnapshot>;
   updatePreferences(input: TaskPreferencesInput): Promise<TaskSnapshot>;
@@ -111,6 +115,7 @@ export interface LumoraApi {
   mcp: LumoraMcpApi;
   skill: LumoraSkillApi;
   window: LumoraWindowApi;
+  workspace: LumoraWorkspaceApi;
 }
 
 declare global {
@@ -124,3 +129,7 @@ import type { LumoraMemoryApi } from "./memory-contract";
 import type { LumoraMcpApi } from "./mcp-contract";
 import type { LumoraSkillApi } from "./skill-contract";
 import type { LumoraWindowApi } from "./window-contract";
+import type {
+  LumoraWorkspaceApi,
+  WorkspaceEnvironmentSelection,
+} from "./workspace-contract";

@@ -182,4 +182,13 @@ public class ChatStreamEvent {
     public String getRiskLevel() { return riskLevel; }
     public Boolean getReversible() { return reversible; }
     public String getDecision() { return decision; }
+
+    public ChatStreamEvent withMetadata(Map<String, Object> replacement) {
+        return new ChatStreamEvent(
+                type, delta, model, usage, errorMessage, itemId, toolCallId,
+                toolName, title, arguments, output, durationMs, exitCode,
+                replacement, approvalId, permissionLayer, reason, riskLevel,
+                reversible, decision, activeContextTokens
+        );
+    }
 }

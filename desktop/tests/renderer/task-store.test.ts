@@ -115,12 +115,60 @@ describe("task store", () => {
     expect(api.create).toHaveBeenCalledWith(
       "整理下载目录",
       "F:\\project\\test",
+      { target: "LOCAL" },
     );
     expect(store.getState().taskProjectPaths).toEqual({
       [createdTask.taskId]: "F:\\project\\test",
     });
     expect(localStorage.getItem(TASK_PROJECT_PATHS_STORAGE_KEY)).toBeNull();
     localStorage.clear();
+  });
+
+  it("forwards explicit Worktree environment choices when the first task is created", async () => {
+    const api = createApi();
+    const store = createTaskStore(api);
+
+    await store.getState().createTask(
+      "并行处理登录模块",
+      "F:\\project\\test",
+      {
+        environmentSelection: {
+          target: "NEW_WORKTREE",
+          autoApplyWhenClean: true,
+        },
+      },
+    );
+
+    expect(api.create).toHaveBeenLastCalledWith(
+      "并行处理登录模块",
+      "F:\\project\\test",
+      {
+        target: "NEW_WORKTREE",
+        autoApplyWhenClean: true,
+      },
+    );
+
+    await store.getState().createTask(
+      "继续既有隔离任务",
+      "F:\\project\\test",
+      {
+        environmentSelection: {
+          target: "EXISTING_WORKTREE",
+          worktreePath: "F:\\worktrees\\auth",
+          autoApplyWhenClean: false,
+        },
+      },
+    );
+
+    expect(api.create).toHaveBeenLastCalledWith(
+      "继续既有隔离任务",
+      "F:\\project\\test",
+      {
+        target: "EXISTING_WORKTREE",
+        worktreePath: "F:\\worktrees\\auth",
+        autoApplyWhenClean: false,
+      },
+    );
   });
 
   it("rejects an empty goal before calling the process boundary", async () => {

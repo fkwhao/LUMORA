@@ -17,6 +17,7 @@ import com.lumora.core.conversation.domain.model.ConversationInputTarget;
 import com.lumora.core.task.application.service.TaskService;
 import com.lumora.core.task.application.support.TaskWorktreeService;
 import com.lumora.core.task.domain.entity.AgentTask;
+import com.lumora.core.shared.infrastructure.git.GitWorkspaceMutationGate;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
@@ -27,6 +28,11 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -125,6 +131,8 @@ class ConversationRunCoordinatorTest {
         ConversationRunEventStreamRegistry streams = mock(
                 ConversationRunEventStreamRegistry.class
         );
+        GitRunChangeService runChanges = mock(GitRunChangeService.class);
+        TaskWorktreeService worktrees = mock(TaskWorktreeService.class);
         Map<String, ConversationRun> runs = new LinkedHashMap<>();
         Map<String, ConversationInput> inputs = new LinkedHashMap<>();
         stubRunStore(runStore, runs);
@@ -166,8 +174,8 @@ class ConversationRunCoordinatorTest {
                 conversationService, runStore, inputStore, streams,
                 mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
-                mock(GitRunChangeService.class),
-                mock(TaskWorktreeService.class),
+                runChanges,
+                worktrees,
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
                         ZoneOffset.UTC
@@ -300,6 +308,8 @@ class ConversationRunCoordinatorTest {
         ConversationRunEventStreamRegistry streams = mock(
                 ConversationRunEventStreamRegistry.class
         );
+        GitRunChangeService runChanges = mock(GitRunChangeService.class);
+        TaskWorktreeService worktrees = mock(TaskWorktreeService.class);
         Map<String, ConversationRun> runs = new LinkedHashMap<>();
         stubRunStore(runStore, runs);
         List<String> startedTaskIds = new ArrayList<>();
@@ -319,8 +329,8 @@ class ConversationRunCoordinatorTest {
                 streams,
                 mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
-                mock(GitRunChangeService.class),
-                mock(TaskWorktreeService.class),
+                runChanges,
+                worktrees,
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
                         ZoneOffset.UTC
@@ -344,6 +354,10 @@ class ConversationRunCoordinatorTest {
         assertThat(startedTaskIds).containsExactly("task-1", "task-2");
         assertThat(first.getStatus()).isEqualTo(ConversationRunStatus.COMPLETED);
         assertThat(second.getStatus()).isEqualTo(ConversationRunStatus.RUNNING);
+        InOrder terminalOrder = inOrder(runChanges, worktrees, streams);
+        terminalOrder.verify(runChanges).captureTerminal(first);
+        terminalOrder.verify(worktrees).onRunTerminal(first);
+        terminalOrder.verify(streams).complete(first.getRunId());
         verify(conversationService, times(2)).streamMessage(
                 anyString(), anyString(), any(), isNull(), any(), any(),
                 anyString(), any(), any(), any()
@@ -688,6 +702,147 @@ class ConversationRunCoordinatorTest {
         order.verify(conversationService).revertRunMessages(
                 "task-1", run.getRunId()
         );
+    }
+
+    @Test
+    void doesNotInsertAQueuedRunWhileWorkspaceMutationOwnsTheGate()
+            throws Exception {
+        ConversationRunStore runStore = mock(ConversationRunStore.class);
+        Map<String, ConversationRun> runs = new LinkedHashMap<>();
+        stubRunStore(runStore, runs);
+        GitWorkspaceMutationGate gate = new GitWorkspaceMutationGate();
+        ConversationRunCoordinator coordinator = new ConversationRunCoordinator(
+                mock(ConversationService.class),
+                runStore,
+                mock(ConversationInputStore.class),
+                mock(ConversationRunEventStreamRegistry.class),
+                mock(ConversationRunEventJournal.class),
+                mock(TaskService.class),
+                mock(GitRunChangeService.class),
+                mock(TaskWorktreeService.class),
+                gate,
+                Clock.fixed(
+                        Instant.parse("2026-08-15T00:00:00Z"),
+                        ZoneOffset.UTC
+                ),
+                1
+        );
+        CountDownLatch gateHeld = new CountDownLatch(1);
+        CountDownLatch releaseGate = new CountDownLatch(1);
+        CountDownLatch startAttempted = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> mutation = executor.submit(() -> gate.execute(() -> {
+                gateHeld.countDown();
+                await(releaseGate);
+            }));
+            assertThat(gateHeld.await(2, TimeUnit.SECONDS)).isTrue();
+
+            Future<ConversationRun> start = executor.submit(() -> {
+                startAttempted.countDown();
+                return coordinator.startMessage(
+                        "task-1", "inspect current branch", null, null,
+                        "F:/project/demo", null, "correlation-1"
+                );
+            });
+            assertThat(startAttempted.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(start.isDone()).isFalse();
+            verify(runStore, never()).insert(any(ConversationRun.class));
+
+            releaseGate.countDown();
+            assertThat(start.get(2, TimeUnit.SECONDS).getStatus())
+                    .isEqualTo(ConversationRunStatus.RUNNING);
+            mutation.get(2, TimeUnit.SECONDS);
+            verify(runStore).insert(any(ConversationRun.class));
+        } finally {
+            releaseGate.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void doesNotClaimANextTurnWhileWorkspaceMutationOwnsTheGate()
+            throws Exception {
+        ConversationRunStore runStore = mock(ConversationRunStore.class);
+        ConversationInputStore inputStore = mock(ConversationInputStore.class);
+        Map<String, ConversationRun> runs = new LinkedHashMap<>();
+        Map<String, ConversationInput> inputs = new LinkedHashMap<>();
+        stubRunStore(runStore, runs);
+        when(inputStore.nextPosition("task-1")).thenReturn(1L);
+        doAnswer(invocation -> {
+            ConversationInput input = invocation.getArgument(0);
+            inputs.put(input.getInputId(), input);
+            return null;
+        }).when(inputStore).insert(any(ConversationInput.class));
+        when(inputStore.firstPendingNextTurn("task-1")).thenAnswer(
+                invocation -> inputs.values().stream()
+                        .filter(input -> input.getStatus()
+                                == ConversationInputStatus.PENDING)
+                        .findFirst().orElse(null)
+        );
+        when(inputStore.markStatus(
+                any(ConversationInput.class), any(ConversationInputStatus.class)
+        )).thenAnswer(invocation -> {
+            ConversationInput input = invocation.getArgument(0);
+            input.setStatus(invocation.getArgument(1));
+            return input;
+        });
+        when(inputStore.requireForTask(anyString(), anyString()))
+                .thenAnswer(invocation -> inputs.get(invocation.getArgument(1)));
+        GitWorkspaceMutationGate gate = new GitWorkspaceMutationGate();
+        ConversationRunCoordinator coordinator = new ConversationRunCoordinator(
+                mock(ConversationService.class), runStore, inputStore,
+                mock(ConversationRunEventStreamRegistry.class),
+                mock(ConversationRunEventJournal.class),
+                mock(TaskService.class), mock(GitRunChangeService.class),
+                mock(TaskWorktreeService.class), gate,
+                Clock.fixed(
+                        Instant.parse("2026-08-15T00:00:00Z"),
+                        ZoneOffset.UTC
+                ), 1
+        );
+        CountDownLatch gateHeld = new CountDownLatch(1);
+        CountDownLatch releaseGate = new CountDownLatch(1);
+        CountDownLatch enqueueAttempted = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> mutation = executor.submit(() -> gate.execute(() -> {
+                gateHeld.countDown();
+                await(releaseGate);
+            }));
+            assertThat(gateHeld.await(2, TimeUnit.SECONDS)).isTrue();
+            Future<ConversationInput> enqueue = executor.submit(() -> {
+                enqueueAttempted.countDown();
+                return coordinator.enqueueInput(
+                        "task-1", "next branch-aware turn",
+                        ConversationInputTarget.NEXT_TURN,
+                        null, null, "F:/project/demo", null, null
+                );
+            });
+            assertThat(enqueueAttempted.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(enqueue.isDone()).isFalse();
+            verify(runStore, never()).insert(any(ConversationRun.class));
+
+            releaseGate.countDown();
+            assertThat(enqueue.get(2, TimeUnit.SECONDS).getStatus())
+                    .isEqualTo(ConversationInputStatus.CLAIMED);
+            mutation.get(2, TimeUnit.SECONDS);
+            verify(runStore).insert(any(ConversationRun.class));
+        } finally {
+            releaseGate.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(2, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Timed out waiting for test gate");
+            }
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting", error);
+        }
     }
 
     private void stubRunStore(

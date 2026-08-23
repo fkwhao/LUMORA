@@ -1,9 +1,11 @@
 import asyncio
+import json
 import time
 from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from typing import Any
 
+from app.execution.workspace_changes import WorkspaceChangeLedger
 from app.execution.write_intents import (
     WriteIntentManager,
     scopes_from_resource_accesses,
@@ -14,11 +16,25 @@ from app.tool.resource_locks import (
     ResourceAccessMode,
     ResourceLockManager,
     ResourceObservationStore,
+    workspace_resource_key,
 )
 
 
 class ToolInputError(ValueError):
     pass
+
+
+class WorkspacePartialEffectError(ValueError):
+    """A failed tool changed files and therefore requires explicit review."""
+
+    def __init__(
+        self,
+        cause: BaseException,
+        metadata: Mapping[str, Any],
+    ) -> None:
+        super().__init__(str(cause) or type(cause).__name__)
+        self.cause = cause
+        self.metadata = dict(metadata)
 
 
 class ToolRegistry:
@@ -31,6 +47,7 @@ class ToolRegistry:
         resource_locks: ResourceLockManager | None = None,
         resource_observations: ResourceObservationStore | None = None,
         write_intents: WriteIntentManager | None = None,
+        workspace_changes: WorkspaceChangeLedger | None = None,
     ) -> None:
         self._tools: dict[str, Tool] = {}
         self._resource_locks = resource_locks or ResourceLockManager()
@@ -38,6 +55,7 @@ class ToolRegistry:
             resource_observations or ResourceObservationStore()
         )
         self._write_intents = write_intents or WriteIntentManager()
+        self._workspace_changes = workspace_changes or WorkspaceChangeLedger()
         for tool in tools:
             self.register(tool)
 
@@ -67,6 +85,7 @@ class ToolRegistry:
             resource_locks=self._resource_locks,
             resource_observations=self._resource_observations,
             write_intents=self._write_intents,
+            workspace_changes=self._workspace_changes,
         )
 
     def select(self, names: Iterable[str]) -> "ToolRegistry":
@@ -81,11 +100,28 @@ class ToolRegistry:
             resource_locks=self._resource_locks,
             resource_observations=self._resource_observations,
             write_intents=self._write_intents,
+            workspace_changes=self._workspace_changes,
         )
 
     @property
     def write_intents(self) -> WriteIntentManager:
         return self._write_intents
+
+    def begin_workspace_run(self, context: ToolContext) -> int:
+        return self._workspace_changes.begin_run(
+            context.workspace_path,
+            context.correlation_id or context.session_id or context.task_id,
+        )
+
+    def consume_workspace_updates(
+        self,
+        context: ToolContext,
+    ) -> tuple[int, tuple[dict[str, Any], ...]]:
+        revision, events = self._workspace_changes.consume_external(
+            context.workspace_path,
+            context.correlation_id or context.session_id or context.task_id,
+        )
+        return revision, tuple(event.notice_metadata() for event in events)
 
     def model_definitions(
         self,
@@ -131,18 +167,24 @@ class ToolRegistry:
             resource_observations=self._resource_observations,
         )
         accesses = tool.resource_accesses(runtime_context, normalized_input)
-        try:
-            concurrency_safe = (
-                tool.is_concurrency_safe(normalized_input) is True
-            )
-        except Exception:  # noqa: BLE001 - tool scheduling must fail closed
-            concurrency_safe = False
-        if not accesses and not concurrency_safe:
+        if not accesses:
             key = tool.concurrency_key(runtime_context, normalized_input)
+            if key:
+                fallback_key = key
+                fallback_mode = ResourceAccessMode.WRITE
+            else:
+                fallback_key = workspace_resource_key(
+                    runtime_context.workspace_path
+                )
+                fallback_mode = (
+                    ResourceAccessMode.READ
+                    if tool.is_read_only(normalized_input)
+                    else ResourceAccessMode.WRITE
+                )
             accesses = (
                 ResourceAccess(
-                    key or f"tool:{name}",
-                    ResourceAccessMode.WRITE,
+                    fallback_key,
+                    fallback_mode,
                 ),
             )
 
@@ -159,6 +201,7 @@ class ToolRegistry:
             owner_label=runtime_context.agent_id or owner_id,
         ) as write_claim:
             self._write_intents.ensure_current(owner_id, write_scopes)
+            result: ToolResult | None = None
             if not accesses:
                 resource_wait_ms = 0
                 resource_contended = False
@@ -173,7 +216,210 @@ class ToolRegistry:
                     resource_contended_keys = lock_report.contended_keys
                     if runtime_context.cancelled():
                         raise asyncio.CancelledError
-                    result = await tool.execute(runtime_context, normalized_input)
+                    workspace_write = any(
+                        access.mode == ResourceAccessMode.WRITE
+                        and access.key.startswith("workspace:")
+                        for access in accesses
+                    )
+                    run_id = (
+                        runtime_context.correlation_id
+                        or runtime_context.session_id
+                        or runtime_context.task_id
+                    )
+                    stale, current_revision = (
+                        self._workspace_changes.has_foreign_change_after(
+                            runtime_context.workspace_path,
+                            run_id,
+                            runtime_context.workspace_revision,
+                        )
+                        if workspace_write else (False, -1)
+                    )
+                    if stale:
+                        duration_ms = max(
+                            1,
+                            round((time.perf_counter() - started) * 1000),
+                        )
+                        return ToolResult(
+                            content=json.dumps(
+                                {
+                                    "ok": False,
+                                    "errorCode": "stale_workspace_version",
+                                    "message": (
+                                        "工作区在命令等待执行期间已被其他任务更新；"
+                                        "请先读取最新状态并重新规划"
+                                    ),
+                                    "expectedRevision": (
+                                        runtime_context.workspace_revision
+                                    ),
+                                    "currentRevision": current_revision,
+                                    "retryable": True,
+                                    "toolExecutionState": "not_started",
+                                    "nextAction": "refresh_and_replan",
+                                },
+                                ensure_ascii=False,
+                            ),
+                            is_error=True,
+                            metadata={
+                                "durationMs": duration_ms,
+                                "category": tool.category.value,
+                                "readOnly": tool.is_read_only(normalized_input),
+                                "destructive": tool.is_destructive(
+                                    normalized_input
+                                ),
+                                "title": tool.display_title(normalized_input),
+                                "failureKind": "stale_workspace_version",
+                                "retryable": True,
+                                "toolExecutionState": "not_started",
+                                "workspaceRevision": current_revision,
+                                "resourceWaitMs": resource_wait_ms,
+                                "resourceContended": resource_contended,
+                                "resourceContendedKeys": (
+                                    resource_contended_keys
+                                ),
+                                "resourceAccess": tuple(
+                                    {
+                                        "key": access.key,
+                                        "mode": access.mode.value,
+                                    }
+                                    for access in accesses
+                                ),
+                                "writeLease": (
+                                    write_claim.metadata(state="released")
+                                    if write_claim is not None
+                                    else {"state": "shared_owner"}
+                                ),
+                            },
+                        )
+                    mutation_snapshot = None
+                    if any(
+                        access.mode == ResourceAccessMode.WRITE
+                        for access in accesses
+                    ):
+                        mutation_snapshot = await asyncio.to_thread(
+                            self._workspace_changes.capture,
+                            runtime_context.workspace_path,
+                            accesses,
+                        )
+                    execution_error: Exception | None = None
+                    execution_cancelled: asyncio.CancelledError | None = None
+                    try:
+                        result = await tool.execute(
+                            runtime_context,
+                            normalized_input,
+                        )
+                    except asyncio.CancelledError as error:
+                        execution_cancelled = error
+                    except Exception as error:  # noqa: BLE001
+                        execution_error = error
+                    change_metadata: dict[str, Any] = {}
+                    if mutation_snapshot is not None:
+                        after_task = asyncio.create_task(asyncio.to_thread(
+                                self._workspace_changes.capture,
+                                runtime_context.workspace_path,
+                                accesses,
+                                mutation_snapshot.private_paths,
+                        ))
+                        try:
+                            after_snapshot = await asyncio.shield(after_task)
+                        except asyncio.CancelledError as error:
+                            execution_cancelled = execution_cancelled or error
+                            after_snapshot = await after_task
+                        compare_task = asyncio.create_task(asyncio.to_thread(
+                                self._workspace_changes.compare,
+                                mutation_snapshot,
+                                after_snapshot,
+                        ))
+                        try:
+                            changes = await asyncio.shield(compare_task)
+                        except asyncio.CancelledError as error:
+                            execution_cancelled = execution_cancelled or error
+                            changes = await compare_task
+                        revision, recorded = self._workspace_changes.record(
+                            workspace_path=runtime_context.workspace_path,
+                            repository_root=after_snapshot.repository_root,
+                            task_id=runtime_context.task_id,
+                            run_id=(
+                                runtime_context.correlation_id
+                                or runtime_context.session_id
+                                or runtime_context.task_id
+                            ),
+                            agent_id=runtime_context.agent_id,
+                            changes=changes,
+                        )
+                        change_set_complete = (
+                            mutation_snapshot.complete
+                            and after_snapshot.complete
+                            and all(
+                                bool(change.get("attributionComplete", True))
+                                for change in changes
+                            )
+                            and len(recorded) == len(changes)
+                        )
+                        change_metadata = {
+                            "workspaceRevision": revision,
+                            "workspaceChangeCount": len(recorded),
+                            "workspaceChangeSetComplete": (
+                                change_set_complete
+                            ),
+                            "workspaceChangeFilesTruncated": (
+                                not change_set_complete
+                            ),
+                            "workspaceChangesTruncated": (
+                                not change_set_complete
+                                or any(event.truncated for event in recorded)
+                            ),
+                            "workspaceChanges": tuple(
+                                event.metadata() for event in recorded
+                            ),
+                        }
+                    if execution_cancelled is not None:
+                        if (
+                            change_metadata.get("workspaceChangeCount", 0)
+                            or change_metadata.get(
+                                "workspaceChangeSetComplete", True
+                            ) is False
+                        ):
+                            raise WorkspacePartialEffectError(
+                                execution_cancelled,
+                                {
+                                    **change_metadata,
+                                    "failureKind": (
+                                        "partial_effect_review_required"
+                                    ),
+                                    "retryable": False,
+                                    "toolExecutionState": "partial_effect",
+                                },
+                            ) from execution_cancelled
+                        raise execution_cancelled
+                    if execution_error is not None:
+                        if (
+                            change_metadata.get("workspaceChangeCount", 0)
+                            or change_metadata.get(
+                                "workspaceChangeSetComplete", True
+                            ) is False
+                        ):
+                            raise WorkspacePartialEffectError(
+                                execution_error,
+                                {
+                                    **change_metadata,
+                                    "failureKind": (
+                                        "partial_effect_review_required"
+                                    ),
+                                    "retryable": False,
+                                    "toolExecutionState": "partial_effect",
+                                },
+                            ) from execution_error
+                        raise execution_error
+                    assert result is not None
+                    if change_metadata:
+                        result = replace(
+                            result,
+                            metadata={
+                                **dict(result.metadata),
+                                **change_metadata,
+                            },
+                        )
+        assert result is not None
         duration_ms = max(1, round((time.perf_counter() - started) * 1000))
         metadata = {
             **dict(result.metadata),

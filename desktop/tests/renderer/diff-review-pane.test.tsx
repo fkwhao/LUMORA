@@ -1,12 +1,15 @@
 import {
   fireEvent,
+  cleanup,
   render,
   screen,
   within,
 } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DiffReviewPane } from "../../src/renderer/features/tasks/DiffReviewPane";
+
+afterEach(cleanup);
 
 describe("DiffReviewPane", () => {
   it("expands and collapses each changed file independently", () => {
@@ -184,5 +187,135 @@ describe("DiffReviewPane", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "放弃修改" }));
     expect(onDiscard).toHaveBeenCalledOnce();
+  });
+
+  it("selects concrete commit and branch review ranges without switching branches", () => {
+    const onScopeChange = vi.fn();
+    render(
+      <DiffReviewPane
+        changes={[]}
+        scope={{ scope: "LAST_RUN", runId: "run-1" }}
+        lastRunId="run-1"
+        currentBranch="main"
+        commits={[{
+          sha: "abc123456789",
+          shortSha: "abc1234",
+          summary: "调整审阅布局",
+        }]}
+        branches={[
+          { name: "main", current: true },
+          { name: "feature/auth", current: false },
+        ]}
+        onSelectChange={vi.fn()}
+        onScopeChange={onScopeChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "审阅范围：本轮" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "本轮" }));
+    expect(onScopeChange).toHaveBeenLastCalledWith({
+      scope: "LAST_RUN",
+      runId: "run-1",
+    });
+    expect(screen.queryByRole("menuitemradio", { name: "本轮" }))
+      .not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "审阅范围：本轮" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "全部未提交" }));
+    expect(onScopeChange).toHaveBeenLastCalledWith({ scope: "UNCOMMITTED" });
+
+    fireEvent.click(screen.getByRole("button", { name: "审阅范围：本轮" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "未暂存" }));
+    expect(onScopeChange).toHaveBeenLastCalledWith({ scope: "UNSTAGED" });
+
+    fireEvent.click(screen.getByRole("button", { name: "审阅范围：本轮" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "已暂存" }));
+    expect(onScopeChange).toHaveBeenLastCalledWith({ scope: "STAGED" });
+
+    fireEvent.click(screen.getByRole("button", { name: "审阅范围：本轮" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /调整审阅布局/ }));
+    expect(onScopeChange).toHaveBeenLastCalledWith({
+      scope: "COMMIT",
+      commitSha: "abc123456789",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "审阅范围：本轮" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /feature\/auth/ }));
+    expect(onScopeChange).toHaveBeenLastCalledWith({
+      scope: "BRANCH_COMPARE",
+      baseRef: "feature/auth",
+      headRef: "main",
+    });
+  });
+
+  it("shows totals from the selected review scope instead of the last Run", () => {
+    const { container } = render(
+      <DiffReviewPane
+        changes={[{
+          changeId: "uncommitted:src/current.ts",
+          path: "src/current.ts",
+          additions: 7,
+          deletions: 4,
+          previewAvailable: false,
+        }]}
+        runChanges={{
+          runId: "run-1",
+          status: "CAPTURED",
+          repositoryRoot: "C:/project",
+          reason: "",
+          additions: 1,
+          deletions: 0,
+          revertible: true,
+          files: [],
+        }}
+        scope={{ scope: "UNCOMMITTED" }}
+        scopeChanges={{
+          scope: "UNCOMMITTED",
+          label: "全部未提交",
+          repositoryRoot: "C:/project",
+          reason: "",
+          additions: 7,
+          deletions: 4,
+          files: [],
+        }}
+        onSelectChange={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".review-total-add")).toHaveTextContent("+7");
+    expect(container.querySelector(".review-total-del")).toHaveTextContent("−4");
+    expect(screen.queryByText("+1")).not.toBeInTheDocument();
+  });
+
+  it("does not leak the last Run warning into another review scope", () => {
+    render(
+      <DiffReviewPane
+        changes={[]}
+        runChanges={{
+          runId: "run-1",
+          status: "UNAVAILABLE",
+          repositoryRoot: "C:/project",
+          reason: "本轮变更追踪不可用",
+          additions: 0,
+          deletions: 0,
+          revertible: false,
+          files: [],
+        }}
+        scope={{ scope: "UNCOMMITTED" }}
+        scopeChanges={{
+          scope: "UNCOMMITTED",
+          label: "全部未提交",
+          repositoryRoot: "C:/project",
+          reason: "",
+          additions: 0,
+          deletions: 0,
+          files: [],
+        }}
+        onSelectChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("本轮变更追踪不可用")).not.toBeInTheDocument();
+    expect(screen.getByText("当前环境没有未提交改动。")).toBeInTheDocument();
   });
 });

@@ -37,7 +37,7 @@ from app.permission.reviewer import (
     ApprovalReviewResult,
 )
 from app.tool.base import ToolContext
-from app.tool.registry import ToolRegistry
+from app.tool.registry import ToolRegistry, WorkspacePartialEffectError
 
 _AwaitedValue = TypeVar("_AwaitedValue")
 
@@ -809,6 +809,38 @@ class ToolCallExecutor:
                     "attempt": max(1, attempt),
                     "maxAttempts": self._retry_policy.max_attempts,
                     "toolExecutionState": "not_started",
+                },
+                model=model,
+            ), result_text
+        except WorkspacePartialEffectError as error:
+            result_text = json.dumps(
+                {
+                    "ok": False,
+                    "content": str(error),
+                    "errorCode": "partial_effect_review_required",
+                    "retryable": False,
+                    "nextAction": (
+                        "工具失败前已经修改了工作区。先重新读取相关文件，"
+                        "审查实际变更后再决定修复或继续。"
+                    ),
+                },
+                ensure_ascii=False,
+            )
+            yield RunEvent(
+                type="tool_failed",
+                item_id=item_id,
+                tool_call_id=call.call_id,
+                tool_name=call.name,
+                title=title,
+                arguments=arguments,
+                output=str(error),
+                error_message=str(error),
+                metadata={
+                    **error.metadata,
+                    "effectId": effect_id,
+                    "idempotencyKey": effect_id,
+                    "attempt": max(1, attempt),
+                    "maxAttempts": self._retry_policy.max_attempts,
                 },
                 model=model,
             ), result_text

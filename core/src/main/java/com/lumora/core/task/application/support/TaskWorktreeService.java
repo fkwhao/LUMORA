@@ -1,7 +1,10 @@
 package com.lumora.core.task.application.support;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.lumora.core.conversation.application.support.WorkspaceChangeLedgerService;
 import com.lumora.core.conversation.domain.entity.ConversationRun;
+import com.lumora.core.conversation.infrastructure.persistence.ConversationRunMapper;
+import com.lumora.core.shared.infrastructure.git.GitWorkspaceMutationGate;
 import com.lumora.core.shared.infrastructure.git.GitWorkspaceOperations;
 import com.lumora.core.shared.infrastructure.git.GitWorkspaceOperations.MergeResult;
 import com.lumora.core.shared.infrastructure.git.GitWorkspaceOperations.Snapshot;
@@ -13,6 +16,7 @@ import com.lumora.core.task.infrastructure.persistence.TaskWorktreeMapper;
 import com.lumora.core.task.infrastructure.persistence.TaskMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -47,25 +51,40 @@ public class TaskWorktreeService {
             WorktreeState.WAITING_REVIEW, WorktreeState.CONFLICTED,
             WorktreeState.CLEANUP_PENDING, WorktreeState.BRANCHED
     );
+    private static final Set<WorktreeState> TEMPORARY_RETAINED = EnumSet.of(
+            WorktreeState.PROVISIONING, WorktreeState.ACTIVE,
+            WorktreeState.WAITING_REVIEW, WorktreeState.APPLYING,
+            WorktreeState.CONFLICTED, WorktreeState.CLEANUP_PENDING
+    );
 
     private final TaskWorktreeMapper worktreeMapper;
     private final TaskMapper taskMapper;
+    private final ConversationRunMapper runMapper;
     private final GitWorkspaceOperations git;
+    private final GitWorkspaceMutationGate mutationGate;
+    private final WorkspaceChangeLedgerService workspaceLedger;
     private final Clock clock;
     private final Path managedRoot;
     private final int maxRetained;
 
+    @Autowired
     public TaskWorktreeService(
             TaskWorktreeMapper worktreeMapper,
             TaskMapper taskMapper,
+            ConversationRunMapper runMapper,
             GitWorkspaceOperations git,
+            GitWorkspaceMutationGate mutationGate,
+            WorkspaceChangeLedgerService workspaceLedger,
             Clock clock,
             @Value("${lumora.worktrees.root:}") String configuredRoot,
             @Value("${lumora.worktrees.max-retained:5}") int maxRetained
     ) {
         this.worktreeMapper = worktreeMapper;
         this.taskMapper = taskMapper;
+        this.runMapper = runMapper;
         this.git = git;
+        this.mutationGate = mutationGate;
+        this.workspaceLedger = workspaceLedger;
         this.clock = clock;
         this.managedRoot = configuredRoot == null || configuredRoot.isBlank()
                 ? Path.of(System.getProperty("java.io.tmpdir"),
@@ -79,7 +98,28 @@ public class TaskWorktreeService {
         this.maxRetained = maxRetained;
     }
 
-    public synchronized String acquireForRun(ConversationRun run) {
+    /** Test-compatible constructor for fixtures without a durable ledger. */
+    public TaskWorktreeService(
+            TaskWorktreeMapper worktreeMapper,
+            TaskMapper taskMapper,
+            ConversationRunMapper runMapper,
+            GitWorkspaceOperations git,
+            Clock clock,
+            String configuredRoot,
+            int maxRetained
+    ) {
+        this(
+                worktreeMapper, taskMapper, runMapper, git,
+                new GitWorkspaceMutationGate(), null, clock,
+                configuredRoot, maxRetained
+        );
+    }
+
+    public String acquireForRun(ConversationRun run) {
+        return mutationGate.execute(() -> acquireForRunLocked(run));
+    }
+
+    private synchronized String acquireForRunLocked(ConversationRun run) {
         Path requested = requiredWorkspace(run.getWorkspacePath());
         TaskWorktree existing = worktreeMapper.selectById(run.getTaskId());
         if (canReuse(existing)) {
@@ -93,22 +133,43 @@ public class TaskWorktreeService {
             }
             return effective.toString();
         }
-        if (!git.isRepository(requested)) {
-            saveLocal(run.getTaskId(), requested, "", "");
+        boolean explicitlyIsolated = existing != null
+                && existing.getWorkspaceMode() == TaskWorkspaceMode.WORKTREE;
+        if (!explicitlyIsolated) {
+            if (git.isRepository(requested)) {
+                Path localRepository = git.repositoryRoot(requested);
+                saveLocal(
+                        run.getTaskId(), requested,
+                        localRepository.toString(), git.head(localRepository)
+                );
+            } else {
+                saveLocal(run.getTaskId(), requested, "", "");
+            }
             return requested.toString();
+        }
+        if (!git.isRepository(requested)) {
+            throw new IllegalStateException(
+                    "显式 Worktree 环境要求任务工作区属于 Git 仓库"
+            );
         }
 
         Path repositoryRoot = git.repositoryRoot(requested);
-        String repositoryKey = repositoryRoot.toString();
-        if (!hasOtherActiveLocal(run.getTaskId(), repositoryKey)) {
-            saveLocal(
-                    run.getTaskId(), requested, repositoryKey,
-                    git.head(repositoryRoot)
-            );
-            return requested.toString();
-        }
         ensureCapacity();
-        Snapshot base = git.snapshot(repositoryRoot);
+        boolean localBusy = hasOtherActiveLocal(
+                run.getTaskId(), repositoryRoot.toString()
+        );
+        String committedHead = git.head(repositoryRoot);
+        if (localBusy && committedHead.isBlank()) {
+            throw new IllegalStateException(
+                    "共享 Local 正在写入且仓库尚无首个提交；请等待 Local Run 进入安全状态"
+            );
+        }
+        Snapshot base = localBusy
+                ? new Snapshot(
+                git.commitTree(repositoryRoot, committedHead),
+                committedHead,
+                git.commitTree(repositoryRoot, committedHead)
+        ) : git.snapshot(repositoryRoot);
         String baseCommit = base.head();
         boolean syntheticBase = baseCommit.isBlank();
         if (syntheticBase) {
@@ -132,6 +193,9 @@ public class TaskWorktreeService {
                 requested, effectiveWorkspace, repositoryRoot,
                 baseCommit, base.tree(), WorktreeState.PROVISIONING
         );
+        lease.setManagedByLumora(true);
+        lease.setAutoApplyWhenClean(existing.isAutoApplyWhenClean());
+        lease.setSettingsRevision(existing.getSettingsRevision());
         save(lease);
         try {
             if (syntheticBase) {
@@ -171,12 +235,17 @@ public class TaskWorktreeService {
         }
     }
 
-    public synchronized void onRunTerminal(ConversationRun run) {
+    public void onRunTerminal(ConversationRun run) {
+        mutationGate.execute(() -> onRunTerminalLocked(run));
+    }
+
+    private synchronized void onRunTerminalLocked(ConversationRun run) {
         TaskWorktree lease = worktreeMapper.selectById(run.getTaskId());
         if (lease == null) return;
         if (lease.getWorkspaceMode() == TaskWorkspaceMode.LOCAL) {
             lease.setCompletedAt(clock.instant());
             updateState(lease, WorktreeState.RELEASED, "");
+            autoApplyReady(lease.getRepositoryRoot());
             return;
         }
         if (lease.getWorktreeState() == WorktreeState.REMOVED
@@ -194,14 +263,29 @@ public class TaskWorktreeService {
         }
         try {
             Snapshot result = git.snapshot(physicalRoot);
+            List<String> ignoredEffects = git.ignoredUntracked(
+                    physicalRoot, 100
+            );
             lease.setResultTree(result.tree());
             lease.setCompletedAt(clock.instant());
             keepResultTree(lease, result.tree());
             if (branched) {
                 updateState(
                         lease, WorktreeState.BRANCHED,
-                        "分支 " + lease.getBranchName()
+                        lease.isManagedByLumora()
+                                ? "分支 " + lease.getBranchName()
                                 + " 已更新，修改保持为未提交状态"
+                                : "现有 Worktree 已更新并继续由用户管理；"
+                                + "可切回 Local，Lumora 不会删除该目录"
+                );
+                return;
+            }
+            if (!ignoredEffects.isEmpty()) {
+                updateState(
+                        lease, WorktreeState.WAITING_REVIEW,
+                        "Worktree 包含 " + ignoredEffects.size()
+                                + " 个被 Git 忽略的新增文件；"
+                                + "为避免数据丢失，已保留并禁用自动应用"
                 );
                 return;
             }
@@ -212,13 +296,22 @@ public class TaskWorktreeService {
                         lease, WorktreeState.WAITING_REVIEW,
                         "修改已隔离保存，等待应用到 Local、创建分支或放弃"
                 );
+                if (lease.isAutoApplyWhenClean()
+                        && !hasOtherActiveLocal(
+                        lease.getTaskId(), lease.getRepositoryRoot())) {
+                    attemptAutoApply(lease);
+                }
             }
         } catch (RuntimeException error) {
             fail(lease, safeMessage(error));
         }
     }
 
-    public synchronized void onRunReverted(ConversationRun run) {
+    public void onRunReverted(ConversationRun run) {
+        mutationGate.execute(() -> onRunRevertedLocked(run));
+    }
+
+    private synchronized void onRunRevertedLocked(ConversationRun run) {
         TaskWorktree lease = worktreeMapper.selectById(run.getTaskId());
         if (lease == null
                 || lease.getWorkspaceMode() != TaskWorkspaceMode.WORKTREE
@@ -231,6 +324,7 @@ public class TaskWorktreeService {
         Path physicalRoot = worktreeRoot(lease);
         if (!Files.isDirectory(physicalRoot)) return;
         Snapshot current = git.snapshot(physicalRoot);
+        List<String> ignoredEffects = git.ignoredUntracked(physicalRoot, 100);
         lease.setResultTree(current.tree());
         keepResultTree(lease, current.tree());
         if (lease.getWorktreeState() == WorktreeState.BRANCHED) {
@@ -241,7 +335,8 @@ public class TaskWorktreeService {
             );
             return;
         }
-        if (current.tree().equals(lease.getBaseTree())) {
+        if (current.tree().equals(lease.getBaseTree())
+                && ignoredEffects.isEmpty()) {
             cleanup(lease, "撤回后不再包含任务修改，临时 Worktree 已清理");
         } else {
             updateState(
@@ -254,6 +349,138 @@ public class TaskWorktreeService {
     public synchronized TaskWorktreeResponse status(String taskId) {
         TaskWorktree lease = worktreeMapper.selectById(taskId);
         return lease == null ? null : TaskWorktreeResponse.from(lease);
+    }
+
+    public TaskWorktreeResponse handoff(
+            String taskId,
+            String sourceWorkspacePath,
+            String target,
+            String existingWorktreePath
+    ) {
+        return mutationGate.execute(() -> handoffLocked(
+                taskId, sourceWorkspacePath, target, existingWorktreePath
+        ));
+    }
+
+    private synchronized TaskWorktreeResponse handoffLocked(
+            String taskId,
+            String sourceWorkspacePath,
+            String target,
+            String existingWorktreePath
+    ) {
+        String normalizedTarget = valueOrEmpty(target).toUpperCase();
+        preflight(sourceWorkspacePath, normalizedTarget, existingWorktreePath);
+        Path source = requiredWorkspace(sourceWorkspacePath);
+        ensureNoActiveRun(taskId);
+        TaskWorktree current = worktreeMapper.selectById(taskId);
+        if (current != null
+                && current.getWorktreeState().retainsWorkspace()
+                && current.getWorktreeState() != WorktreeState.BRANCHED) {
+            throw new IllegalStateException(
+                    "当前任务仍保留 Worktree；请先应用、创建分支或放弃修改"
+            );
+        }
+        return switch (normalizedTarget) {
+            case "LOCAL" -> selectLocal(taskId, source);
+            case "WORKTREE", "NEW_WORKTREE" -> selectNewWorktree(
+                    taskId, source, current
+            );
+            case "EXISTING_WORKTREE" -> adoptExisting(
+                    taskId, source, existingWorktreePath, current
+            );
+            default -> throw new IllegalArgumentException(
+                    "target 必须是 LOCAL、NEW_WORKTREE 或 EXISTING_WORKTREE"
+            );
+        };
+    }
+
+    /** Read-only validation used before a task row is created. */
+    public synchronized void preflight(
+            String sourceWorkspacePath,
+            String target,
+            String existingWorktreePath
+    ) {
+        String normalizedTarget = valueOrEmpty(target).toUpperCase();
+        if ("LOCAL".equals(normalizedTarget)) {
+            if (!valueOrEmpty(sourceWorkspacePath).isBlank()) {
+                requiredWorkspace(sourceWorkspacePath);
+            }
+            return;
+        }
+        if (!Set.of("WORKTREE", "NEW_WORKTREE", "EXISTING_WORKTREE")
+                .contains(normalizedTarget)) {
+            throw new IllegalArgumentException(
+                    "target 必须是 LOCAL、NEW_WORKTREE 或 EXISTING_WORKTREE"
+            );
+        }
+        Path source = requiredWorkspace(sourceWorkspacePath);
+        if (!git.isRepository(source)) {
+            throw new IllegalStateException(
+                    "显式 Worktree 环境要求任务工作区属于 Git 仓库"
+            );
+        }
+        if (!"EXISTING_WORKTREE".equals(normalizedTarget)) return;
+        if (valueOrEmpty(existingWorktreePath).isBlank()) {
+            throw new IllegalArgumentException("必须指定现有 Worktree 路径");
+        }
+        Path selected = normalized(existingWorktreePath);
+        requireDirectory(selected, "指定的 Worktree 不存在");
+        if (!git.isRepository(selected)) {
+            throw new IllegalArgumentException("指定目录不是 Git Worktree");
+        }
+        Path sourcePrimary = git.primaryWorktree(source);
+        Path selectedPrimary = git.primaryWorktree(selected);
+        Path selectedRoot = git.repositoryRoot(selected);
+        if (!sourcePrimary.equals(selectedPrimary)) {
+            throw new IllegalArgumentException("指定 Worktree 不属于任务仓库");
+        }
+        if (selectedRoot.equals(sourcePrimary)) {
+            throw new IllegalArgumentException("主工作树不能作为现有 Worktree 选择");
+        }
+        if (!Files.isRegularFile(selectedRoot.resolve(".git"))) {
+            throw new IllegalArgumentException("指定目录不是 linked Worktree");
+        }
+    }
+
+    public synchronized TaskWorktreeResponse updateSettings(
+            String taskId,
+            boolean autoApplyWhenClean,
+            long expectedRevision
+    ) {
+        TaskWorktree lease = require(taskId);
+        if (lease.getWorkspaceMode() != TaskWorkspaceMode.WORKTREE) {
+            throw new IllegalStateException("autoApplyWhenClean 仅适用于显式 Worktree");
+        }
+        if (!lease.isManagedByLumora()) {
+            throw new IllegalStateException(
+                    "外部采用的 Worktree 由用户管理，不能开启自动应用"
+            );
+        }
+        if (Set.of(
+                WorktreeState.BRANCHED,
+                WorktreeState.CLEANUP_PENDING,
+                WorktreeState.REMOVED,
+                WorktreeState.FAILED
+        ).contains(lease.getWorktreeState())) {
+            throw new IllegalStateException(
+                    "当前 Worktree 状态不支持修改自动应用设置"
+            );
+        }
+        if (lease.getSettingsRevision() != expectedRevision) {
+            throw new IllegalStateException(
+                    "Worktree 设置已更新，请刷新后重试"
+            );
+        }
+        lease.setAutoApplyWhenClean(autoApplyWhenClean);
+        lease.setSettingsRevision(expectedRevision + 1L);
+        updateState(
+                lease,
+                lease.getWorktreeState(),
+                autoApplyWhenClean
+                        ? "已开启无冲突时自动应用"
+                        : "已关闭自动应用"
+        );
+        return TaskWorktreeResponse.from(lease);
     }
 
     public synchronized ChangeRange changeRange(String taskId) {
@@ -279,8 +506,14 @@ public class TaskWorktreeService {
         );
     }
 
-    public synchronized TaskWorktreeResponse apply(String taskId) {
+    public TaskWorktreeResponse apply(String taskId) {
+        return mutationGate.execute(() -> applyLocked(taskId));
+    }
+
+    private synchronized TaskWorktreeResponse applyLocked(String taskId) {
         TaskWorktree lease = requireReviewable(taskId);
+        requireManagedTemporary(lease, "应用");
+        rejectIgnoredEffects(lease);
         if (hasOtherActiveLocal(taskId, lease.getRepositoryRoot())) {
             throw new IllegalStateException(
                     "Local 工作区仍有任务正在写入，请等待其进入安全状态"
@@ -299,6 +532,18 @@ public class TaskWorktreeService {
                     merge.details().isBlank()
                             ? "Local 与 Worktree 修改发生冲突"
                             : merge.details()
+            );
+            return TaskWorktreeResponse.from(lease);
+        }
+        List<String> physicalConflicts = git.untrackedOverwriteConflicts(
+                source, local.tree(), merge.tree(), 100
+        );
+        if (!physicalConflicts.isEmpty()) {
+            updateState(
+                    lease,
+                    WorktreeState.CONFLICTED,
+                    "Local 存在未纳入 Git tree 的忽略文件，应用会覆盖其物理内容: "
+                            + String.join(", ", physicalConflicts)
             );
             return TaskWorktreeResponse.from(lease);
         }
@@ -321,15 +566,26 @@ public class TaskWorktreeService {
             );
             throw error;
         }
+        advanceRevision(source);
         cleanup(lease, "修改已应用到 Local，临时 Worktree 已清理");
         return TaskWorktreeResponse.from(lease);
     }
 
-    public synchronized TaskWorktreeResponse createBranch(
+    public TaskWorktreeResponse createBranch(
+            String taskId,
+            String requestedBranchName
+    ) {
+        return mutationGate.execute(() -> createBranchLocked(
+                taskId, requestedBranchName
+        ));
+    }
+
+    private synchronized TaskWorktreeResponse createBranchLocked(
             String taskId,
             String requestedBranchName
     ) {
         TaskWorktree lease = requireReviewable(taskId);
+        rejectIgnoredEffects(lease);
         String branchName = requireBranchName(requestedBranchName);
         Path effective = worktreeRoot(lease);
         requireDirectory(effective, "任务 Worktree 不存在");
@@ -346,11 +602,37 @@ public class TaskWorktreeService {
                 lease, WorktreeState.BRANCHED,
                 "已创建分支 " + branchName + "；修改保持为未提交状态"
         );
+        advanceRevision(effective);
         return TaskWorktreeResponse.from(lease);
     }
 
-    public synchronized TaskWorktreeResponse discard(String taskId) {
+    /** Keeps task state aligned after the generic Git header switches branch. */
+    public synchronized void onBranchCheckedOut(
+            String taskId,
+            String branchName
+    ) {
+        TaskWorktree lease = worktreeMapper.selectById(taskId);
+        if (lease == null
+                || lease.getWorkspaceMode() != TaskWorkspaceMode.WORKTREE
+                || !lease.getWorktreeState().retainsWorkspace()) {
+            return;
+        }
+        String normalizedBranch = requireBranchName(branchName);
+        lease.setBranchName(normalizedBranch);
+        updateState(
+                lease, WorktreeState.BRANCHED,
+                "已切换到正式分支 " + normalizedBranch
+                        + "；该 Worktree 不会被自动清理"
+        );
+    }
+
+    public TaskWorktreeResponse discard(String taskId) {
+        return mutationGate.execute(() -> discardLocked(taskId));
+    }
+
+    private synchronized TaskWorktreeResponse discardLocked(String taskId) {
         TaskWorktree lease = require(taskId);
+        requireManagedTemporary(lease, "放弃");
         if (lease.getWorkspaceMode() != TaskWorkspaceMode.WORKTREE
                 || (!REVIEWABLE.contains(lease.getWorktreeState())
                 && lease.getWorktreeState()
@@ -362,7 +644,13 @@ public class TaskWorktreeService {
     }
 
     /** Reconciles persisted leases before durable Runs are marked paused. */
-    public synchronized void recoverAfterRestart(Set<String> activeTaskIds) {
+    public void recoverAfterRestart(Set<String> activeTaskIds) {
+        mutationGate.execute(() -> recoverAfterRestartLocked(activeTaskIds));
+    }
+
+    private synchronized void recoverAfterRestartLocked(
+            Set<String> activeTaskIds
+    ) {
         Set<String> active = activeTaskIds == null ? Set.of()
                 : Set.copyOf(activeTaskIds);
         for (TaskWorktree lease : worktreeMapper.selectList(null)) {
@@ -383,7 +671,11 @@ public class TaskWorktreeService {
             fixedDelayString = "${lumora.worktrees.cleanup-retry-ms:30000}",
             initialDelayString = "${lumora.worktrees.cleanup-retry-ms:30000}"
     )
-    public synchronized void retryPendingCleanup() {
+    public void retryPendingCleanup() {
+        mutationGate.execute(this::retryPendingCleanupLocked);
+    }
+
+    private synchronized void retryPendingCleanupLocked() {
         for (TaskWorktree lease : worktreeMapper.selectList(
                 Wrappers.<TaskWorktree>lambdaQuery()
                         .eq(TaskWorktree::getWorktreeState,
@@ -419,12 +711,23 @@ public class TaskWorktreeService {
 
     private void recoverOrphan(Path candidate) {
         try {
+            String branch = git.currentBranch(candidate);
+            if (!branch.isBlank()) {
+                LOGGER.info(
+                        "Preserving branch-attached worktree {} on branch {}",
+                        candidate, branch
+                );
+                return;
+            }
             Snapshot snapshot = git.snapshot(candidate);
+            List<String> ignoredEffects = git.ignoredUntracked(candidate, 100);
             Path primary = git.primaryWorktree(candidate);
             String head = git.head(candidate);
             String headTree = head.isBlank() ? ""
                     : git.commitTree(candidate, head);
-            if (!headTree.isBlank() && snapshot.tree().equals(headTree)) {
+            if (ignoredEffects.isEmpty()
+                    && !headTree.isBlank()
+                    && snapshot.tree().equals(headTree)) {
                 git.removeWorktree(primary, candidate);
                 LOGGER.info("Removed clean orphan worktree {}", candidate);
                 return;
@@ -442,10 +745,12 @@ public class TaskWorktreeService {
                     primary, candidate, primary, head, headTree,
                     WorktreeState.WAITING_REVIEW
             );
+            recovered.setManagedByLumora(true);
             recovered.setResultTree(snapshot.tree());
-            recovered.setReason(
-                    "检测到应用异常退出前遗留的修改；原始基线信息不完整，请审阅后处理"
-            );
+            recovered.setReason(ignoredEffects.isEmpty()
+                    ? "检测到应用异常退出前遗留的修改；原始基线信息不完整，请审阅后处理"
+                    : "检测到 " + ignoredEffects.size()
+                    + " 个被 Git 忽略的遗留文件；已保留 Worktree 等待处理");
             save(recovered);
             keepResultTree(recovered, snapshot.tree());
         } catch (RuntimeException error) {
@@ -507,22 +812,30 @@ public class TaskWorktreeService {
             return;
         }
         Snapshot current = git.snapshot(physicalRoot);
+        List<String> ignoredEffects = git.ignoredUntracked(physicalRoot, 100);
         lease.setResultTree(current.tree());
         keepResultTree(lease, current.tree());
-        if (current.tree().equals(lease.getBaseTree())) {
+        if (current.tree().equals(lease.getBaseTree())
+                && ignoredEffects.isEmpty()) {
             cleanup(lease, "应用恢复时确认无修改，临时 Worktree 已清理");
         } else {
             updateState(
                     lease, WorktreeState.WAITING_REVIEW,
-                    "应用重启后已恢复隔离修改，等待用户处理"
+                    ignoredEffects.isEmpty()
+                            ? "应用重启后已恢复隔离修改，等待用户处理"
+                            : "应用重启后检测到 " + ignoredEffects.size()
+                            + " 个被 Git 忽略的文件，已保留等待处理"
             );
         }
     }
 
     private void recoverDetachedRecord(TaskWorktree lease) {
-        Snapshot current = git.snapshot(worktreeRoot(lease));
+        Path root = worktreeRoot(lease);
+        Snapshot current = git.snapshot(root);
+        List<String> ignoredEffects = git.ignoredUntracked(root, 100);
         if (!lease.getBaseTree().isBlank()
-                && current.tree().equals(lease.getBaseTree())) {
+                && current.tree().equals(lease.getBaseTree())
+                && ignoredEffects.isEmpty()) {
             cleanup(lease, "遗留的干净 Worktree 已完成清理");
             return;
         }
@@ -530,7 +843,10 @@ public class TaskWorktreeService {
         keepResultTree(lease, current.tree());
         updateState(
                 lease, WorktreeState.WAITING_REVIEW,
-                "检测到未完成清理的 Worktree 修改，已恢复并等待审阅"
+                ignoredEffects.isEmpty()
+                        ? "检测到未完成清理的 Worktree 修改，已恢复并等待审阅"
+                        : "检测到 " + ignoredEffects.size()
+                        + " 个被 Git 忽略的遗留文件，已恢复并等待处理"
         );
     }
 
@@ -555,7 +871,167 @@ public class TaskWorktreeService {
         }
     }
 
+    private TaskWorktreeResponse selectLocal(String taskId, Path source) {
+        String repositoryRoot = "";
+        String head = "";
+        if (git.isRepository(source)) {
+            Path repository = git.repositoryRoot(source);
+            repositoryRoot = repository.toString();
+            head = git.head(repository);
+        }
+        saveLocal(taskId, source, repositoryRoot, head);
+        TaskWorktree saved = require(taskId);
+        updateState(saved, WorktreeState.RELEASED, "已选择共享 Local");
+        return TaskWorktreeResponse.from(saved);
+    }
+
+    private TaskWorktreeResponse selectNewWorktree(
+            String taskId,
+            Path source,
+            TaskWorktree previous
+    ) {
+        if (!git.isRepository(source)) {
+            throw new IllegalStateException(
+                    "显式 Worktree 环境要求任务工作区属于 Git 仓库"
+            );
+        }
+        Path repository = git.repositoryRoot(source);
+        TaskWorktree preference = newLease(
+                taskId, TaskWorkspaceMode.WORKTREE,
+                source, source, repository,
+                git.head(repository), "", WorktreeState.RELEASED
+        );
+        preference.setManagedByLumora(true);
+        inheritSettings(preference, previous);
+        preference.setReason("已选择显式 Worktree；将在下一次 Run 启动时创建");
+        save(preference);
+        return TaskWorktreeResponse.from(preference);
+    }
+
+    private TaskWorktreeResponse adoptExisting(
+            String taskId,
+            Path source,
+            String existingWorktreePath,
+            TaskWorktree previous
+    ) {
+        if (!git.isRepository(source)) {
+            throw new IllegalStateException("源工作区不是 Git 仓库");
+        }
+        Path selected = normalized(existingWorktreePath);
+        requireDirectory(selected, "指定的 Worktree 不存在");
+        if (!git.isRepository(selected)) {
+            throw new IllegalArgumentException("指定目录不是 Git Worktree");
+        }
+        Path sourcePrimary = git.primaryWorktree(source);
+        Path selectedPrimary = git.primaryWorktree(selected);
+        if (!sourcePrimary.equals(selectedPrimary)) {
+            throw new IllegalArgumentException("指定 Worktree 不属于任务仓库");
+        }
+        Path sourceRoot = git.repositoryRoot(source);
+        Path selectedRoot = git.repositoryRoot(selected);
+        if (selectedRoot.equals(sourcePrimary)) {
+            throw new IllegalArgumentException("主工作树不能作为现有 Worktree 选择");
+        }
+        if (!Files.isRegularFile(selectedRoot.resolve(".git"))) {
+            throw new IllegalArgumentException("指定目录不是 linked Worktree");
+        }
+        boolean leased = worktreeMapper.selectList(
+                Wrappers.<TaskWorktree>lambdaQuery()
+                        .eq(TaskWorktree::getWorkspaceMode,
+                                TaskWorkspaceMode.WORKTREE)
+        ).stream()
+                .filter(item -> !item.getTaskId().equals(taskId))
+                .filter(item -> item.getWorktreeState().retainsWorkspace())
+                .anyMatch(item -> samePath(
+                        worktreeRoot(item).toString(), selectedRoot.toString()
+                ));
+        if (leased) {
+            throw new IllegalStateException("指定 Worktree 已由其他任务占用");
+        }
+        Path relative = sourceRoot.relativize(source);
+        Path effective = selectedRoot.resolve(relative).normalize();
+        requireDirectory(effective, "指定 Worktree 中不存在任务子目录");
+        Snapshot snapshot = git.snapshot(selectedRoot);
+        TaskWorktree lease = newLease(
+                taskId, TaskWorkspaceMode.WORKTREE,
+                source, effective, sourceRoot,
+                snapshot.head(), snapshot.tree(), WorktreeState.BRANCHED
+        );
+        lease.setManagedByLumora(false);
+        lease.setBranchName(git.currentBranch(selectedRoot));
+        lease.setReason("已选择现有 Worktree");
+        inheritSettings(lease, previous);
+        lease.setAutoApplyWhenClean(false);
+        save(lease);
+        keepResultTree(lease, snapshot.tree());
+        return TaskWorktreeResponse.from(lease);
+    }
+
+    private void inheritSettings(
+            TaskWorktree target,
+            TaskWorktree previous
+    ) {
+        if (previous == null) return;
+        target.setAutoApplyWhenClean(previous.isAutoApplyWhenClean());
+        target.setSettingsRevision(previous.getSettingsRevision());
+    }
+
+    private void ensureNoActiveRun(String taskId) {
+        boolean active = runMapper.selectList(
+                Wrappers.<ConversationRun>lambdaQuery()
+                        .eq(ConversationRun::getTaskId, taskId)
+        ).stream().anyMatch(run -> run.getStatus().isActive());
+        if (active) {
+            throw new IllegalStateException(
+                    "任务仍有活动 Run，进入安全状态后才能切换执行环境"
+            );
+        }
+    }
+
+    private void attemptAutoApply(TaskWorktree lease) {
+        try {
+            apply(lease.getTaskId());
+        } catch (RuntimeException error) {
+            TaskWorktree current = worktreeMapper.selectById(lease.getTaskId());
+            if (current != null
+                    && current.getWorktreeState() != WorktreeState.CONFLICTED
+                    && current.getWorktreeState() != WorktreeState.REMOVED) {
+                updateState(
+                        current, WorktreeState.WAITING_REVIEW,
+                        "自动应用未完成，修改仍安全保留: " + safeMessage(error)
+                );
+            }
+        }
+    }
+
+    private void autoApplyReady(String repositoryRoot) {
+        if (valueOrEmpty(repositoryRoot).isBlank()) return;
+        List<TaskWorktree> candidates = worktreeMapper.selectList(
+                Wrappers.<TaskWorktree>lambdaQuery()
+                        .eq(TaskWorktree::getWorkspaceMode,
+                                TaskWorkspaceMode.WORKTREE)
+                        .eq(TaskWorktree::getWorktreeState,
+                                WorktreeState.WAITING_REVIEW)
+        );
+        for (TaskWorktree candidate : candidates) {
+            if (candidate.isAutoApplyWhenClean()
+                    && samePath(candidate.getRepositoryRoot(), repositoryRoot)
+                    && !hasOtherActiveLocal(
+                    candidate.getTaskId(), repositoryRoot)) {
+                attemptAutoApply(candidate);
+            }
+        }
+    }
+
     private void cleanup(TaskWorktree lease, String reason) {
+        if (!lease.isManagedByLumora()) {
+            updateState(
+                    lease,
+                    WorktreeState.BRANCHED,
+                    "外部采用的 Worktree 已保留；Lumora 不会删除用户目录"
+            );
+            return;
+        }
         try {
             Path physicalRoot = worktreeRoot(lease);
             if (Files.exists(physicalRoot)) {
@@ -618,6 +1094,7 @@ public class TaskWorktreeService {
         result.setWorktreeState(state);
         result.setBranchName("");
         result.setReason("");
+        result.setManagedByLumora(false);
         result.setCreatedAt(now);
         result.setUpdatedAt(now);
         return result;
@@ -663,7 +1140,10 @@ public class TaskWorktreeService {
         ).stream()
                 .filter(item -> item.getWorkspaceMode()
                         == TaskWorkspaceMode.WORKTREE)
-                .filter(item -> item.getWorktreeState().retainsWorkspace())
+                .filter(TaskWorktree::isManagedByLumora)
+                .filter(item -> TEMPORARY_RETAINED.contains(
+                        item.getWorktreeState()
+                ))
                 .count();
         if (retained >= maxRetained) {
             throw new IllegalStateException(
@@ -690,6 +1170,17 @@ public class TaskWorktreeService {
         return lease;
     }
 
+    private void rejectIgnoredEffects(TaskWorktree lease) {
+        Path root = worktreeRoot(lease);
+        List<String> ignored = git.ignoredUntracked(root, 100);
+        if (!ignored.isEmpty()) {
+            throw new IllegalStateException(
+                    "Worktree 包含被 Git 忽略的新增文件，Git tree 无法安全"
+                            + "保存或应用；请先移动或删除这些文件，或选择放弃修改"
+            );
+        }
+    }
+
     private TaskWorktree require(String taskId) {
         TaskWorktree lease = worktreeMapper.selectById(taskId);
         if (lease == null) {
@@ -707,6 +1198,12 @@ public class TaskWorktreeService {
         lease.setReason(valueOrEmpty(reason));
         lease.setUpdatedAt(clock.instant());
         worktreeMapper.updateById(lease);
+    }
+
+    private void advanceRevision(Path workspace) {
+        if (workspaceLedger != null) {
+            workspaceLedger.advanceRevision(workspace.toString());
+        }
     }
 
     private void fail(TaskWorktree lease, String reason) {
@@ -816,6 +1313,7 @@ public class TaskWorktreeService {
             TaskWorktree lease,
             Path physicalRoot
     ) {
+        requireManagedTemporary(lease, "清理");
         Path primary = normalized(lease.getRepositoryRoot());
         Path effective = normalized(lease.getEffectiveWorkspacePath());
         if (physicalRoot.equals(primary)
@@ -823,6 +1321,18 @@ public class TaskWorktreeService {
                 || !Files.isRegularFile(physicalRoot.resolve(".git"))) {
             throw new IllegalStateException(
                     "拒绝清理无法验证归属的 Worktree 路径"
+            );
+        }
+    }
+
+    private void requireManagedTemporary(
+            TaskWorktree lease,
+            String action
+    ) {
+        if (!lease.isManagedByLumora()) {
+            throw new IllegalStateException(
+                    "外部采用的 Worktree 由用户管理，Lumora 不能"
+                            + action + "或删除该目录"
             );
         }
     }

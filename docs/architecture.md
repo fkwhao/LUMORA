@@ -21,6 +21,8 @@ Python Agent Runtime
 ### Electron Desktop
 
 - Renderer 负责任务、对话、计划、Changes、Hosted Web Search、上下文/Token 统计和设置界面。
+- 任务标题栏承载彼此独立的 Workspace（Local/Worktree）与 Branch 控件；Changes 右栏承载本轮、
+  全部未提交、未暂存、已暂存、提交和分支比较。聊天输入框不承担 Git Workspace 选择。
 - 多步骤任务的最近一次 `update_plan` 快照显示在对话区域右上角；清单收起后为紧凑
   胶囊，全部步骤完成后自动隐藏。计划仅用于透明展示，不增加等待用户确认的阶段。
 - Preload 只暴露按业务领域划分的白名单能力。
@@ -38,6 +40,8 @@ Python Agent Runtime
 - Java 是任务、审批、工具调用和审计状态的最终权威。
 - Java 也负责 Run 级 Git ChangeSet：在不修改用户真实 index 的前提下保存工作区前后 tree，
   生成真实 Diff，并在满足后续未改动等安全条件时撤回单个 Run。
+- Java 持久化任务的 Workspace 选择、物理 Workspace 的 `workspaceRevision`、Run 归属区间和
+  逐工具文件事件。普通任务默认共享 Local；Worktree 只能由用户从标题栏显式选择。
 - 对 Electron 和 Python 分别使用独立 DTO，不暴露数据库实体。
 
 ### Python Agent Runtime
@@ -46,6 +50,9 @@ Python Agent Runtime
 - 负责三种模型协议的路由与适配、流式响应解析、Agent Harness、动态编排、远程 MCP 和 Hosted Web Search 事件转换。
 - 当前文件与命令工具由 Python Tool Registry 在 Java 授权的工作区和工具白名单内
   执行；未来浏览器、系统级能力仍应通过单独的受控 Capability 接入。
+- Python 的 Workspace Mutation Coordinator 负责共享 Local 的 Workspace/文件两级锁域、文件
+  版本/hash 验证、工具前后快照和同进程 Run 变化通知；它只能使用 Core 下发的
+  `effectiveWorkspacePath`，没有 Worktree 或 Branch 的选择权限。
 - Python 不获得任意磁盘或系统凭据权限。文件路径必须位于工作区内，Shell 只允许
   非交互命令，并在执行前经过参数与危险模式校验。
 
@@ -241,8 +248,12 @@ Turn 存在 `PAUSING` 耐久事件；普通模型或工具失败不会被自动�
 `PAUSED`；已经开始的 Turn 会先从事件记录重建并封存中间轨迹，未开始的排队 Run 保留原触发
 输入。当前 `lumora.runs.max-concurrent` 默认为 `3`，不同任务在有界槽位内并发；Run 存储、
 事件流和调度器按 `run_id` 隔离。同一任务仍只保留一个活动 Run，其问题队列严格串行。
-Python 工具层在跨 Run 共享的资源域中协调工作区和文件访问，并对完整文件覆盖执行陈旧
-版本检查；同一模型步骤内的显式安全工具通过有界滚动池并发，独占工具形成顺序屏障。
+普通任务即使属于同一项目也默认共享 Local，不因第二个任务或风险判断自动创建 Worktree。
+Python 工具层共享 Workspace/文件两级锁域：精确文件写入可按不同目标短暂并行，Shell 和未知
+副作用工具形成 Workspace 写屏障；文件版本/hash 与 revision 共同拒绝陈旧写入。每次已捕获的
+副作用由 Core 投影为唯一 `workspaceRevision` 和逐工具文件归属；同一 Runtime 的其他 Session
+在安全步骤边界获知变更路径，命中旧观察时重新读取。
+同一模型步骤内的显式安全只读工具仍可通过有界滚动池并发，独占工具形成顺序屏障。
 完整边界见[任务并发与资源感知设计](cross-task-concurrency-design.md)。
 
 ### 问题队列与运行中引导
@@ -337,9 +348,9 @@ Provider 只负责供应商请求和响应适配；最多二十轮的模型—�
 ## 6. 数据归属
 
 ```text
-Electron：临时界面状态和本机显示偏好
-Java：任务、会话、消息、审批、Git Run ChangeSet、工具调用、审计和业务投影
-Python：Agent 编排状态、模型适配和 Harness Checkpoint
+Electron：临时界面状态、本机显示偏好和 Changes 展开状态
+Java：任务、会话、消息、审批、Workspace 选择/revision、Git ChangeSet、逐工具文件归属、审计和业务投影
+Python：Agent 编排状态、模型适配、Workspace 进程内锁和 Harness Checkpoint
 ```
 
 模型最终消息和 TokenUsage 写入 Java；模型文本增量只用于实时展示。TokenUsage 在协议边界
@@ -363,12 +374,12 @@ Phase A/B 已实现 Run 级 Git 文件快照、真实 Diff 和整轮撤回。Run
 
 Desktop 通过白名单 IPC 调用以下 Core API。每轮有文件改动的 Assistant 回答会在正文末尾
 追加变更摘要卡，展示文件总数、增删行统计、默认 3 个文件以及展开/收起、整轮撤销和审核入口；
-审核或点击单个文件会打开任务右侧 Changes 面板，展示完整文件列表、行级 unified Diff、统计、
-不可撤回原因和撤回入口：
+审核或点击单个文件会打开任务右侧 Changes 面板：
 
 ```text
 GET  /api/v1/tasks/{taskId}/runs/{runId}/changes
 POST /api/v1/tasks/{taskId}/runs/{runId}/revert
+GET  /api/v1/tasks/{taskId}/changes?scope=...
 GET  /api/v1/tasks/{taskId}/worktree
 GET  /api/v1/tasks/{taskId}/worktree/changes
 POST /api/v1/tasks/{taskId}/worktree/apply
@@ -380,23 +391,30 @@ POST /api/v1/tasks/{taskId}/worktree/discard
 Run 的 `after` 一致，Run 内也不能修改过 `HEAD` 或 index。Core 先恢复并验证文件，再在事务中
 隐藏该 `run_id` 所属的活动消息。非 Git 工作区照常执行，但状态为 `UNAVAILABLE`。
 
-Phase C/D/E 已接入同一条 Run 调度主链。同一仓库只有一个活动写入任务时继续使用 Local；第二个
-及后续任务在 Run 启动前按任务分配 detached Worktree，Supervisor、子 Agent、可续接 Session
-与 DAG 节点都只接收同一个 `effectiveWorkspacePath`。Run 的 Git 碰撞判断按物理工作区进行，
-不同 Worktree 不会互相污染或误算 Diff。
+普通多会话默认使用同一个 Local 物理目录。精确文件工具取得 Workspace READ 与目标文件 WRITE，
+Shell 和无法证明副作用边界的工具取得 Workspace WRITE；文件版本/hash 防止任务基于旧内容覆盖
+新修改。每次完整捕获的修改产生逐工具文件归属，Core 将 `workspaceRevision` 增加一次；同一
+Python Runtime 的其他活动 Run 在下一安全步骤边界收到路径摘要。Run 终态继续生成 Git
+Checkpoint，并按本 Run 的归属聚合回答 Diff，因此用户无需在每个普通并发任务结束后处理 Git
+合并。
 
-Worktree 从原始 `baseCommit` 建立，再把包含 Local 未提交可见状态的 `baseTree` 物化到隔离目录。
-尚无首个提交的仓库会由 Core 从 `baseTree` 创建仅由 Lumora 私有 ref 持有的合成基线，以便建立
-detached Worktree；该基线不改变 Local 的 unborn `HEAD` 或真实 index，也不会进入用户分支历史。
-应用结果后 Local 仍保持 unborn；若用户选择创建分支，隔离目录会转为真正的 orphan 分支并把
-全部文件作为未提交修改保留。
-任务完成后进入待审阅状态，不自动写回。用户可选择“应用到 Local”“创建正式分支”或“放弃
-修改”；审阅读取 `baseTree..resultTree` 的完整任务 ChangeSet，而单轮撤回仍读取对应 Run Diff。
-应用使用 Base、当前 Local 与 Worktree 结果做 tree 级三方合并，冲突时不写 Local 并
-保留现场。无修改、应用成功或明确放弃会清理目录；待审阅、冲突和暂停状态继续保留，清理失败
-进入 `CLEANUP_PENDING` 定时重试。启动恢复会核对持久化租约与托管目录，最多保留 5 个未完成
-Worktree。完整状态机和安全条件见
-[Run 级 Git 变更与撤回设计](git-run-changes-design.md)。
+任务标题栏提供两个相互独立的控件：Workspace 控件显示 `Local` 或用户选中的 Worktree；Branch
+控件显示当前物理目录的 Git 分支。Workspace 决定执行目录，Branch 决定该目录的 Git 引用，
+两者不得合并。新任务默认 Local，只有用户显式创建或选择时才进入 Worktree；Agent、子 Agent、
+Supervisor、DAG 节点和工具都只能继承固定 `effectiveWorkspacePath`，不能自主切换。Local 有
+活动写入时禁止切换分支。本次改造不改变聊天输入框。
+
+Worktree 继续复用现有 detached HEAD、`baseTree` 物化、unborn 合成基线、三方应用和清理恢复
+底座，但不再由“第二个任务”或风险等级自动触发。任务完成后默认由用户选择“应用到 Local”、
+“创建正式分支”或“放弃修改”。用户可显式开启“无冲突时自动应用”；只有 Local 安全、三方结果
+无冲突且最终校验通过才执行，否则回到待审阅。冲突时不写 Local 并保留 Worktree、Base 和完整
+ChangeSet。无修改、应用成功或明确放弃后清理；待审阅、冲突、暂停和应用失败继续保留。
+
+Changes 右栏使用统一查询和 Diff 组件，支持“本轮”“全部未提交”“未暂存”“已暂存”“提交”和
+“分支比较”。回答摘要卡默认打开“本轮”；切换审阅范围只读 Git 状态，不改变 Workspace 或
+Branch。完整状态机、安全条件和交付顺序见
+[Run 级 Git 变更与撤回设计](git-run-changes-design.md)与
+[Git Workspace 一次性交付记录](git-workspace-execution-plan.md)。
 
 ### 模型供应商配置
 

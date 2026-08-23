@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -25,6 +26,8 @@ import java.util.concurrent.TimeUnit;
 public class GitWorkspaceOperations {
 
     private static final long GIT_TIMEOUT_SECONDS = 90L;
+    /** Public pages allow 200 rows; one extra row is an internal look-ahead. */
+    private static final int MAX_HISTORY_FETCH = 201;
     private static final Map<String, String> INTERNAL_IDENTITY = Map.of(
             "GIT_AUTHOR_NAME", "Lumora",
             "GIT_AUTHOR_EMAIL", "lumora@local.invalid",
@@ -56,6 +59,352 @@ public class GitWorkspaceOperations {
         Result result = run(workspace, Map.of(), false,
                 "rev-parse", "--verify", "HEAD");
         return result.exitCode() == 0 ? result.output().trim() : "";
+    }
+
+    public String currentBranch(Path workspace) {
+        Result result = run(
+                workspace, Map.of(), false,
+                "symbolic-ref", "--quiet", "--short", "HEAD"
+        );
+        return result.exitCode() == 0 ? result.output().trim() : "";
+    }
+
+    /** Ignored, untracked files are outside tree snapshots and must be guarded. */
+    public List<String> ignoredUntracked(Path workspace, int limit) {
+        int boundedLimit = Math.max(1, Math.min(limit, 1_000));
+        String output = require(
+                workspace, Map.of(), "ls-files", "--others", "--ignored",
+                "--exclude-standard", "-z"
+        );
+        List<String> result = new ArrayList<>();
+        for (String path : output.split("\\u0000", -1)) {
+            if (path.isBlank()) continue;
+            result.add(path);
+            if (result.size() >= boundedLimit) break;
+        }
+        return List.copyOf(result);
+    }
+
+    /**
+     * Finds target-tree writes that would overwrite a currently ignored,
+     * untracked physical file. Such files are absent from Git tree merges and
+     * therefore require an explicit physical collision guard.
+     */
+    public List<String> untrackedOverwriteConflicts(
+            Path workspace,
+            String currentTree,
+            String targetTree,
+            int limit
+    ) {
+        int boundedLimit = Math.max(1, Math.min(limit, 1_000));
+        if (currentTree.equals(targetTree)) return List.of();
+        String output = require(
+                workspace, Map.of(), "diff", "--name-status", "-z",
+                "--find-renames", currentTree, targetTree, "--"
+        );
+        List<String> fields = nulFields(output);
+        List<String> targets = new ArrayList<>();
+        int index = 0;
+        while (index < fields.size()) {
+            String status = fields.get(index++);
+            if (status.isBlank() || index >= fields.size()) break;
+            String path = fields.get(index++);
+            if ((status.startsWith("R") || status.startsWith("C"))
+                    && index < fields.size()) {
+                path = fields.get(index++);
+            }
+            if (!status.startsWith("D")) targets.add(path);
+        }
+        List<String> collisions = new ArrayList<>();
+        Path root = workspace.toAbsolutePath().normalize();
+        for (String path : targets) {
+            Path physical = root.resolve(path).normalize();
+            if (!physical.startsWith(root)
+                    || !Files.exists(physical)
+                    || run(root, Map.of(), false,
+                    "check-ignore", "--quiet", "--no-index", "--", path
+            ).exitCode() != 0) {
+                continue;
+            }
+            String targetBlob = run(root, Map.of(), false,
+                    "rev-parse", targetTree + ":" + path).output().trim();
+            String physicalBlob = Files.isRegularFile(physical)
+                    ? run(root, Map.of(), false,
+                    "hash-object", "--no-filters", "--", path
+            ).output().trim() : "";
+            if (!targetBlob.equals(physicalBlob)) {
+                collisions.add(path);
+                if (collisions.size() >= boundedLimit) break;
+            }
+        }
+        return List.copyOf(collisions);
+    }
+
+    /** Returns a stable, renderer-safe projection of the current Git state. */
+    public Status status(Path workspace) {
+        String output = require(
+                workspace, Map.of(), "status", "--porcelain=v2", "--branch",
+                "--untracked-files=all"
+        );
+        int staged = 0;
+        int unstaged = 0;
+        int untracked = 0;
+        int conflicted = 0;
+        int ahead = 0;
+        int behind = 0;
+        for (String line : output.split("\\R")) {
+            if (line.startsWith("# branch.ab ")) {
+                String[] fields = line.substring("# branch.ab ".length())
+                        .trim().split("\\s+");
+                for (String field : fields) {
+                    if (field.startsWith("+")) ahead = integer(field.substring(1));
+                    if (field.startsWith("-")) behind = integer(field.substring(1));
+                }
+                continue;
+            }
+            if (line.startsWith("? ")) {
+                untracked += 1;
+                continue;
+            }
+            if (line.startsWith("u ")) {
+                conflicted += 1;
+                continue;
+            }
+            if ((line.startsWith("1 ") || line.startsWith("2 "))
+                    && line.length() >= 4) {
+                char index = line.charAt(2);
+                char worktree = line.charAt(3);
+                if (index != '.') staged += 1;
+                if (worktree != '.') unstaged += 1;
+            }
+        }
+        return new Status(
+                staged == 0 && unstaged == 0 && untracked == 0
+                        && conflicted == 0,
+                staged, unstaged, untracked, conflicted, ahead, behind
+        );
+    }
+
+    /** Lists local and remote branches without exposing arbitrary Git syntax. */
+    public List<Branch> branches(Path workspace) {
+        String current = currentBranch(workspace);
+        Map<String, String> checkedOut = new HashMap<>();
+        for (Worktree item : worktrees(workspace)) {
+            if (!item.branchReference().isBlank()) {
+                checkedOut.put(item.branchReference(), item.path().toString());
+            }
+        }
+        String output = require(
+                workspace, Map.of(), "for-each-ref",
+                "--format=%(refname)%1f%(objectname)%1f%(upstream:short)",
+                "refs/heads", "refs/remotes"
+        );
+        List<Branch> result = new ArrayList<>();
+        for (String line : output.split("\\R")) {
+            if (line.isBlank()) continue;
+            String[] fields = line.split("\\u001f", -1);
+            if (fields.length < 2) continue;
+            String reference = fields[0];
+            boolean remote = reference.startsWith("refs/remotes/");
+            String name = remote
+                    ? reference.substring("refs/remotes/".length())
+                    : reference.substring("refs/heads/".length());
+            if (remote && name.endsWith("/HEAD")) continue;
+            String upstream = fields.length >= 3 ? fields[2] : "";
+            Counts counts = upstream.isBlank()
+                    ? new Counts(0, 0)
+                    : aheadBehind(workspace, reference, upstream);
+            result.add(new Branch(
+                    name, !remote && name.equals(current), remote,
+                    fields[1], upstream, counts.left(), counts.right(),
+                    checkedOut.getOrDefault(reference, "")
+            ));
+        }
+        return List.copyOf(result);
+    }
+
+    public List<Commit> history(
+            Path workspace,
+            int limit,
+            String cursor
+    ) {
+        if (head(workspace).isBlank()) return List.of();
+        int boundedLimit = Math.max(1, Math.min(limit, MAX_HISTORY_FETCH));
+        List<String> arguments = new ArrayList<>(List.of(
+                "log", "--max-count=" + boundedLimit,
+                "--date=iso-strict",
+                "--format=%H%x1f%h%x1f%s%x1f%an%x1f%aI%x1f%P%x1f%D%x00"
+        ));
+        if (cursor != null && !cursor.isBlank()) {
+            arguments.add("--skip=1");
+            arguments.add(requireRevision(cursor));
+        }
+        String output = require(
+                workspace, Map.of(), arguments.toArray(String[]::new)
+        );
+        return parseCommits(output);
+    }
+
+    public Commit commit(Path workspace, String revision) {
+        String output = require(
+                workspace, Map.of(), "log", "--max-count=1",
+                "--date=iso-strict",
+                "--format=%H%x1f%h%x1f%s%x1f%an%x1f%aI%x1f%P%x1f%D%x00",
+                requireRevision(revision)
+        );
+        List<Commit> commits = parseCommits(output);
+        if (commits.isEmpty()) {
+            throw new IllegalArgumentException("提交不存在");
+        }
+        return commits.getFirst();
+    }
+
+    private List<Commit> parseCommits(String output) {
+        List<Commit> result = new ArrayList<>();
+        for (String record : output.split("\\u0000")) {
+            // String.strip() also removes U+001F, our field separator, when
+            // decorations are empty. Remove only Git's record newlines.
+            String normalized = record
+                    .replaceFirst("^[\\r\\n]+", "")
+                    .replaceFirst("[\\r\\n]+$", "");
+            if (normalized.isBlank()) continue;
+            String[] fields = normalized.split("\\u001f", -1);
+            if (fields.length < 7) continue;
+            result.add(new Commit(
+                    fields[0], fields[1], fields[2], fields[3], fields[4],
+                    words(fields[5]), commaSeparated(fields[6])
+            ));
+        }
+        return List.copyOf(result);
+    }
+
+    public List<Worktree> worktrees(Path workspace) {
+        String output = require(
+                workspace, Map.of(), "worktree", "list", "--porcelain", "-z"
+        );
+        List<Worktree> result = new ArrayList<>();
+        Map<String, String> fields = new LinkedHashMap<>();
+        for (String token : output.split("\\u0000", -1)) {
+            if (token.isEmpty()) {
+                addWorktree(fields, result);
+                fields.clear();
+                continue;
+            }
+            int separator = token.indexOf(' ');
+            String key = separator < 0 ? token : token.substring(0, separator);
+            String value = separator < 0 ? "" : token.substring(separator + 1);
+            fields.put(key, value);
+        }
+        addWorktree(fields, result);
+        return List.copyOf(result);
+    }
+
+    public String resolveCommit(Path workspace, String revision) {
+        String value = requireRevision(revision);
+        return require(
+                workspace, Map.of(), "rev-parse", "--verify", value + "^{commit}"
+        ).trim();
+    }
+
+    public String resolveTree(Path workspace, String revision) {
+        String value = requireRevision(revision);
+        return require(
+                workspace, Map.of(), "rev-parse", "--verify", value + "^{tree}"
+        ).trim();
+    }
+
+    public String emptyTree(Path workspace) {
+        Path temporaryIndex = temporaryIndex("lumora-empty-tree-");
+        Map<String, String> environment = Map.of(
+                "GIT_INDEX_FILE", temporaryIndex.toString()
+        );
+        try {
+            require(workspace, environment, "read-tree", "--empty");
+            return require(workspace, environment, "write-tree").trim();
+        } finally {
+            deleteTemporaryIndex(temporaryIndex);
+        }
+    }
+
+    public void checkoutBranch(Path workspace, String branchName) {
+        validateBranchName(workspace, branchName);
+        if (!referenceTarget(
+                workspace, "refs/heads/" + branchName
+        ).isBlank()) {
+            require(workspace, Map.of(), "switch", "--no-guess", branchName);
+            return;
+        }
+        if (!referenceTarget(
+                workspace, "refs/remotes/" + branchName
+        ).isBlank()) {
+            require(workspace, Map.of(), "switch", "--track", branchName);
+            return;
+        }
+        throw new IllegalArgumentException("分支不存在");
+    }
+
+    public void createBranch(
+            Path workspace,
+            String branchName,
+            String startPoint,
+            boolean checkout
+    ) {
+        validateBranchName(workspace, branchName);
+        String reference = "refs/heads/" + branchName;
+        if (!referenceTarget(workspace, reference).isBlank()) {
+            throw new IllegalArgumentException("分支名称已存在");
+        }
+        String currentHead = head(workspace);
+        if (currentHead.isBlank()) {
+            if (!checkout) {
+                throw new IllegalStateException(
+                        "尚未产生首个提交，只能创建并检出新的未出生分支"
+                );
+            }
+            if (startPoint != null && !startPoint.isBlank()) {
+                throw new IllegalArgumentException(
+                        "尚未产生首个提交，不能指定分支起点"
+                );
+            }
+            require(workspace, Map.of(), "symbolic-ref", "HEAD", reference);
+            return;
+        }
+        String base = startPoint == null || startPoint.isBlank()
+                ? currentHead : resolveCommit(workspace, startPoint);
+        if (checkout) {
+            require(workspace, Map.of(), "switch", "-c", branchName, base);
+        } else {
+            require(workspace, Map.of(), "branch", branchName, base);
+        }
+    }
+
+    public void removeCleanWorktree(Path repositoryRoot, Path worktreePath) {
+        Path primary = primaryWorktree(repositoryRoot);
+        Path target = worktreePath.toAbsolutePath().normalize();
+        if (target.equals(primary)) {
+            throw new IllegalStateException("拒绝删除 Git 主工作树");
+        }
+        if (!Files.isDirectory(target)
+                || !Files.isRegularFile(target.resolve(".git"))) {
+            throw new IllegalStateException("目标不是可验证的 linked Worktree");
+        }
+        if (!status(target).clean()
+                || !ignoredUntracked(target, 1).isEmpty()) {
+            throw new IllegalStateException(
+                    "Worktree 包含未处理修改或被忽略文件，拒绝删除"
+            );
+        }
+        Result remove = run(primary, Map.of(), false,
+                "worktree", "remove", target.toString());
+        if (remove.exitCode() != 0) {
+            throw new IllegalStateException(messageOrDefault(
+                    remove.output(), "无法删除 Worktree"
+            ));
+        }
+    }
+
+    public void pruneWorktrees(Path repositoryRoot) {
+        require(repositoryRoot, Map.of(), "worktree", "prune");
     }
 
     public String commitTree(Path workspace, String commit) {
@@ -317,6 +666,67 @@ public class GitWorkspaceOperations {
         }
     }
 
+    private Counts aheadBehind(
+            Path workspace,
+            String reference,
+            String upstream
+    ) {
+        Result result = run(workspace, Map.of(), false,
+                "rev-list", "--left-right", "--count",
+                reference + "..." + upstream);
+        if (result.exitCode() != 0) return new Counts(0, 0);
+        String[] values = result.output().trim().split("\\s+");
+        return values.length < 2
+                ? new Counts(0, 0)
+                : new Counts(integer(values[0]), integer(values[1]));
+    }
+
+    private void addWorktree(
+            Map<String, String> fields,
+            List<Worktree> result
+    ) {
+        String rawPath = fields.getOrDefault("worktree", "");
+        if (rawPath.isBlank()) return;
+        result.add(new Worktree(
+                Path.of(rawPath).toAbsolutePath().normalize(),
+                fields.getOrDefault("HEAD", ""),
+                fields.getOrDefault("branch", ""),
+                fields.containsKey("detached"),
+                fields.containsKey("locked"),
+                fields.getOrDefault("prunable", "")
+        ));
+    }
+
+    private String requireRevision(String value) {
+        String revision = value == null ? "" : value.trim();
+        if (revision.isBlank() || revision.startsWith("-")
+                || revision.chars().anyMatch(Character::isISOControl)) {
+            throw new IllegalArgumentException("Git 引用不合法");
+        }
+        return revision;
+    }
+
+    private List<String> words(String value) {
+        return value == null || value.isBlank()
+                ? List.of() : List.of(value.trim().split("\\s+"));
+    }
+
+    private List<String> commaSeparated(String value) {
+        if (value == null || value.isBlank()) return List.of();
+        return Arrays.stream(value.split(","))
+                .map(String::trim)
+                .filter(item -> !item.isBlank())
+                .toList();
+    }
+
+    private int integer(String value) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException ignored) {
+            return 0;
+        }
+    }
+
     private void restoreDetachedHead(
             Path worktreePath,
             String detachedBaseCommit,
@@ -482,6 +892,57 @@ public class GitWorkspaceOperations {
             boolean conflicted,
             String details
     ) {
+    }
+
+    public record Status(
+            boolean clean,
+            int staged,
+            int unstaged,
+            int untracked,
+            int conflicted,
+            int ahead,
+            int behind
+    ) {
+    }
+
+    public record Branch(
+            String name,
+            boolean current,
+            boolean remote,
+            String headSha,
+            String upstream,
+            int ahead,
+            int behind,
+            String worktreePath
+    ) {
+    }
+
+    public record Commit(
+            String sha,
+            String shortSha,
+            String summary,
+            String authorName,
+            String authoredAt,
+            List<String> parentShas,
+            List<String> decorations
+    ) {
+        public Commit {
+            parentShas = List.copyOf(parentShas);
+            decorations = List.copyOf(decorations);
+        }
+    }
+
+    public record Worktree(
+            Path path,
+            String headSha,
+            String branchReference,
+            boolean detached,
+            boolean locked,
+            String prunableReason
+    ) {
+    }
+
+    private record Counts(int left, int right) {
     }
 
     private record RemovedPath(String path) {

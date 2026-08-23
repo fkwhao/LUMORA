@@ -1,6 +1,7 @@
 package com.lumora.core.task.api.dto.response;
 
 import com.lumora.core.task.domain.entity.TaskWorktree;
+import com.lumora.core.task.domain.model.TaskWorkspaceMode;
 import com.lumora.core.task.domain.model.WorktreeState;
 
 import java.time.Instant;
@@ -10,6 +11,7 @@ import java.util.List;
 public record TaskWorktreeResponse(
         String taskId,
         String workspaceMode,
+        String environment,
         String worktreeState,
         String sourceWorkspacePath,
         String effectiveWorkspacePath,
@@ -17,6 +19,10 @@ public record TaskWorktreeResponse(
         String baseCommit,
         String branchName,
         String reason,
+        boolean autoApplyWhenClean,
+        long settingsRevision,
+        boolean managedByLumora,
+        boolean canAutoApply,
         List<String> conflictPaths,
         boolean canApply,
         boolean canCreateBranch,
@@ -28,8 +34,15 @@ public record TaskWorktreeResponse(
             case WAITING_REVIEW, CONFLICTED -> true;
             default -> false;
         };
+        boolean canAutoApply = worktree.isManagedByLumora()
+                && worktree.getWorkspaceMode() == TaskWorkspaceMode.WORKTREE
+                && switch (worktree.getWorktreeState()) {
+            case BRANCHED, CLEANUP_PENDING, REMOVED, FAILED -> false;
+            default -> true;
+        };
         return new TaskWorktreeResponse(
                 worktree.getTaskId(),
+                worktree.getWorkspaceMode().name(),
                 worktree.getWorkspaceMode().name(),
                 worktree.getWorktreeState().name(),
                 worktree.getSourceWorkspacePath(),
@@ -38,11 +51,16 @@ public record TaskWorktreeResponse(
                 worktree.getBaseCommit(),
                 worktree.getBranchName(),
                 worktree.getReason(),
+                worktree.isAutoApplyWhenClean(),
+                worktree.getSettingsRevision(),
+                worktree.isManagedByLumora(),
+                canAutoApply,
                 conflictPaths(worktree.getReason()),
-                reviewable,
-                reviewable,
-                reviewable || worktree.getWorktreeState()
-                        == WorktreeState.CLEANUP_PENDING,
+                reviewable && worktree.isManagedByLumora(),
+                reviewable && worktree.isManagedByLumora(),
+                worktree.isManagedByLumora()
+                        && (reviewable || worktree.getWorktreeState()
+                        == WorktreeState.CLEANUP_PENDING),
                 worktree.getUpdatedAt()
         );
     }

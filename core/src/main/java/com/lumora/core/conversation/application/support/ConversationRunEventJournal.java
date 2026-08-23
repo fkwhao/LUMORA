@@ -6,9 +6,11 @@ import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,6 +39,7 @@ public class ConversationRunEventJournal implements AutoCloseable {
 
     private final ConversationRunStore runStore;
     private final ConversationRunEventStreamRegistry eventStreams;
+    private final WorkspaceChangeLedgerService workspaceLedger;
     private final long flushIntervalMillis;
     private final Object queueMonitor = new Object();
     private final Map<String, ArrayDeque<ChatStreamEvent>> pending =
@@ -47,9 +50,11 @@ public class ConversationRunEventJournal implements AutoCloseable {
     private ScheduledFuture<?> scheduledFlush;
     private boolean closed;
 
+    @Autowired
     public ConversationRunEventJournal(
             ConversationRunStore runStore,
             ConversationRunEventStreamRegistry eventStreams,
+            WorkspaceChangeLedgerService workspaceLedger,
             @Value("${lumora.runs.event-flush-interval-ms:20}")
             long flushIntervalMillis
     ) {
@@ -60,6 +65,7 @@ public class ConversationRunEventJournal implements AutoCloseable {
         }
         this.runStore = runStore;
         this.eventStreams = eventStreams;
+        this.workspaceLedger = workspaceLedger;
         this.flushIntervalMillis = flushIntervalMillis;
         this.writer = Executors.newSingleThreadScheduledExecutor(task -> {
             Thread thread = new Thread(task, "run-event-journal");
@@ -67,6 +73,15 @@ public class ConversationRunEventJournal implements AutoCloseable {
             writerThread.set(thread);
             return thread;
         });
+    }
+
+    /** Test-compatible constructor; production always supplies the ledger. */
+    public ConversationRunEventJournal(
+            ConversationRunStore runStore,
+            ConversationRunEventStreamRegistry eventStreams,
+            long flushIntervalMillis
+    ) {
+        this(runStore, eventStreams, null, flushIntervalMillis);
     }
 
     /** Adds an event without waiting for SQLite. */
@@ -135,10 +150,66 @@ public class ConversationRunEventJournal implements AutoCloseable {
             String runId,
             List<ChatStreamEvent> batch
     ) {
-        for (ConversationRunEventEnvelope envelope
-                : runStore.appendEvents(runId, batch)) {
-            eventStreams.publish(envelope);
+        var run = workspaceLedger == null ? null : runStore.require(runId);
+        List<ChatStreamEvent> durableBatch = batch;
+        if (workspaceLedger != null) {
+            durableBatch = new ArrayList<>(batch.size());
+            for (ChatStreamEvent event : batch) {
+                long revision = workspaceLedger.project(run, event);
+                if (revision < 0L) {
+                    durableBatch.add(event);
+                    continue;
+                }
+                Map<String, Object> metadata = new LinkedHashMap<>(
+                        event.getMetadata()
+                );
+                Object rawChanges = metadata.remove("workspaceChanges");
+                List<Map<String, Object>> changedFiles = changeSummaries(
+                        rawChanges
+                );
+                metadata.put("workspaceRevision", revision);
+                metadata.put("workspaceRevisionSource", "CORE");
+                metadata.put("workspaceChangeCount", changedFiles.size());
+                metadata.put("workspaceChangedFiles", changedFiles);
+                durableBatch.add(event.withMetadata(Map.copyOf(metadata)));
+            }
         }
+        List<ConversationRunEventEnvelope> persisted = runStore.appendEvents(
+                runId, durableBatch
+        );
+        for (ConversationRunEventEnvelope envelope : persisted) {
+            try {
+                eventStreams.publish(envelope);
+            } catch (RuntimeException error) {
+                // Persistence already committed. Re-queuing here would create
+                // a second durable event sequence; a broken subscriber may
+                // reconnect and replay the committed event instead.
+                LOGGER.warn(
+                        "Failed to publish persisted run event {}:{}",
+                        envelope.runId(), envelope.sequence(), error
+                );
+            }
+        }
+    }
+
+    private static List<Map<String, Object>> changeSummaries(Object value) {
+        if (!(value instanceof Iterable<?> iterable)) return List.of();
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object item : iterable) {
+            if (result.size() >= 500 || !(item instanceof Map<?, ?> raw)) {
+                continue;
+            }
+            Map<String, Object> summary = new LinkedHashMap<>();
+            for (String key : List.of(
+                    "path", "operation", "previousPath",
+                    "beforeHash", "afterHash"
+            )) {
+                Object field = raw.get(key);
+                if (field != null) summary.put(key, field);
+            }
+            result.add(Map.copyOf(summary));
+        }
+        return List.copyOf(result);
     }
 
     private List<ChatStreamEvent> take(String runId) {

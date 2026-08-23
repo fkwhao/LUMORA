@@ -34,6 +34,10 @@ MAX_SEARCH_QUERY_CHARS = 500
 MAX_PATCH_TEXT_CHARS = 100_000
 
 
+class StaleWorkspaceVersionError(ValueError):
+    """The file changed after the caller established its write baseline."""
+
+
 def filesystem_tools() -> tuple[FunctionTool, ...]:
     return (
         function_tool(
@@ -398,7 +402,13 @@ def _apply_patch(context: ToolContext, data: ToolInput) -> ToolResult:
     new_text = _use_file_newlines(str(data["newText"]), content)
     occurrences = content.count(old_text)
     if occurrences == 0:
-        raise ValueError("待替换文本不存在，文件可能已发生变化")
+        return _stale_write_result(
+            context,
+            path,
+            reason="待替换文本不存在，文件可能已发生变化",
+            expected_version=version,
+            current_version=version,
+        )
     replace_all = bool(data.get("replaceAll", False))
     if occurrences > 1 and not replace_all:
         raise ValueError(
@@ -406,7 +416,16 @@ def _apply_patch(context: ToolContext, data: ToolInput) -> ToolResult:
         )
     updated = content.replace(old_text, new_text, -1 if replace_all else 1)
     replacements = occurrences if replace_all else 1
-    _atomic_write_text(path, updated, expected_version=version)
+    try:
+        _atomic_write_text(path, updated, expected_version=version)
+    except StaleWorkspaceVersionError:
+        return _stale_write_result(
+            context,
+            path,
+            reason="文件在提交补丁前发生变化",
+            expected_version=version,
+            current_version=_safe_file_version(path),
+        )
     current_version = _file_version(path)
     observation_id = _observe_file(context, path, current_version, updated)
     metadata = {
@@ -439,7 +458,13 @@ def _write_file(context: ToolContext, data: ToolInput) -> ToolResult:
         current_version = _file_version(path)
         previous, verified_version = _read_text_file(path)
         if verified_version != current_version:
-            raise ValueError("文件在写入前发生变化，请重新读取后再试")
+            return _stale_write_result(
+                context,
+                path,
+                reason="文件在写入前发生变化",
+                expected_version=current_version,
+                current_version=verified_version,
+            )
         owner_id = context.resource_owner_id
         observations = context.resource_observations
         resource_key = file_resource_key(path)
@@ -474,8 +499,13 @@ def _write_file(context: ToolContext, data: ToolInput) -> ToolResult:
             base = observation.content
         if observed_version is not None and observed_version != verified_version:
             if data.get("conflictPolicy", "reject") != "merge":
-                raise ValueError(
-                    "文件已被其他任务修改，或被其他 Agent 修改，请重新读取后再试"
+                return _stale_write_result(
+                    context,
+                    path,
+                    reason="读取后文件已被其他任务或 Agent 修改",
+                    expected_version=observed_version,
+                    current_version=verified_version,
+                    observation_id=used_observation_id,
                 )
             if base is None:
                 return _human_merge_required(
@@ -517,7 +547,17 @@ def _write_file(context: ToolContext, data: ToolInput) -> ToolResult:
         previous = ""
         expected_version = None
     if write_resolution != "already_current":
-        _atomic_write_text(path, content, expected_version=expected_version)
+        try:
+            _atomic_write_text(path, content, expected_version=expected_version)
+        except StaleWorkspaceVersionError:
+            return _stale_write_result(
+                context,
+                path,
+                reason="文件在提交完整写入前发生变化",
+                expected_version=expected_version,
+                current_version=_safe_file_version(path),
+                observation_id=used_observation_id,
+            )
     final_version = _file_version(path)
     observation_id = _observe_file(context, path, final_version, content)
     metadata = {
@@ -622,6 +662,35 @@ def _human_merge_required(
     )
 
 
+def _stale_write_result(
+    context: ToolContext,
+    path: Path,
+    *,
+    reason: str,
+    expected_version: str | None,
+    current_version: str | None,
+    observation_id: str | None = None,
+) -> ToolResult:
+    metadata = {
+        "failureKind": "stale_workspace_version",
+        "retryable": True,
+        # ToolCallExecutor deliberately does not blindly retry write tools;
+        # this flag tells the model to re-read and construct a fresh patch.
+        "toolExecutionState": "not_started",
+        "path": _display_path(context, path),
+        "reason": reason,
+        "baseObservationId": observation_id,
+        "expectedVersion": expected_version,
+        "resourceVersion": current_version,
+        "nextAction": "重新读取文件最新内容，并基于新的 observationId 重新生成写入。",
+    }
+    return ToolResult(
+        content=json.dumps(metadata, ensure_ascii=False),
+        is_error=True,
+        metadata=metadata,
+    )
+
+
 def _content_hash(value: str) -> str:
     return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -690,7 +759,7 @@ def _atomic_write_text(
                 # Linking a prepared sibling is an atomic create-if-absent.
                 os.link(temporary, path)
             except FileExistsError as error:
-                raise ValueError(
+                raise StaleWorkspaceVersionError(
                     "目标文件已被其他任务创建，请先读取后再试"
                 ) from error
             temporary.unlink()
@@ -700,16 +769,25 @@ def _atomic_write_text(
         try:
             actual_version = _file_version(path)
         except FileNotFoundError as error:
-            raise ValueError(
+            raise StaleWorkspaceVersionError(
                 "文件在提交写入前发生变化，请重新读取后再试"
             ) from error
         if actual_version != expected_version:
-            raise ValueError("文件在提交写入前发生变化，请重新读取后再试")
+            raise StaleWorkspaceVersionError(
+                "文件在提交写入前发生变化，请重新读取后再试"
+            )
         os.replace(temporary, path)
         temporary = None
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def _safe_file_version(path: Path) -> str | None:
+    try:
+        return _file_version(path)
+    except (FileNotFoundError, OSError):
+        return None
 
 
 def _use_file_newlines(text: str, file_content: str) -> str:

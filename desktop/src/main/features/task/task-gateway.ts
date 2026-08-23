@@ -8,10 +8,15 @@ import type {
   TaskPreferencesInput,
   TaskWorkspaceInput,
 } from "../../../shared/task-contract";
+import type { WorkspaceEnvironmentSelection } from "../../../shared/workspace-contract";
 import { validateApprovalDecisionInput } from "../../../shared/validation";
 
 export interface TaskGateway {
-  create(goal: string, workspacePath?: string): Promise<TaskSnapshot>;
+  create(
+    goal: string,
+    workspacePath?: string,
+    environmentSelection?: WorkspaceEnvironmentSelection,
+  ): Promise<TaskSnapshot>;
   list(): Promise<TaskSummary[]>;
   get(taskId: string): Promise<TaskSnapshot>;
   updatePreferences(input: TaskPreferencesInput): Promise<TaskSnapshot>;
@@ -30,7 +35,11 @@ export class DemoTaskGateway implements TaskGateway {
   private readonly listeners = new Map<string, Set<(event: TaskEvent) => void>>();
   private readonly timers = new Map<string, NodeJS.Timeout[]>();
 
-  async create(goal: string, workspacePath = ""): Promise<TaskSnapshot> {
+  async create(
+    goal: string,
+    workspacePath = "",
+    _environmentSelection: WorkspaceEnvironmentSelection = { target: "LOCAL" },
+  ): Promise<TaskSnapshot> {
     const taskId = randomUUID();
     const task: TaskSnapshot = {
       taskId,

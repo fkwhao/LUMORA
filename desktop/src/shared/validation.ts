@@ -3,6 +3,19 @@ import type {
   TaskPreferencesInput,
   TaskWorkspaceInput,
 } from "./task-contract";
+import type {
+  CreateGitBranchInput,
+  GetGitChangesInput,
+  GitCheckoutInput,
+  GitHistoryInput,
+  GitReviewScope,
+  InspectWorkspaceInput,
+  ListWorktreesInput,
+  RemoveWorktreeInput,
+  SetWorktreeAutoApplyInput,
+  WorkspaceEnvironmentSelection,
+  WorkspaceHandoffInput,
+} from "./workspace-contract";
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/;
 const approvalKeys = ["approvalId", "decision", "taskId"] as const;
@@ -121,6 +134,227 @@ export function validateTaskWorkspaceInput(
     taskId: validateTaskId(input.taskId),
     workspacePath: validateWorkspacePath(input.workspacePath),
   };
+}
+
+export function validateWorkspaceEnvironmentSelection(
+  input: unknown,
+): WorkspaceEnvironmentSelection {
+  if (input === undefined || input === null) {
+    return { target: "LOCAL" };
+  }
+  if (!isPlainRecord(input)) {
+    throw new Error("工作环境参数格式无效");
+  }
+  const target = input.target;
+  if (
+    target !== "LOCAL"
+    && target !== "NEW_WORKTREE"
+    && target !== "EXISTING_WORKTREE"
+  ) {
+    throw new Error("工作环境类型无效");
+  }
+  const worktreePath = validateWorkspacePath(input.worktreePath);
+  if (target === "EXISTING_WORKTREE" && !worktreePath) {
+    throw new Error("请选择已有 Worktree");
+  }
+  const autoApplyWhenClean = target === "NEW_WORKTREE"
+    && typeof input.autoApplyWhenClean === "boolean"
+    ? input.autoApplyWhenClean
+    : undefined;
+  return {
+    target,
+    ...(worktreePath ? { worktreePath } : {}),
+    ...(autoApplyWhenClean === undefined ? {} : { autoApplyWhenClean }),
+  };
+}
+
+export function validateInspectWorkspaceInput(
+  input: unknown,
+): InspectWorkspaceInput {
+  if (!isPlainRecord(input)) {
+    throw new Error("工作区检查参数格式无效");
+  }
+  const workspacePath = validateWorkspacePath(input.workspacePath);
+  if (!workspacePath) throw new Error("工作区路径不能为空");
+  return {
+    workspacePath,
+    taskId: input.taskId === undefined
+      ? undefined
+      : validateTaskId(input.taskId),
+  };
+}
+
+export function validateWorkspaceHandoffInput(
+  input: unknown,
+): WorkspaceHandoffInput {
+  if (!isPlainRecord(input)) {
+    throw new Error("Handoff 参数格式无效");
+  }
+  const selection = validateWorkspaceEnvironmentSelection(input);
+  return {
+    taskId: validateTaskId(input.taskId),
+    ...selection,
+    expectedRevision: validateOptionalRevision(input.expectedRevision),
+  };
+}
+
+export function validateGitBranchName(input: unknown): string {
+  if (typeof input !== "string") throw new TypeError("分支名称必须是字符串");
+  const value = input.trim();
+  if (
+    !value
+    || value.length > 255
+    || /[\u0000-\u0020~^:?*\\[]/.test(value)
+    || value.includes("..")
+    || value.includes("@{")
+    || value.startsWith("/")
+    || value.endsWith("/")
+    || value.endsWith(".")
+    || value.includes("//")
+  ) {
+    throw new Error("分支名称无效");
+  }
+  return value;
+}
+
+function validateGitRef(input: unknown, label: string): string {
+  if (typeof input !== "string") throw new TypeError(`${label}必须是字符串`);
+  const value = input.trim();
+  if (!value || value.length > 512 || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new Error(`${label}无效`);
+  }
+  return value;
+}
+
+export function validateGitCheckoutInput(input: unknown): GitCheckoutInput {
+  if (!isPlainRecord(input)) throw new Error("切换分支参数格式无效");
+  return {
+    taskId: validateTaskId(input.taskId),
+    branchName: validateGitBranchName(input.branchName),
+    expectedHead: input.expectedHead === undefined
+      ? undefined
+      : validateGitRef(input.expectedHead, "预期 HEAD"),
+    expectedRevision: validateOptionalRevision(input.expectedRevision),
+  };
+}
+
+export function validateCreateGitBranchInput(
+  input: unknown,
+): CreateGitBranchInput {
+  if (!isPlainRecord(input)) throw new Error("创建分支参数格式无效");
+  return {
+    taskId: validateTaskId(input.taskId),
+    branchName: validateGitBranchName(input.branchName),
+    startPoint: input.startPoint === undefined
+      ? undefined
+      : validateGitRef(input.startPoint, "起始引用"),
+    checkout: input.checkout === undefined ? true : input.checkout === true,
+    expectedRevision: validateOptionalRevision(input.expectedRevision),
+  };
+}
+
+export function validateGitHistoryInput(input: unknown): GitHistoryInput {
+  if (!isPlainRecord(input)) throw new Error("提交历史参数格式无效");
+  const limit = input.limit === undefined ? 30 : Number(input.limit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    throw new Error("提交历史数量无效");
+  }
+  return {
+    taskId: validateTaskId(input.taskId),
+    limit,
+    cursor: input.cursor === undefined
+      ? undefined
+      : validateGitRef(input.cursor, "历史游标"),
+  };
+}
+
+export function validateGitReviewScope(input: unknown): GitReviewScope {
+  if (!isPlainRecord(input)) throw new Error("审阅范围格式无效");
+  const scopeName = input.scope;
+  if (
+    scopeName !== "LAST_RUN"
+    && scopeName !== "UNCOMMITTED"
+    && scopeName !== "UNSTAGED"
+    && scopeName !== "STAGED"
+    && scopeName !== "COMMIT"
+    && scopeName !== "BRANCH_COMPARE"
+  ) {
+    throw new Error("审阅范围无效");
+  }
+  const scope: GitReviewScope = { scope: scopeName };
+  if (input.runId !== undefined) scope.runId = validateTaskId(input.runId);
+  if (input.commitSha !== undefined) {
+    scope.commitSha = validateGitRef(input.commitSha, "提交引用");
+  }
+  if (input.baseRef !== undefined) {
+    scope.baseRef = validateGitRef(input.baseRef, "比较基准");
+  }
+  if (input.headRef !== undefined) {
+    scope.headRef = validateGitRef(input.headRef, "比较目标");
+  }
+  if (scopeName === "LAST_RUN" && !scope.runId) {
+    throw new Error("本轮审阅缺少 Run ID");
+  }
+  if (scopeName === "COMMIT" && !scope.commitSha) {
+    throw new Error("提交审阅缺少 Commit");
+  }
+  if (scopeName === "BRANCH_COMPARE" && !scope.baseRef) {
+    throw new Error("分支比较缺少基准分支");
+  }
+  return scope;
+}
+
+export function validateGetGitChangesInput(
+  input: unknown,
+): GetGitChangesInput {
+  if (!isPlainRecord(input)) throw new Error("Git 变更参数格式无效");
+  return {
+    taskId: validateTaskId(input.taskId),
+    scope: validateGitReviewScope(input.scope),
+  };
+}
+
+export function validateListWorktreesInput(
+  input: unknown,
+): ListWorktreesInput {
+  if (!isPlainRecord(input)) throw new Error("Worktree 参数格式无效");
+  return { taskId: validateTaskId(input.taskId) };
+}
+
+export function validateRemoveWorktreeInput(
+  input: unknown,
+): RemoveWorktreeInput {
+  if (!isPlainRecord(input)) throw new Error("删除 Worktree 参数格式无效");
+  const worktreePath = validateWorkspacePath(input.worktreePath);
+  if (!worktreePath) throw new Error("Worktree 路径不能为空");
+  return {
+    taskId: validateTaskId(input.taskId),
+    worktreePath,
+  };
+}
+
+export function validateSetWorktreeAutoApplyInput(
+  input: unknown,
+): SetWorktreeAutoApplyInput {
+  if (!isPlainRecord(input) || typeof input.enabled !== "boolean") {
+    throw new Error("Worktree 自动应用设置无效");
+  }
+  return {
+    taskId: validateTaskId(input.taskId),
+    enabled: input.enabled,
+    expectedSettingsRevision: validateOptionalRevision(
+      input.expectedSettingsRevision,
+    ),
+  };
+}
+
+function validateOptionalRevision(input: unknown): number | undefined {
+  if (input === undefined) return undefined;
+  const revision = Number(input);
+  if (!Number.isSafeInteger(revision) || revision < 0) {
+    throw new Error("工作区版本无效");
+  }
+  return revision;
 }
 
 function isPlainRecord(input: unknown): input is Record<string, unknown> {

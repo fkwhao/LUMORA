@@ -67,6 +67,7 @@ class ToolContext:
     workflow_id: str = ""
     workflow_node_id: str = ""
     write_owner_id: str = ""
+    workspace_revision: int = -1
     execution_budget: "ExecutionBudgetLedger | None" = field(
         default=None,
         repr=False,

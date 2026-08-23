@@ -16,6 +16,10 @@ import { useStore } from "zustand";
 
 import type { ProjectDirectory } from "../../../../shared/window-contract";
 import type { MessageAttachment } from "../../../../shared/attachment-contract";
+import type {
+  LumoraWorkspaceApi,
+  WorkspaceEnvironmentSelection,
+} from "../../../../shared/workspace-contract";
 import { resizeTextarea } from "../../../utils/auto-resize-textarea";
 import { submitFormOnEnter } from "../../../utils/submit-on-enter";
 import {
@@ -25,9 +29,11 @@ import {
 import type { TaskStore } from "../state/task-store";
 import { HalftoneMountainArtwork } from "../components/HalftoneMountainArtwork";
 import { PixelDriftHeading } from "../components/PixelDriftHeading";
+import { DraftEnvironmentPicker } from "../components/DraftEnvironmentPicker";
 
 interface HomePageProps {
   store: TaskStore;
+  workspaceApi?: LumoraWorkspaceApi;
   composerMotion?: "from-bottom";
   notify(message: string, tone?: "info" | "success"): void;
 }
@@ -86,7 +92,7 @@ function HomeAttachmentChip({
   );
 }
 
-export function HomePage({ store, composerMotion, notify }: HomePageProps) {
+export function HomePage({ store, workspaceApi, composerMotion, notify }: HomePageProps) {
   const [goal, setGoal] = useState("");
   const [contexts, setContexts] = useState<string[]>([]);
   const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
@@ -94,6 +100,8 @@ export function HomePage({ store, composerMotion, notify }: HomePageProps) {
   const [project, setProject] = useState<ProjectDirectory | undefined>(
     loadActiveProject,
   );
+  const [environmentSelection, setEnvironmentSelection] =
+    useState<WorkspaceEnvironmentSelection>({ target: "LOCAL" });
   const fileInput = useRef<HTMLInputElement>(null);
   const goalInput = useRef<HTMLTextAreaElement>(null);
   const isCreating = useStore(store, (state) => state.isCreating);
@@ -107,7 +115,10 @@ export function HomePage({ store, composerMotion, notify }: HomePageProps) {
       const content = goal.trim()
         || (attachments.length > 0 ? "请查看这些附件。" : "");
       if (!content) return;
-      await store.getState().createTask(content, project?.path, { attachments });
+      await store.getState().createTask(content, project?.path, {
+        attachments,
+        environmentSelection,
+      });
     } catch {
       // Store 已经提供面向用户的错误信息，表单无需重复处理异常。
     }
@@ -120,12 +131,14 @@ export function HomePage({ store, composerMotion, notify }: HomePageProps) {
       return;
     }
     setProject(selected);
+    setEnvironmentSelection({ target: "LOCAL" });
     saveActiveProject(selected);
     notify(`已选择项目：${selected.name}`, "success");
   }
 
   function clearProject() {
     setProject(undefined);
+    setEnvironmentSelection({ target: "LOCAL" });
     saveActiveProject(undefined);
     notify("已切换为无项目对话");
   }
@@ -195,10 +208,12 @@ export function HomePage({ store, composerMotion, notify }: HomePageProps) {
               <FolderOpen size={15} />
               <span>{project?.name ?? "选择项目文件夹"}</span>
             </button>
-            <span className="project-mode">
-              <Laptop size={14} />
-              本地
-            </span>
+            <DraftEnvironmentPicker
+              api={workspaceApi}
+              workspacePath={project?.path}
+              value={environmentSelection}
+              onChange={setEnvironmentSelection}
+            />
             <span className="project-branch">
               <GitBranch size={14} />
               {project?.gitBranch ?? "未关联 Git"}
