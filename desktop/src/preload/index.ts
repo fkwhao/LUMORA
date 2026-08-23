@@ -233,6 +233,32 @@ const api: LumoraApi = {
         validateTaskId(taskId),
         validateMessageId(runId),
       ),
+    getTaskWorktree: (taskId) =>
+      ipcRenderer.invoke(
+        "model:get-task-worktree",
+        validateTaskId(taskId),
+      ),
+    getTaskWorktreeChanges: (taskId) =>
+      ipcRenderer.invoke(
+        "model:get-task-worktree-changes",
+        validateTaskId(taskId),
+      ),
+    applyTaskWorktree: (taskId) =>
+      ipcRenderer.invoke(
+        "model:apply-task-worktree",
+        validateTaskId(taskId),
+      ),
+    createTaskWorktreeBranch: (taskId, branchName) =>
+      ipcRenderer.invoke(
+        "model:create-task-worktree-branch",
+        validateTaskId(taskId),
+        validateBranchName(branchName),
+      ),
+    discardTaskWorktree: (taskId) =>
+      ipcRenderer.invoke(
+        "model:discard-task-worktree",
+        validateTaskId(taskId),
+      ),
     subscribeRun: (
       untrustedTaskId,
       untrustedRunId,
@@ -385,3 +411,14 @@ const api: LumoraApi = {
 
 // 只暴露具体业务动作，不把 ipcRenderer 或任意 channel 交给页面。
 contextBridge.exposeInMainWorld("lumora", api);
+
+function validateBranchName(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new TypeError("分支名称不能为空");
+  }
+  const branchName = value.trim();
+  if (branchName.length > 255) {
+    throw new TypeError("分支名称不能超过 255 个字符");
+  }
+  return branchName;
+}

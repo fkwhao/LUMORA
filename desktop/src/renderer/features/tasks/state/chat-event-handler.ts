@@ -31,6 +31,17 @@ export function applyChatEvent(
   set: (partial: Partial<TaskState>) => void,
   resolve: () => void,
 ): void {
+  if (
+    get().isPausing &&
+    event.type !== "paused" &&
+    event.type !== "completed" &&
+    event.type !== "failed"
+  ) {
+    // The user-facing answer freezes at click time. Core continues consuming
+    // and persisting safe-settlement events; the terminal refresh below then
+    // reconciles the complete resumable state.
+    return;
+  }
   if (event.type === "steer_claimed") {
     if (event.itemId && event.delta.trim()) {
       set({
@@ -204,8 +215,17 @@ export function applyChatEvent(
     return;
   }
   if (event.type === "completed") {
+    const currentRun = get().activeRun;
     set({
+      activeRun: currentRun
+        ? {
+            ...currentRun,
+            status: "COMPLETED",
+            updatedAt: new Date().toISOString(),
+          }
+        : currentRun,
       isChatting: false,
+      isPausing: false,
       chatWasStopped: false,
       chatStartedAt: undefined,
       lastChatDurationMs,
@@ -234,6 +254,15 @@ export function applyChatEvent(
     return;
   }
   if (event.type === "failed") {
+    const currentRun = get().activeRun;
+    const failedRun = currentRun
+      ? {
+          ...currentRun,
+          status: "FAILED" as const,
+          errorMessage: event.errorMessage || currentRun.errorMessage,
+          updatedAt: new Date().toISOString(),
+        }
+      : currentRun;
     void modelApi
       .listMessages(taskId)
       .then((persistedMessages) => {
@@ -247,8 +276,10 @@ export function applyChatEvent(
               )
             : [...persistedMessages, liveAssistant];
         set({
+          activeRun: failedRun,
           messages,
           isChatting: false,
+          isPausing: false,
           chatWasStopped: false,
           chatStartedAt: undefined,
           lastChatDurationMs,
@@ -259,7 +290,9 @@ export function applyChatEvent(
       })
       .catch(() =>
         set({
+          activeRun: failedRun,
           isChatting: false,
+          isPausing: false,
           chatWasStopped: false,
           chatStartedAt: undefined,
           lastChatDurationMs,

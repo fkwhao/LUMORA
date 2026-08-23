@@ -47,6 +47,11 @@ export const modelIpcChannels = {
   cancelRun: "model:cancel-run",
   getRunChanges: "model:get-run-changes",
   revertRun: "model:revert-run",
+  getTaskWorktree: "model:get-task-worktree",
+  getTaskWorktreeChanges: "model:get-task-worktree-changes",
+  applyTaskWorktree: "model:apply-task-worktree",
+  createTaskWorktreeBranch: "model:create-task-worktree-branch",
+  discardTaskWorktree: "model:discard-task-worktree",
   listInputs: "model:list-inputs",
   createInput: "model:create-input",
   updateInput: "model:update-input",
@@ -209,6 +214,38 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
       requireText(runId, "运行 ID"),
     ),
   );
+  ipcMain.handle(
+    modelIpcChannels.getTaskWorktree,
+    (_event, taskId: string) => gateway.getTaskWorktree(
+      requireText(taskId, "任务 ID"),
+    ),
+  );
+  ipcMain.handle(
+    modelIpcChannels.getTaskWorktreeChanges,
+    (_event, taskId: string) => gateway.getTaskWorktreeChanges(
+      requireText(taskId, "任务 ID"),
+    ),
+  );
+  ipcMain.handle(
+    modelIpcChannels.applyTaskWorktree,
+    (_event, taskId: string) => gateway.applyTaskWorktree(
+      requireText(taskId, "任务 ID"),
+    ),
+  );
+  ipcMain.handle(
+    modelIpcChannels.createTaskWorktreeBranch,
+    (_event, taskId: string, branchName: string) =>
+      gateway.createTaskWorktreeBranch(
+        requireText(taskId, "任务 ID"),
+        requireText(branchName, "分支名称"),
+      ),
+  );
+  ipcMain.handle(
+    modelIpcChannels.discardTaskWorktree,
+    (_event, taskId: string) => gateway.discardTaskWorktree(
+      requireText(taskId, "任务 ID"),
+    ),
+  );
   ipcMain.on(modelIpcChannels.streamStart, (event, input: StreamStartInput) => {
     const taskId = requireText(input?.taskId, "任务 ID");
     const content = input?.runId
@@ -334,6 +371,11 @@ export function registerModelIpc(gateway: ModelGateway): () => void {
     ipcMain.removeHandler(modelIpcChannels.cancelRun);
     ipcMain.removeHandler(modelIpcChannels.getRunChanges);
     ipcMain.removeHandler(modelIpcChannels.revertRun);
+    ipcMain.removeHandler(modelIpcChannels.getTaskWorktree);
+    ipcMain.removeHandler(modelIpcChannels.getTaskWorktreeChanges);
+    ipcMain.removeHandler(modelIpcChannels.applyTaskWorktree);
+    ipcMain.removeHandler(modelIpcChannels.createTaskWorktreeBranch);
+    ipcMain.removeHandler(modelIpcChannels.discardTaskWorktree);
     ipcMain.removeAllListeners(modelIpcChannels.streamStart);
     ipcMain.removeAllListeners(modelIpcChannels.streamCancel);
     for (const cancel of subscriptions.values()) {

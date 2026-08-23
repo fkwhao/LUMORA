@@ -15,6 +15,7 @@ import com.lumora.core.conversation.domain.model.ConversationRunTrigger;
 import com.lumora.core.conversation.domain.model.ConversationInputStatus;
 import com.lumora.core.conversation.domain.model.ConversationInputTarget;
 import com.lumora.core.task.application.service.TaskService;
+import com.lumora.core.task.application.support.TaskWorktreeService;
 import com.lumora.core.task.domain.entity.AgentTask;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
@@ -62,6 +63,7 @@ class ConversationRunCoordinatorTest {
                 mock(ConversationRunEventJournal.class),
                 taskService,
                 mock(GitRunChangeService.class),
+                mock(TaskWorktreeService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
                         ZoneOffset.UTC
@@ -97,6 +99,7 @@ class ConversationRunCoordinatorTest {
                 mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
                 mock(GitRunChangeService.class),
+                mock(TaskWorktreeService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
                         ZoneOffset.UTC
@@ -164,6 +167,7 @@ class ConversationRunCoordinatorTest {
                 mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
                 mock(GitRunChangeService.class),
+                mock(TaskWorktreeService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
                         ZoneOffset.UTC
@@ -253,6 +257,7 @@ class ConversationRunCoordinatorTest {
                 mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
                 mock(GitRunChangeService.class),
+                mock(TaskWorktreeService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
                         ZoneOffset.UTC
@@ -315,6 +320,7 @@ class ConversationRunCoordinatorTest {
                 mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
                 mock(GitRunChangeService.class),
+                mock(TaskWorktreeService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
                         ZoneOffset.UTC
@@ -370,6 +376,7 @@ class ConversationRunCoordinatorTest {
                 mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
                 mock(GitRunChangeService.class),
+                mock(TaskWorktreeService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
                         ZoneOffset.UTC
@@ -433,6 +440,7 @@ class ConversationRunCoordinatorTest {
                 mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
                 mock(GitRunChangeService.class),
+                mock(TaskWorktreeService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
                         ZoneOffset.UTC
@@ -497,6 +505,7 @@ class ConversationRunCoordinatorTest {
                 mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
                 mock(GitRunChangeService.class),
+                mock(TaskWorktreeService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
                         ZoneOffset.UTC
@@ -574,6 +583,7 @@ class ConversationRunCoordinatorTest {
                 mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
                 mock(GitRunChangeService.class),
+                mock(TaskWorktreeService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
                         ZoneOffset.UTC
@@ -588,6 +598,45 @@ class ConversationRunCoordinatorTest {
                 "task-1", "run-legacy:0", List.of(pausing)
         );
         verify(runStore).markRecoveredPaused("run-legacy");
+    }
+
+    @Test
+    void treatsAPauseRacingWithNaturalCompletionAsIdempotent() {
+        ConversationService conversationService = mock(
+                ConversationService.class
+        );
+        ConversationRunStore runStore = mock(ConversationRunStore.class);
+        Map<String, ConversationRun> runs = new LinkedHashMap<>();
+        stubRunStore(runStore, runs);
+        ConversationRun completed = new ConversationRun();
+        completed.setRunId("run-completed");
+        completed.setTaskId("task-1");
+        completed.setStatus(ConversationRunStatus.COMPLETED);
+        runs.put(completed.getRunId(), completed);
+        ConversationRunCoordinator coordinator = new ConversationRunCoordinator(
+                conversationService,
+                runStore,
+                mock(ConversationInputStore.class),
+                mock(ConversationRunEventStreamRegistry.class),
+                mock(ConversationRunEventJournal.class),
+                mock(TaskService.class),
+                mock(GitRunChangeService.class),
+                mock(TaskWorktreeService.class),
+                Clock.fixed(
+                        Instant.parse("2026-08-15T00:00:00Z"),
+                        ZoneOffset.UTC
+                ),
+                1
+        );
+
+        ConversationRun result = coordinator.pause(
+                "task-1", completed.getRunId()
+        );
+
+        assertThat(result.getStatus()).isEqualTo(
+                ConversationRunStatus.COMPLETED
+        );
+        verify(conversationService, never()).pauseGeneration(anyString());
     }
 
     @Test
@@ -620,6 +669,7 @@ class ConversationRunCoordinatorTest {
                 mock(ConversationRunEventJournal.class),
                 mock(TaskService.class),
                 gitChanges,
+                mock(TaskWorktreeService.class),
                 Clock.fixed(
                         Instant.parse("2026-08-15T00:00:00Z"),
                         ZoneOffset.UTC

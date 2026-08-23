@@ -27,7 +27,9 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Captures one Run's before/after workspace as Git trees without touching the
- * user's real index. Worktree isolation is deliberately a later phase.
+ * user's real index. The physical workspace is recorded separately from the
+ * repository's primary worktree so captured trees remain readable after a
+ * temporary task Worktree is removed.
  */
 @Service
 @RequiredArgsConstructor
@@ -57,13 +59,14 @@ public class GitRunChangeService {
                 unavailable(changeSet, "工作区不存在，无法建立 Git 变更基线");
                 return;
             }
-            Path repositoryRoot = repositoryRoot(workspacePath);
+            Path workspaceRoot = workspaceRoot(workspacePath);
+            Path repositoryRoot = repositoryRoot(workspaceRoot);
             changeSet.setRepositoryRoot(repositoryRoot.toString());
+            changeSet.setWorkspacePath(workspaceRoot.toString());
             List<ConversationRunChangeSet> repositoryLeases =
-                    repositoryLeases(repositoryRoot);
+                    workspaceLeases(workspaceRoot);
             if (!repositoryLeases.isEmpty()) {
-                String reason = "同一 Git 仓库出现并发 Run；在引入 worktree 隔离前，"
-                        + "相关 Run 均不提供自动撤回";
+                String reason = "同一物理工作区出现并发 Run，相关 Run 均不提供自动撤回";
                 for (ConversationRunChangeSet lease : repositoryLeases) {
                     lease.setStatus(RunChangeSetStatus.COLLIDED);
                     lease.setReason(reason);
@@ -76,7 +79,7 @@ public class GitRunChangeService {
                 changeSetMapper.insert(changeSet);
                 return;
             }
-            Snapshot snapshot = snapshot(repositoryRoot);
+            Snapshot snapshot = snapshot(workspaceRoot);
             changeSet.setBeforeTree(snapshot.tree());
             changeSet.setBeforeHead(snapshot.head());
             changeSet.setBeforeIndexTree(snapshot.indexTree());
@@ -115,8 +118,9 @@ public class GitRunChangeService {
         }
         if (changeSet.getStatus() != RunChangeSetStatus.TRACKING) return;
         try {
-            Path root = Path.of(changeSet.getRepositoryRoot());
-            Snapshot snapshot = snapshot(root);
+            Path workspace = Path.of(changeSet.getWorkspacePath());
+            Path repository = Path.of(changeSet.getRepositoryRoot());
+            Snapshot snapshot = snapshot(workspace);
             changeSet.setAfterTree(snapshot.tree());
             changeSet.setAfterHead(snapshot.head());
             changeSet.setAfterIndexTree(snapshot.indexTree());
@@ -126,7 +130,7 @@ public class GitRunChangeService {
             changeSet.setCapturedAt(capturedAt);
             changeSet.setUpdatedAt(capturedAt);
             changeSetMapper.updateById(changeSet);
-            keepTree(root, run.getRunId(), "after", snapshot.tree());
+            keepTree(repository, run.getRunId(), "after", snapshot.tree());
         } catch (RuntimeException error) {
             Instant capturedAt = clock.instant();
             changeSet.setStatus(RunChangeSetStatus.UNAVAILABLE);
@@ -148,7 +152,7 @@ public class GitRunChangeService {
         String comparisonTree = changeSet.getAfterTree();
         if (changeSet.getStatus() == RunChangeSetStatus.TRACKING) {
             comparisonTree = snapshot(Path.of(
-                    changeSet.getRepositoryRoot()
+                    changeSet.getWorkspacePath()
             )).tree();
         }
         if (comparisonTree == null || comparisonTree.isBlank()) {
@@ -161,8 +165,30 @@ public class GitRunChangeService {
         );
         boolean revertible = changeSet.getStatus()
                 == RunChangeSetStatus.CAPTURED
-                && metadataReason(changeSet).isBlank();
+                && metadataReason(changeSet).isBlank()
+                && Files.isDirectory(Path.of(changeSet.getWorkspacePath()));
         return response(changeSet, files, revertible);
+    }
+
+    /**
+     * Reads an immutable Git tree range without requiring a Run change-set.
+     * Task-level Worktree review uses this to expose the complete isolated
+     * result while Run review continues to use its own before/after trees.
+     */
+    public synchronized List<ConversationFileChangeResponse> diffTrees(
+            String repositoryRoot,
+            String beforeTree,
+            String afterTree
+    ) {
+        if (valueOrEmpty(repositoryRoot).isBlank()
+                || valueOrEmpty(beforeTree).isBlank()
+                || valueOrEmpty(afterTree).isBlank()) {
+            return List.of();
+        }
+        return diff(
+                Path.of(repositoryRoot).toAbsolutePath().normalize(),
+                beforeTree.trim(), afterTree.trim()
+        );
     }
 
     public synchronized ConversationRunChangesResponse revert(
@@ -182,10 +208,13 @@ public class GitRunChangeService {
         if (!metadataReason.isBlank()) {
             throw new IllegalStateException(metadataReason);
         }
-        Path root = Path.of(changeSet.getRepositoryRoot());
-        if (!repositoryLeases(root).isEmpty()) {
+        Path root = Path.of(changeSet.getWorkspacePath());
+        if (!Files.isDirectory(root)) {
+            throw new IllegalStateException("本轮使用的临时 Worktree 已清理，不能原地撤回");
+        }
+        if (!workspaceLeases(root).isEmpty()) {
             throw new IllegalStateException(
-                    "同一 Git 仓库仍有其他活动 Run，不能撤回"
+                    "同一物理工作区仍有其他活动 Run，不能撤回"
             );
         }
         Snapshot current = snapshot(root);
@@ -230,6 +259,7 @@ public class GitRunChangeService {
         result.setRunId(run.getRunId());
         result.setTaskId(run.getTaskId());
         result.setRepositoryRoot("");
+        result.setWorkspacePath(valueOrEmpty(run.getWorkspacePath()));
         result.setBeforeTree("");
         result.setAfterTree("");
         result.setBeforeHead("");
@@ -258,8 +288,8 @@ public class GitRunChangeService {
         }
     }
 
-    private List<ConversationRunChangeSet> repositoryLeases(
-            Path repositoryRoot
+    private List<ConversationRunChangeSet> workspaceLeases(
+            Path workspacePath
     ) {
         return changeSetMapper.selectList(
                 Wrappers.<ConversationRunChangeSet>lambdaQuery()
@@ -268,14 +298,14 @@ public class GitRunChangeService {
                                 RunChangeSetStatus.COLLIDED,
                                 RunChangeSetStatus.UNAVAILABLE)
         ).stream().filter(item -> item.getCapturedAt() == null)
-                .filter(item -> !valueOrEmpty(item.getRepositoryRoot()).isBlank())
-                .filter(item -> Path.of(item.getRepositoryRoot())
+                .filter(item -> !valueOrEmpty(item.getWorkspacePath()).isBlank())
+                .filter(item -> Path.of(item.getWorkspacePath())
                 .toAbsolutePath().normalize().equals(
-                        repositoryRoot.toAbsolutePath().normalize()
+                        workspacePath.toAbsolutePath().normalize()
                 )).toList();
     }
 
-    private Path repositoryRoot(Path workspacePath) {
+    private Path workspaceRoot(Path workspacePath) {
         GitResult result = git(workspacePath, Map.of(), false,
                 "rev-parse", "--show-toplevel");
         if (result.exitCode() != 0 || result.output().isBlank()) {
@@ -288,6 +318,19 @@ public class GitRunChangeService {
             throw new IllegalStateException("无法定位 Git 仓库元数据");
         }
         return root;
+    }
+
+    private Path repositoryRoot(Path workspaceRoot) {
+        String output = requireGit(
+                workspaceRoot, Map.of(), "worktree", "list", "--porcelain"
+        );
+        for (String line : output.split("\\R")) {
+            if (!line.startsWith("worktree ")) continue;
+            Path root = Path.of(line.substring("worktree ".length()).trim())
+                    .toAbsolutePath().normalize();
+            if (Files.isDirectory(root)) return root;
+        }
+        throw new IllegalStateException("无法定位 Git 主工作树");
     }
 
     private Snapshot snapshot(Path root) {

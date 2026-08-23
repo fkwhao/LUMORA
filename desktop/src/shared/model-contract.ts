@@ -309,6 +309,46 @@ export interface ConversationRunChanges {
   revertedAt?: string;
 }
 
+export type TaskWorkspaceMode = "LOCAL" | "WORKTREE";
+export type TaskWorktreeState =
+  | "PROVISIONING"
+  | "ACTIVE"
+  | "WAITING_REVIEW"
+  | "APPLYING"
+  | "CONFLICTED"
+  | "CLEANUP_PENDING"
+  | "BRANCHED"
+  | "RELEASED"
+  | "REMOVED"
+  | "FAILED";
+
+export interface TaskWorktreeStatus {
+  taskId: string;
+  workspaceMode: TaskWorkspaceMode;
+  worktreeState: TaskWorktreeState;
+  sourceWorkspacePath: string;
+  effectiveWorkspacePath: string;
+  repositoryRoot: string;
+  baseCommit: string;
+  branchName: string;
+  reason: string;
+  conflictPaths?: string[];
+  canApply: boolean;
+  canCreateBranch: boolean;
+  canDiscard: boolean;
+  updatedAt: string;
+}
+
+export interface TaskWorktreeChanges {
+  taskId: string;
+  status: TaskWorktreeState;
+  repositoryRoot: string;
+  reason: string;
+  additions: number;
+  deletions: number;
+  files: ConversationFileChange[];
+}
+
 export type ConversationInputTarget = "NEXT_TURN" | "NEXT_STEP";
 export type ConversationInputStatus =
   | "PENDING"
@@ -412,6 +452,11 @@ export interface LumoraModelApi {
   cancelRun(taskId: string, runId: string): Promise<ConversationRunSnapshot>;
   getRunChanges(taskId: string, runId: string): Promise<ConversationRunChanges>;
   revertRun(taskId: string, runId: string): Promise<ConversationRunChanges>;
+  getTaskWorktree(taskId: string): Promise<TaskWorktreeStatus | undefined>;
+  getTaskWorktreeChanges(taskId: string): Promise<TaskWorktreeChanges | undefined>;
+  applyTaskWorktree(taskId: string): Promise<TaskWorktreeStatus>;
+  createTaskWorktreeBranch(taskId: string, branchName: string): Promise<TaskWorktreeStatus>;
+  discardTaskWorktree(taskId: string): Promise<TaskWorktreeStatus>;
   subscribeRun(
     taskId: string,
     runId: string,

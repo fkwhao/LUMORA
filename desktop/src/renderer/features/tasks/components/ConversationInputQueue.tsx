@@ -39,9 +39,9 @@ export function ConversationInputQueue({
     .filter((input) => input.target === "NEXT_TURN")
     .sort((left, right) => left.position - right.position);
   const paused = activeRun?.status === "PAUSED";
-  const canAdjustDirection = isChatting || paused;
+  const canAdjustDirection = isChatting || isPausing || paused;
 
-  if (queued.length === 0 && !paused) return null;
+  if (queued.length === 0 && !paused && !isPausing) return null;
 
   const run = async (inputId: string, action: () => Promise<void>) => {
     setBusyId(inputId);
@@ -63,25 +63,29 @@ export function ConversationInputQueue({
       className="relative z-10 mx-auto -mb-[17px] w-[calc(100%_-_34px)] overflow-hidden rounded-[22px_22px_12px_12px] border border-border/60 bg-background/96 pb-[17px] shadow-[0_8px_26px_rgba(20,25,32,0.05)] backdrop-blur"
       aria-label="问题队列"
     >
-      {paused && (
+      {(paused || isPausing) && (
         <header className="flex min-h-10 items-center justify-between gap-3 border-b border-border/55 px-4 py-2">
           <div className="flex min-w-0 items-center gap-2 text-sm text-foreground">
             <Pause className="size-3.5 shrink-0 text-muted-foreground" />
             <span className="truncate">
-              {queued.length > 0
+              {isPausing
+                ? "输出已暂停，正在保存当前进度"
+                : queued.length > 0
                 ? "由于你暂停了当前响应，问题队列已暂停"
                 : "当前响应已暂停，进度和上下文均已保留"}
             </span>
           </div>
-          <button
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
-            type="button"
-            disabled={isPausing || busyId === "__resume__"}
-            onClick={resume}
-          >
-            <Play className="size-3 fill-current" />
-            继续
-          </button>
+          {paused && (
+            <button
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+              type="button"
+              disabled={busyId === "__resume__"}
+              onClick={resume}
+            >
+              <Play className="size-3 fill-current" />
+              继续
+            </button>
+          )}
         </header>
       )}
 

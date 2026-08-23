@@ -6,8 +6,9 @@ Agent 推理编排。
 
 > 当前处于持续开发阶段：真实模型对话、Agent 工具循环、动态计划、权限审批、上下文
 > 压缩、Artifact、本地会话持久化和完整能力 Supervisor 多 Agent 已经打通；可续接
-> Agent Session、耐久显式 DAG、共享预算、安全重试、跨进程写入租约与冲突合并已实现，浏览器/OCR、
-> 复杂文档等通用 Changes、worktree 并行隔离、插件运行时和 Windows 受限 Worker 仍按架构逐步实现。
+> Agent Session、耐久显式 DAG、共享预算、安全重试、跨进程写入租约、Run 级 Git Diff/撤回、
+> 按需 Worktree 并行隔离、三方结果应用和崩溃恢复已实现；浏览器/OCR、复杂文档等通用 Changes、
+> 插件运行时和 Windows 受限 Worker 仍按架构逐步实现。
 
 ## 项目结构
 
@@ -42,6 +43,8 @@ Electron Renderer
 - Git 项目按 Run 保存执行前后工作区 tree；每轮回答末尾汇总已编辑文件和增删行，可展开文件、
   撤销整轮或打开右侧 Changes 审核真实 Diff。满足后续没有新修改、`HEAD` 与暂存区未变化等
   条件时，可安全撤回该 Run 的文件和会话消息。
+- 同一 Git 仓库并行执行第二个任务时自动分配任务级 detached Worktree；任务结束后可在 Changes
+  审阅累计修改并选择三方应用到 Local、创建正式分支或放弃，冲突与异常退出会保留现场等待恢复。
 - 接入远程 Streamable HTTP MCP 的 Tools、Resources、Resource Templates 与 Prompts，所有远程能力继续经过现有权限和审计链路。
 - 支持项目级与个人级 Skills：只在上下文中暴露名称和描述，命中后由 Agent 按需加载完整 SOP 与附属文本资源；输入 `/` 可搜索显式 Skill 指令。
 - 对支持的模型启用供应商托管 Web Search，并在工作过程中展示搜索状态、引用和来源。
@@ -103,8 +106,8 @@ context: full
 Supervisor/子 Agent 的 Session、事件、界面和分阶段路线图见
 [Supervisor 多 Agent 设计](docs/supervisor-multi-agent-design.md)。
 
-Run 级 Git Diff、安全撤回和后续按需 worktree 路线见
-[Run 级 Git 变更与撤回设计](docs/git-run-changes-design.md)。
+Run 级 Git Diff、安全撤回、按需 Worktree 与结果生命周期见
+[Git 变更、撤回与 Worktree 路线](docs/git-run-changes-design.md)。
 
 ## 安全说明
 

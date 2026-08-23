@@ -1182,7 +1182,7 @@ globalStyle(".agent-run-heading", {
 
 const reviewFileExpand = keyframes({
   from: { opacity: 0, transform: "translateY(-2px)" },
-  to: { opacity: 1, transform: "translateY(0)" },
+  to: { opacity: 1, transform: "none" },
 });
 
 globalStyle(".agent-run-toggle", {
@@ -2839,6 +2839,9 @@ globalStyle(".review-pane-content", {
   minHeight: "0",
   flexDirection: "column",
   background: "var(--surface)",
+  fontFamily:
+    'var(--ui-font, "Segoe UI Variable Text", "Segoe UI", sans-serif)',
+  textRendering: "optimizeLegibility",
 });
 
 globalStyle(".conversation-usage-pane", {
@@ -2856,11 +2859,9 @@ globalStyle(".conversation-usage-pane", {
   overflow: "visible",
   borderLeft: "1px solid var(--line)",
   background: "var(--surface)",
-  backfaceVisibility: "hidden",
   containerName: "contextPane",
   containerType: "inline-size",
   transform: "translate3d(100%, 0, 0)",
-  willChange: "transform",
   transition: "transform 220ms cubic-bezier(0.22, 0.82, 0.24, 1)",
 });
 
@@ -3510,7 +3511,7 @@ globalStyle(".aui-composer-root .composer-add-panel button small", {
 
 globalStyle(".conversation-usage-pane.is-open", {
   overflow: "visible",
-  transform: "translate3d(0, 0, 0)",
+  transform: "none",
 });
 
 globalStyle(".conversation-usage-pane:not(.is-open) > :not(.context-pane-resize-handle)", {
@@ -4050,7 +4051,7 @@ globalStyle(".review-toolbar-copy", {
 globalStyle(".review-toolbar-copy strong", {
   color: "var(--ink)",
   fontSize: "13px",
-  fontWeight: "650",
+  fontWeight: "600",
 });
 
 globalStyle(".review-toolbar-copy svg", {
@@ -4062,12 +4063,12 @@ globalStyle(".review-toolbar button", {
   color: "var(--muted)",
   border: "0",
   background: "transparent",
-  fontSize: "10px",
+  fontSize: "11px",
 });
 
 globalStyle(".review-toolbar button.active", {
   color: "var(--ink)",
-  fontWeight: "650",
+  fontWeight: "600",
 });
 
 globalStyle(".review-toolbar span", {
@@ -4090,7 +4091,8 @@ globalStyle(".review-toolbar .review-revert-button", {
   background: "var(--surface-soft)",
   cursor: "pointer",
   fontFamily: "inherit",
-  fontSize: "10.5px",
+  fontSize: "12px",
+  fontWeight: "520",
 });
 
 globalStyle(".review-toolbar .review-revert-button:hover:not(:disabled)", {
@@ -4113,7 +4115,7 @@ globalStyle(".review-state", {
   gap: "10px",
   padding: "28px",
   color: "var(--muted)",
-  fontSize: "10px",
+  fontSize: "12px",
   textAlign: "center",
 });
 
@@ -4127,21 +4129,172 @@ globalStyle(".review-notice", {
   color: "color-mix(in srgb, #c87b22 78%, var(--ink))",
   borderBottom: "1px solid var(--line)",
   background: "color-mix(in srgb, #c87b22 7%, var(--surface))",
-  fontSize: "9px",
+  fontSize: "11px",
   lineHeight: "1.5",
 });
 
 globalStyle(".review-notice svg", { flex: "0 0 auto", marginTop: "1px" });
 
+globalStyle(".review-worktree", {
+  display: "grid",
+  gap: "8px",
+  padding: "11px 13px 12px",
+  borderBottom: "1px solid var(--line)",
+  background:
+    "color-mix(in srgb, var(--surface-soft) 72%, var(--surface))",
+});
+
+globalStyle(".review-worktree-status", {
+  display: "flex",
+  minWidth: "0",
+  alignItems: "center",
+  gap: "7px",
+});
+
+globalStyle(".review-worktree-status > span", {
+  width: "7px",
+  height: "7px",
+  flex: "0 0 auto",
+  borderRadius: "999px",
+  background: "#c8872e",
+  boxShadow: "0 0 0 3px color-mix(in srgb, #c8872e 13%, transparent)",
+});
+
+globalStyle(".review-worktree.is-conflicted .review-worktree-status > span", {
+  background: "#d24848",
+  boxShadow: "0 0 0 3px color-mix(in srgb, #d24848 13%, transparent)",
+});
+
+globalStyle(".review-worktree.is-branched .review-worktree-status > span", {
+  background: "#159467",
+  boxShadow: "0 0 0 3px color-mix(in srgb, #159467 13%, transparent)",
+});
+
+globalStyle(".review-worktree-status strong", {
+  minWidth: "0",
+  overflow: "hidden",
+  color: "var(--ink)",
+  fontSize: "12px",
+  fontWeight: "600",
+  lineHeight: "1.3",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(".review-worktree > p", {
+  display: "-webkit-box",
+  margin: "0",
+  overflow: "hidden",
+  color: "var(--muted)",
+  fontSize: "12px",
+  lineHeight: "1.45",
+  overflowWrap: "anywhere",
+  WebkitBoxOrient: "vertical",
+  WebkitLineClamp: "3",
+});
+
+globalStyle(".review-worktree-actions", {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "6px",
+});
+
+globalStyle(".review-worktree-actions button", {
+  display: "inline-flex",
+  minHeight: "28px",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "5px",
+  padding: "0 9px",
+  color: "var(--ink)",
+  border: "1px solid var(--line)",
+  borderRadius: "7px",
+  background: "var(--surface)",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: "12px",
+  fontWeight: "520",
+  transition: "border-color 120ms ease, background 120ms ease",
+});
+
+globalStyle(".review-worktree-actions button:hover:not(:disabled)", {
+  borderColor: "color-mix(in srgb, var(--ink) 25%, var(--line))",
+  background: "color-mix(in srgb, var(--ink) 4%, var(--surface))",
+});
+
+globalStyle(".review-worktree-actions button.is-primary", {
+  color: "color-mix(in srgb, #159467 82%, var(--ink))",
+  borderColor: "color-mix(in srgb, #159467 34%, var(--line))",
+});
+
+globalStyle(".review-worktree-actions button.is-danger", {
+  color: "color-mix(in srgb, #d24848 82%, var(--ink))",
+});
+
+globalStyle(".review-worktree-actions button:disabled", {
+  opacity: "0.42",
+  cursor: "not-allowed",
+});
+
+globalStyle(".review-worktree-branch-form", {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
+  gap: "6px",
+});
+
+globalStyle(".review-worktree-branch-form input", {
+  width: "100%",
+  minWidth: "0",
+  height: "30px",
+  padding: "0 9px",
+  color: "var(--ink)",
+  border: "1px solid var(--line)",
+  borderRadius: "7px",
+  outline: "none",
+  background: "var(--surface)",
+  fontFamily: "inherit",
+  fontSize: "12px",
+});
+
+globalStyle(".review-worktree-branch-form input:focus", {
+  borderColor: "color-mix(in srgb, var(--blue) 56%, var(--line))",
+  boxShadow: "0 0 0 2px color-mix(in srgb, var(--blue) 10%, transparent)",
+});
+
+globalStyle(".review-worktree-branch-form button", {
+  display: "inline-grid",
+  minWidth: "48px",
+  height: "30px",
+  placeItems: "center",
+  padding: "0 10px",
+  color: "var(--ink)",
+  border: "1px solid var(--line)",
+  borderRadius: "7px",
+  background: "var(--surface)",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: "12px",
+  fontWeight: "520",
+});
+
+globalStyle(".review-worktree-branch-form button:disabled", {
+  opacity: "0.42",
+  cursor: "not-allowed",
+});
+
 globalStyle(".review-file-accordion", {
   minHeight: "0",
   flex: "1 1 auto",
-  overflow: "auto",
-  overscrollBehavior: "contain",
+  overflowX: "hidden",
+  overflowY: "auto",
+  overscrollBehaviorY: "contain",
   scrollbarGutter: "stable",
 });
 
 globalStyle(".review-file-item", {
+  width: "100%",
+  minWidth: "0",
+  overflow: "hidden",
   borderBottom: "1px solid color-mix(in srgb, var(--line) 78%, transparent)",
   background: "color-mix(in srgb, var(--surface) 97%, var(--ink) 3%)",
 });
@@ -4150,7 +4303,7 @@ globalStyle(".review-file-trigger", {
   display: "grid",
   width: "100%",
   minHeight: "41px",
-  gridTemplateColumns: "14px 26px minmax(0, 1fr) auto",
+  gridTemplateColumns: "14px 26px minmax(0, 1fr) auto auto",
   alignItems: "center",
   gap: "7px",
   padding: "0 13px 0 10px",
@@ -4172,6 +4325,13 @@ globalStyle(".review-file-trigger:focus-visible", {
   outlineOffset: "-2px",
 });
 
+globalStyle(".review-file-conflict", {
+  minWidth: "0",
+  color: "#d24848",
+  fontSize: "10px",
+  fontWeight: "600",
+});
+
 globalStyle(".review-file-chevron", {
   color: "var(--subtle)",
   transition: "transform 150ms cubic-bezier(0.2, 0.72, 0.22, 1)",
@@ -4189,7 +4349,7 @@ globalStyle(".review-file-type", {
   borderRadius: "5px",
   background: "color-mix(in srgb, var(--blue) 16%, var(--surface-soft))",
   color: "color-mix(in srgb, var(--blue) 80%, var(--ink))",
-  fontSize: "7px",
+  fontSize: "9px",
   fontWeight: "700",
   letterSpacing: "-0.02em",
 });
@@ -4199,7 +4359,7 @@ globalStyle(".review-file-path", {
   minWidth: "0",
   overflow: "hidden",
   alignItems: "baseline",
-  fontSize: "12.5px",
+  fontSize: "13px",
   lineHeight: "1.25",
   whiteSpace: "nowrap",
 });
@@ -4230,7 +4390,7 @@ globalStyle(".review-file-panel", {
   overflow: "hidden",
   borderTop: "1px solid color-mix(in srgb, var(--line) 68%, transparent)",
   background: "color-mix(in srgb, var(--canvas) 76%, var(--surface-soft))",
-  animation: `${reviewFileExpand} 150ms cubic-bezier(0.2, 0.72, 0.22, 1) both`,
+  animation: `${reviewFileExpand} 150ms cubic-bezier(0.2, 0.72, 0.22, 1)`,
   "@media": {
     "(prefers-reduced-motion: reduce)": { animation: "none" },
   },
@@ -4326,7 +4486,7 @@ globalStyle(".review-file-list button > span", {
 
 globalStyle(".review-file-directory", {
   overflow: "hidden",
-  color: "var(--subtle)",
+  color: "var(--muted)",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
 });
@@ -4336,7 +4496,7 @@ globalStyle(".review-file-name", {
   overflow: "hidden",
   flex: "0 1 auto",
   color: "var(--ink)",
-  fontWeight: "570",
+  fontWeight: "560",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
 });

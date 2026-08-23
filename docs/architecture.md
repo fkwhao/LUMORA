@@ -208,6 +208,11 @@ PAUSED ←──────────── PAUSING ←───────�
 
 暂停采用协作式安全边界：正在等待的模型请求、上下文压缩、自动审批 Reviewer 或人工审批会
 响应暂停并结束；尚未开始的工具不再执行；已经开始的工具不被强行杀死，而是先收敛结果再暂停。
+Desktop 在点击时立即冻结新增输出并退出“正在生成”视觉状态，显示“正在保存当前进度”；Core
+锁存暂停意图后立即确认请求，并在虚拟线程中把控制信号转发给 Runtime，避免本地控制面 HTTP
+响应拖住交互。后台仍保留事件订阅，直到 `PAUSED` 或自然终态到达后再用持久化消息校准界面。
+暂停请求与自然完成可能同时到达；Core 对已经进入终态的 Run 按幂等成功处理，Desktop 以最终
+持久化状态收敛，不把“运行恰好先结束”显示成远程调用错误。
 暂停控制信号即使早于 Python 流注册也会先锁存并立即确认；模型或 Reviewer 取消后的正常资源
 清理只等待一个 200ms 的有界窗口，异常 Provider 不能无限拖住 `PAUSED`。因此正常生成和审批
 可以近即时暂停，只有已经发出 `tool_started` 的实际工具仍可能因安全收敛短暂停留在 `PAUSING`。
@@ -364,15 +369,33 @@ Desktop 通过白名单 IPC 调用以下 Core API。每轮有文件改动的 Ass
 ```text
 GET  /api/v1/tasks/{taskId}/runs/{runId}/changes
 POST /api/v1/tasks/{taskId}/runs/{runId}/revert
+GET  /api/v1/tasks/{taskId}/worktree
+GET  /api/v1/tasks/{taskId}/worktree/changes
+POST /api/v1/tasks/{taskId}/worktree/apply
+POST /api/v1/tasks/{taskId}/worktree/branch
+POST /api/v1/tasks/{taskId}/worktree/discard
 ```
 
 自动撤回要求 Run 已结束且仍是最新可见回答，当前工作区 tree、`HEAD` 和真实 index 必须与
 Run 的 `after` 一致，Run 内也不能修改过 `HEAD` 或 index。Core 先恢复并验证文件，再在事务中
 隐藏该 `run_id` 所属的活动消息。非 Git 工作区照常执行，但状态为 `UNAVAILABLE`。
 
-本阶段没有 worktree。若同一 Git 仓库出现并发 Run，所有相关 Run 的追踪都会标为
-`COLLIDED` 并禁用撤回，避免跨任务错误归因。后续 Phase C 才会在第二个同仓库写入 Run
-到达时按需创建临时 worktree，单任务仍直接使用主工作区。完整状态机、安全条件和后续阶段见
+Phase C/D/E 已接入同一条 Run 调度主链。同一仓库只有一个活动写入任务时继续使用 Local；第二个
+及后续任务在 Run 启动前按任务分配 detached Worktree，Supervisor、子 Agent、可续接 Session
+与 DAG 节点都只接收同一个 `effectiveWorkspacePath`。Run 的 Git 碰撞判断按物理工作区进行，
+不同 Worktree 不会互相污染或误算 Diff。
+
+Worktree 从原始 `baseCommit` 建立，再把包含 Local 未提交可见状态的 `baseTree` 物化到隔离目录。
+尚无首个提交的仓库会由 Core 从 `baseTree` 创建仅由 Lumora 私有 ref 持有的合成基线，以便建立
+detached Worktree；该基线不改变 Local 的 unborn `HEAD` 或真实 index，也不会进入用户分支历史。
+应用结果后 Local 仍保持 unborn；若用户选择创建分支，隔离目录会转为真正的 orphan 分支并把
+全部文件作为未提交修改保留。
+任务完成后进入待审阅状态，不自动写回。用户可选择“应用到 Local”“创建正式分支”或“放弃
+修改”；审阅读取 `baseTree..resultTree` 的完整任务 ChangeSet，而单轮撤回仍读取对应 Run Diff。
+应用使用 Base、当前 Local 与 Worktree 结果做 tree 级三方合并，冲突时不写 Local 并
+保留现场。无修改、应用成功或明确放弃会清理目录；待审阅、冲突和暂停状态继续保留，清理失败
+进入 `CLEANUP_PENDING` 定时重试。启动恢复会核对持久化租约与托管目录，最多保留 5 个未完成
+Worktree。完整状态机和安全条件见
 [Run 级 Git 变更与撤回设计](git-run-changes-design.md)。
 
 ### 模型供应商配置

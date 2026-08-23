@@ -18,6 +18,8 @@ public class ConversationRunChangeSet {
     private String taskId;
     @TableField("repository_root")
     private String repositoryRoot;
+    @TableField("workspace_path")
+    private String workspacePath;
     @TableField("before_tree")
     private String beforeTree;
     @TableField("after_tree")
@@ -49,6 +51,8 @@ public class ConversationRunChangeSet {
     public void setTaskId(String taskId) { this.taskId = taskId; }
     public String getRepositoryRoot() { return repositoryRoot; }
     public void setRepositoryRoot(String repositoryRoot) { this.repositoryRoot = repositoryRoot; }
+    public String getWorkspacePath() { return workspacePath; }
+    public void setWorkspacePath(String workspacePath) { this.workspacePath = workspacePath; }
     public String getBeforeTree() { return beforeTree; }
     public void setBeforeTree(String beforeTree) { this.beforeTree = beforeTree; }
     public String getAfterTree() { return afterTree; }

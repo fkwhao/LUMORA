@@ -21,6 +21,8 @@ import type {
   ProviderModel,
   ToolApprovalDecision,
   TokenUsageStatistics,
+  TaskWorktreeChanges,
+  TaskWorktreeStatus,
   UpdateModelSettingsInput,
 } from "../../../shared/model-contract";
 import { workLogFromEvents } from "../../../shared/work-log";
@@ -301,6 +303,51 @@ export class RestModelGateway implements ModelGateway {
   revertRun(taskId: string, runId: string): Promise<ConversationRunChanges> {
     return this.request(
       `/api/v1/tasks/${encodeURIComponent(taskId)}/runs/${encodeURIComponent(runId)}/revert`,
+      { method: "POST" },
+      60_000,
+    );
+  }
+
+  getTaskWorktree(taskId: string): Promise<TaskWorktreeStatus | undefined> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/worktree`,
+      {},
+      30_000,
+    );
+  }
+
+  getTaskWorktreeChanges(
+    taskId: string,
+  ): Promise<TaskWorktreeChanges | undefined> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/worktree/changes`,
+      {},
+      30_000,
+    );
+  }
+
+  applyTaskWorktree(taskId: string): Promise<TaskWorktreeStatus> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/worktree/apply`,
+      { method: "POST" },
+      90_000,
+    );
+  }
+
+  createTaskWorktreeBranch(
+    taskId: string,
+    branchName: string,
+  ): Promise<TaskWorktreeStatus> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/worktree/branch`,
+      { method: "POST", body: JSON.stringify({ branchName }) },
+      60_000,
+    );
+  }
+
+  discardTaskWorktree(taskId: string): Promise<TaskWorktreeStatus> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/worktree/discard`,
       { method: "POST" },
       60_000,
     );

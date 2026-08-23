@@ -17,6 +17,7 @@ import com.lumora.core.conversation.domain.model.ConversationInputTarget;
 import com.lumora.core.conversation.domain.model.MessageAttachment;
 import com.lumora.core.conversation.application.support.MessageAttachmentJson;
 import com.lumora.core.task.application.service.TaskService;
+import com.lumora.core.task.application.support.TaskWorktreeService;
 import com.lumora.core.task.domain.entity.AgentTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,6 +53,7 @@ public class ConversationRunCoordinator {
     private final ConversationRunEventJournal eventJournal;
     private final TaskService taskService;
     private final GitRunChangeService gitRunChangeService;
+    private final TaskWorktreeService taskWorktreeService;
     private final Clock clock;
     private final int maxConcurrentRuns;
     private final ArrayDeque<String> queuedRunIds = new ArrayDeque<>();
@@ -66,6 +68,7 @@ public class ConversationRunCoordinator {
             ConversationRunEventJournal eventJournal,
             TaskService taskService,
             GitRunChangeService gitRunChangeService,
+            TaskWorktreeService taskWorktreeService,
             Clock clock,
             @Value("${lumora.runs.max-concurrent:3}") int maxConcurrentRuns
     ) {
@@ -76,6 +79,7 @@ public class ConversationRunCoordinator {
         this.eventJournal = eventJournal;
         this.taskService = taskService;
         this.gitRunChangeService = gitRunChangeService;
+        this.taskWorktreeService = taskWorktreeService;
         this.clock = clock;
         if (maxConcurrentRuns < 1) {
             throw new IllegalArgumentException(
@@ -182,6 +186,7 @@ public class ConversationRunCoordinator {
         ConversationRunChangesResponse result = gitRunChangeService.revert(
                 taskId, runId
         );
+        taskWorktreeService.onRunReverted(run);
         conversationService.revertRunMessages(taskId, runId);
         return result;
     }
@@ -401,7 +406,9 @@ public class ConversationRunCoordinator {
                 return run;
             }
             if (run.getStatus().isTerminal()) {
-                throw new IllegalStateException("已结束的运行不能暂停");
+                // Pause is idempotent at the API boundary. The renderer may
+                // issue the request just as the final stream event settles.
+                return run;
             }
             if (run.getStatus() == ConversationRunStatus.QUEUED) {
                 queuedRunIds.remove(runId);
@@ -489,6 +496,7 @@ public class ConversationRunCoordinator {
                     runId, ConversationRunStatus.CANCELLED, ""
             );
             gitRunChangeService.captureTerminal(run);
+            taskWorktreeService.onRunTerminal(run);
             publishLifecycle(runId, "任务已取消", "CANCELLED");
             eventStreams.complete(runId);
             releaseExecution(runId);
@@ -499,6 +507,11 @@ public class ConversationRunCoordinator {
 
     @EventListener(ApplicationReadyEvent.class)
     public synchronized void recoverRunsAfterRestart() {
+        taskWorktreeService.recoverAfterRestart(
+                runStore.listActive().stream()
+                        .map(ConversationRun::getTaskId)
+                        .collect(java.util.stream.Collectors.toSet())
+        );
         for (ConversationRun run : runStore.listRecoverable()) {
             inputStore.resetDeliveredForRun(run.getRunId());
             recoverAsPaused(
@@ -704,14 +717,31 @@ public class ConversationRunCoordinator {
                 continue;
             }
             executingRunIds.add(runId);
-            gitRunChangeService.begin(run);
-            runStore.updateStatus(runId, ConversationRunStatus.RUNNING, "");
-            if (run.getTriggerType() == ConversationRunTrigger.RESUME) {
-                publishLifecycle(
-                        runId, "正在恢复执行现场", "RUNNING"
-                );
-            }
             try {
+                String effectiveWorkspace =
+                        taskWorktreeService.acquireForRun(run);
+                if (effectiveWorkspace == null
+                        || effectiveWorkspace.isBlank()) {
+                    effectiveWorkspace = run.getWorkspacePath();
+                }
+                ConversationRun updatedRun = runStore.updateWorkspacePath(
+                        runId, effectiveWorkspace
+                );
+                if (updatedRun != null) {
+                    run = updatedRun;
+                } else {
+                    // Defensive fallback for alternative store adapters.
+                    run.setWorkspacePath(effectiveWorkspace);
+                }
+                gitRunChangeService.begin(run);
+                runStore.updateStatus(
+                        runId, ConversationRunStatus.RUNNING, ""
+                );
+                if (run.getTriggerType() == ConversationRunTrigger.RESUME) {
+                    publishLifecycle(
+                            runId, "正在恢复执行现场", "RUNNING"
+                    );
+                }
                 startWorker(runStore.require(runId));
             } catch (RuntimeException error) {
                 fail(runId, error);
@@ -867,6 +897,7 @@ public class ConversationRunCoordinator {
         ConversationRun settled = runStore.require(runId);
         if (settled.getStatus().isTerminal()) {
             gitRunChangeService.captureTerminal(settled);
+            taskWorktreeService.onRunTerminal(settled);
         }
         releaseExecution(runId);
         if (!paused && runStore.require(runId).getStatus()
@@ -921,6 +952,7 @@ public class ConversationRunCoordinator {
                 runId, ConversationRunStatus.FAILED, message
         );
         gitRunChangeService.captureTerminal(runStore.require(runId));
+        taskWorktreeService.onRunTerminal(runStore.require(runId));
         releaseExecution(runId);
         drainQueue();
     }
@@ -990,6 +1022,10 @@ public class ConversationRunCoordinator {
                 && !task.getWorkspacePath().isBlank()) {
             return task.getWorkspacePath().trim();
         }
+        String leasedSource = valueOrEmpty(
+                taskWorktreeService.sourceWorkspacePath(taskId)
+        );
+        if (!leasedSource.isBlank()) return leasedSource;
         return valueOrEmpty(
                 runStore.findLatestWorkspacePathForTask(taskId)
         );

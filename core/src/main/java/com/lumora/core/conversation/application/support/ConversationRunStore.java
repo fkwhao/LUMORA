@@ -107,6 +107,30 @@ public class ConversationRunStore {
         );
     }
 
+    public List<ConversationRun> listActive() {
+        return runMapper.selectList(
+                Wrappers.<ConversationRun>lambdaQuery()
+                        .in(ConversationRun::getStatus,
+                                ConversationRunStatus.QUEUED,
+                                ConversationRunStatus.RUNNING,
+                                ConversationRunStatus.PAUSING,
+                                ConversationRunStatus.PAUSED,
+                                ConversationRunStatus.WAITING_APPROVAL)
+                        .orderByAsc(ConversationRun::getCreatedAt)
+        );
+    }
+
+    public synchronized ConversationRun updateWorkspacePath(
+            String runId,
+            String workspacePath
+    ) {
+        ConversationRun run = require(runId);
+        run.setWorkspacePath(workspacePath == null ? "" : workspacePath.trim());
+        run.setUpdatedAt(clock.instant());
+        runMapper.updateById(run);
+        return run;
+    }
+
     public List<ConversationRun> listRepairablePauseFailures() {
         return runMapper.selectList(
                 Wrappers.<ConversationRun>lambdaQuery()

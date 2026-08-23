@@ -15,6 +15,7 @@ interface FileDiffProps {
   maxBodyHeight?: number;
   preview?: boolean;
   headerless?: boolean;
+  parentScroll?: boolean;
   truncated?: boolean;
   truncatedMessage?: string;
   emptyMessage?: string;
@@ -28,6 +29,7 @@ export function FileDiff({
   maxBodyHeight,
   preview = false,
   headerless = false,
+  parentScroll = false,
   truncated = false,
   truncatedMessage = "补丁过大，仅展示前 500,000 个字符",
   emptyMessage = "该文件没有可展示的文本补丁",
@@ -38,7 +40,7 @@ export function FileDiff({
     <div
       className={`${styles.diff}${preview ? ` ${styles.preview}` : ""}${
         headerless ? ` ${styles.headerless}` : ""
-      }`}
+      }${parentScroll ? ` ${styles.parentScroll}` : ""}`}
     >
       {!headerless && <div className={styles.diffHead}>
         <span className={styles.diffFileWrap}>
@@ -73,6 +75,7 @@ export function FileDiff({
       {rows.length > 0 ? (
         <div
           className={styles.diffBody}
+          data-diff-scroll-owner={parentScroll ? "parent" : "self"}
           style={maxBodyHeight === undefined ? undefined : { maxHeight: maxBodyHeight }}
         >
           {rows.map((row, index) => row.type === "gap" ? (

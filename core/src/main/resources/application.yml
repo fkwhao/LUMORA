@@ -36,3 +36,9 @@ lumora:
     max-concurrent: ${LUMORA_MAX_CONCURRENT_RUNS:3}
     # 高频 Run 事件保留独立序号，但在很短窗口内合并 SQLite 事务。
     event-flush-interval-ms: ${LUMORA_RUN_EVENT_FLUSH_INTERVAL_MS:20}
+  worktrees:
+    # 空值时使用系统临时目录下的 lumora-worktrees。
+    root: ${LUMORA_WORKTREE_ROOT:}
+    # 包含待审阅、冲突和已转正式分支但仍占用目录的 Worktree。
+    max-retained: ${LUMORA_MAX_RETAINED_WORKTREES:5}
+    cleanup-retry-ms: ${LUMORA_WORKTREE_CLEANUP_RETRY_MS:30000}

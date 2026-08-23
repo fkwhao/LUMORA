@@ -4,7 +4,8 @@
   border-radius: 11px;
   background: color-mix(in srgb, var(--surface) 96%, transparent);
   box-shadow: 0 1px 2px rgb(0 0 0 / 5%), 0 8px 24px rgb(0 0 0 / 3%);
-  font-family: var(--ui-font, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  font-family: var(--ui-font, "Segoe UI Variable Text", "Segoe UI", sans-serif);
+  text-rendering: optimizeLegibility;
 }
 
 .diffHead {
@@ -14,7 +15,7 @@
   min-height: 39px;
   padding: 0 12px;
   border-bottom: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .diffFileWrap {
@@ -29,7 +30,7 @@
   width: 15px;
   height: 15px;
   flex: none;
-  color: var(--subtle);
+  color: var(--muted);
 }
 
 .diffFile {
@@ -41,7 +42,7 @@
 
 .diffDirectory {
   overflow: hidden;
-  color: var(--subtle);
+  color: var(--muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -50,7 +51,7 @@
   flex: 0 1 auto;
   overflow: hidden;
   color: var(--ink);
-  font-weight: 570;
+  font-weight: 560;
   text-overflow: ellipsis;
 }
 
@@ -59,8 +60,8 @@
   margin-left: auto;
   align-items: center;
   gap: 8px;
-  font-size: 11.5px;
-  font-weight: 650;
+  font-size: 12px;
+  font-weight: 600;
   line-height: 1;
 }
 
@@ -72,8 +73,8 @@
   overflow: auto;
   padding: 4px 0;
   font-family: var(--code-font, "Cascadia Code", "SFMono-Regular", Consolas, monospace);
-  font-size: 11px;
-  line-height: 20px;
+  font-size: 12px;
+  line-height: 21px;
   overscroll-behavior: contain;
 }
 
@@ -98,8 +99,8 @@
 
 .diffRow .ln,
 .diffRow .sign {
-  color: var(--subtle);
-  font-size: 10.5px;
+  color: var(--muted);
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
   user-select: none;
 }
@@ -127,8 +128,8 @@
   border-radius: 8px;
   background: color-mix(in srgb, var(--ink) 8%, var(--surface));
   color: var(--muted);
-  font-family: var(--ui-font, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
-  font-size: 11px;
+  font-family: var(--ui-font, "Segoe UI Variable Text", "Segoe UI", sans-serif);
+  font-size: 12px;
   line-height: 24px;
 }
 
@@ -166,18 +167,18 @@
 
 .empty {
   padding: 28px 18px;
-  color: var(--subtle);
+  color: var(--muted);
   font-family: inherit;
-  font-size: 11px;
+  font-size: 12px;
   text-align: center;
 }
 
 .truncated {
   padding: 7px 12px;
   border-top: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
-  color: var(--subtle);
+  color: var(--muted);
   font-family: inherit;
-  font-size: 10px;
+  font-size: 11px;
   text-align: center;
 }
 
@@ -222,6 +223,26 @@
   padding: 5px 0 8px;
 }
 
+.parentScroll {
+  overflow: hidden;
+}
+
+.parentScroll .diffBody {
+  overflow: visible;
+  overscroll-behavior: auto;
+}
+
+.parentScroll .diffRow:not(.gap) {
+  width: 100%;
+  min-width: 0;
+}
+
+.parentScroll .diffRow code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .preview .diffHead {
   position: sticky;
   z-index: 2;
@@ -229,12 +250,12 @@
   min-height: 44px;
   padding: 0 16px 0 18px;
   background: color-mix(in oklab, var(--color-muted) 34%, var(--color-background));
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 .preview .diffBody {
   padding: 6px 0;
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 21px;
 }
 

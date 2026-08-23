@@ -33,7 +33,7 @@ const UI_FONT_STACKS: Record<UiFontPreference, string> = {
 
 const CODE_FONT_STACKS: Record<CodeFontPreference, string> = {
   cascadia:
-    'ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    '"Cascadia Mono", "Cascadia Code", Consolas, "SFMono-Regular", monospace',
   consolas: 'Consolas, "SFMono-Regular", monospace',
   jetbrains: '"JetBrains Mono", "Cascadia Code", Consolas, monospace',
 };

@@ -385,6 +385,57 @@ describe("Java REST model gateway", () => {
     ]);
   });
 
+  it("uses explicit Worktree result lifecycle endpoints", async () => {
+    const requests: Array<{ method: string; path: string; body: string }> = [];
+    const response = {
+      taskId: "task-2",
+      workspaceMode: "WORKTREE",
+      worktreeState: "WAITING_REVIEW",
+      sourceWorkspacePath: "C:/project",
+      effectiveWorkspacePath: "C:/temp/task-2",
+      repositoryRoot: "C:/project",
+      baseCommit: "abc123",
+      branchName: "",
+      reason: "",
+      canApply: true,
+      canCreateBranch: true,
+      canDiscard: true,
+      updatedAt: "2026-08-22T00:00:00Z",
+    };
+    const baseUrl = await listen(async (request) => {
+      let body = "";
+      for await (const chunk of request) body += String(chunk);
+      requests.push({
+        method: request.method ?? "",
+        path: request.url ?? "",
+        body,
+      });
+      return response;
+    });
+    const gateway = new RestModelGateway({
+      baseUrl,
+      sessionToken: "test-token",
+    });
+
+    await gateway.getTaskWorktree("task/2");
+    await gateway.getTaskWorktreeChanges("task/2");
+    await gateway.applyTaskWorktree("task/2");
+    await gateway.createTaskWorktreeBranch("task/2", "agent/refactor");
+    await gateway.discardTaskWorktree("task/2");
+
+    expect(requests).toEqual([
+      { method: "GET", path: "/api/v1/tasks/task%2F2/worktree", body: "" },
+      { method: "GET", path: "/api/v1/tasks/task%2F2/worktree/changes", body: "" },
+      { method: "POST", path: "/api/v1/tasks/task%2F2/worktree/apply", body: "" },
+      {
+        method: "POST",
+        path: "/api/v1/tasks/task%2F2/worktree/branch",
+        body: JSON.stringify({ branchName: "agent/refactor" }),
+      },
+      { method: "POST", path: "/api/v1/tasks/task%2F2/worktree/discard", body: "" },
+    ]);
+  });
+
   it("replays durable run events after the requested sequence", async () => {
     let receivedPath = "";
     const server = createServer((request, response) => {

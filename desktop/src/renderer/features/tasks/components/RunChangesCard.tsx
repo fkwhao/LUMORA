@@ -259,25 +259,32 @@ function resolvePreviewLayout(anchor: DOMRect): PreviewLayout {
   const idealWidth = 840;
   const viewportWidth = window.innerWidth;
   const viewportHeight = window.innerHeight;
-  const width = Math.min(
+  const width = snapToDevicePixel(Math.min(
     idealWidth,
     Math.max(420, anchor.width - 40),
     viewportWidth - padding * 2,
-  );
+  ));
   const centeredLeft = anchor.left + (anchor.width - width) / 2;
-  const left = Math.min(
+  const left = snapToDevicePixel(Math.min(
     Math.max(padding, centeredLeft),
     viewportWidth - width - padding,
-  );
+  ));
   const availableHeight = Math.max(98, anchor.top - gap - padding);
-  const bodyHeight = Math.max(56, Math.min(340, availableHeight - 42));
+  const bodyHeight = snapToDevicePixel(
+    Math.max(56, Math.min(340, availableHeight - 42)),
+  );
 
   return {
     style: {
-      bottom: viewportHeight - anchor.top + gap,
+      bottom: snapToDevicePixel(viewportHeight - anchor.top + gap),
       left,
       width,
     },
     bodyHeight,
   };
+}
+
+function snapToDevicePixel(value: number): number {
+  const scale = window.devicePixelRatio || 1;
+  return Math.round(value * scale) / scale;
 }

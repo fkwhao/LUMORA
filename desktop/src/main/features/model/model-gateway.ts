@@ -19,6 +19,8 @@ import type {
   ProviderModel,
   ToolApprovalDecision,
   TokenUsageStatistics,
+  TaskWorktreeChanges,
+  TaskWorktreeStatus,
   UpdateModelSettingsInput,
 } from "../../../shared/model-contract";
 
@@ -58,6 +60,11 @@ export interface ModelGateway {
   cancelRun(taskId: string, runId: string): Promise<ConversationRunSnapshot>;
   getRunChanges(taskId: string, runId: string): Promise<ConversationRunChanges>;
   revertRun(taskId: string, runId: string): Promise<ConversationRunChanges>;
+  getTaskWorktree(taskId: string): Promise<TaskWorktreeStatus | undefined>;
+  getTaskWorktreeChanges(taskId: string): Promise<TaskWorktreeChanges | undefined>;
+  applyTaskWorktree(taskId: string): Promise<TaskWorktreeStatus>;
+  createTaskWorktreeBranch(taskId: string, branchName: string): Promise<TaskWorktreeStatus>;
+  discardTaskWorktree(taskId: string): Promise<TaskWorktreeStatus>;
   subscribeRun(
     taskId: string,
     runId: string,

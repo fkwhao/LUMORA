@@ -32,6 +32,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -75,6 +76,7 @@ public class ConversationServiceImpl implements ConversationService {
         private volatile boolean pauseRequested;
         private volatile boolean runtimeStarted;
         private volatile boolean pauseForwarded;
+        private final AtomicBoolean pauseForwarding = new AtomicBoolean();
 
         private ActiveRun(String correlationId) {
             this.correlationId = correlationId;
@@ -108,8 +110,14 @@ public class ConversationServiceImpl implements ConversationService {
             return pauseRequested && !pauseForwarded;
         }
 
-        private void markPauseForwarded() {
-            pauseForwarded = true;
+        private boolean tryStartPauseForwarding() {
+            return needsPauseForwarding()
+                    && pauseForwarding.compareAndSet(false, true);
+        }
+
+        private void finishPauseForwarding(boolean forwarded) {
+            if (forwarded) pauseForwarded = true;
+            pauseForwarding.set(false);
         }
 
         private boolean awaitTermination() throws InterruptedException {
@@ -297,13 +305,12 @@ public class ConversationServiceImpl implements ConversationService {
                         return null;
                     }
                     activeRun.markRuntimeStarted();
+                    if (activeRun.needsPauseForwarding()) {
+                        executorService.execute(() ->
+                                forwardPause(activeRun));
+                    }
                     Consumer<ChatStreamEvent> pauseAwareConsumer = event -> {
-                        if (activeRun.needsPauseForwarding()
-                                && conversationRuntimePort.pauseChat(
-                                correlationId, correlationId
-                        )) {
-                            activeRun.markPauseForwarded();
-                        }
+                        forwardPause(activeRun);
                         eventConsumer.accept(event);
                     };
                     executeStream(
@@ -381,20 +388,36 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     @Override
-    public synchronized boolean pauseGeneration(String taskId) {
+    public boolean pauseGeneration(String taskId) {
         ActiveRun run = activeRuns.get(taskId);
         if (run == null) {
             return false;
         }
         run.requestPause();
         if (run.isRuntimeStarted()) {
-            if (conversationRuntimePort.pauseChat(
-                    run.correlationId, run.correlationId
-            )) {
-                run.markPauseForwarded();
-            }
+            // A pause is acknowledged as soon as the local intent is latched.
+            // The control-plane HTTP call runs on a virtual thread so a slow
+            // Runtime response cannot block the Desktop interaction.
+            executorService.execute(() -> forwardPause(run));
         }
         return true;
+    }
+
+    private void forwardPause(ActiveRun run) {
+        if (!run.tryStartPauseForwarding()) return;
+        boolean forwarded = false;
+        try {
+            forwarded = conversationRuntimePort.pauseChat(
+                    run.correlationId, run.correlationId
+            );
+        } catch (RuntimeException error) {
+            LOGGER.warn(
+                    "Failed to forward pause for conversation run {}",
+                    run.correlationId, error
+            );
+        } finally {
+            run.finishPauseForwarding(forwarded);
+        }
     }
 
     @Override

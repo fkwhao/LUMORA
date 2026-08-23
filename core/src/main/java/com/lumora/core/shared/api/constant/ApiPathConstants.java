@@ -22,6 +22,12 @@ public final class ApiPathConstants {
     public static final String TASK_EVENTS = TASK_BY_ID + "/events";
     public static final String TASK_PREFERENCES = TASK_BY_ID + "/preferences";
     public static final String TASK_WORKSPACE = TASK_BY_ID + "/workspace";
+    public static final String TASK_WORKTREE = TASK_BY_ID + "/worktree";
+    public static final String TASK_WORKTREE_CHANGES =
+            TASK_WORKTREE + "/changes";
+    public static final String TASK_WORKTREE_APPLY = TASK_WORKTREE + "/apply";
+    public static final String TASK_WORKTREE_BRANCH = TASK_WORKTREE + "/branch";
+    public static final String TASK_WORKTREE_DISCARD = TASK_WORKTREE + "/discard";
     public static final String TASK_MESSAGES = TASK_BY_ID + "/messages";
     public static final String TASK_MESSAGE_STREAM =
             TASK_MESSAGES + "/stream";

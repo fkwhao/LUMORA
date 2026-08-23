@@ -56,6 +56,8 @@ import { useStore } from "zustand";
 import type {
   ChatMessage,
   ConversationRunChanges,
+  TaskWorktreeChanges,
+  TaskWorktreeStatus,
   LumoraModelApi,
   ModelSettings,
   PermissionMode,
@@ -210,6 +212,12 @@ export const TaskPage = memo(function TaskPage({
   const [selectedChangeId, setSelectedChangeId] = useState<string>();
   const [reviewRunId, setReviewRunId] = useState<string>();
   const [runChanges, setRunChanges] = useState<ConversationRunChanges>();
+  const [taskWorktree, setTaskWorktree] = useState<TaskWorktreeStatus>();
+  const [taskWorktreeChanges, setTaskWorktreeChanges] =
+    useState<TaskWorktreeChanges>();
+  const [worktreeAction, setWorktreeAction] = useState<
+    "apply" | "branch" | "discard"
+  >();
   const [changesLoading, setChangesLoading] = useState(false);
   const [changesError, setChangesError] = useState<string>();
   const [revertingRunId, setRevertingRunId] = useState<string>();
@@ -314,14 +322,26 @@ export const TaskPage = memo(function TaskPage({
     setSelectedChangeId(item?.itemId);
     setReviewRunId(targetRunId);
     setRunChanges(undefined);
+    setTaskWorktree(undefined);
+    setTaskWorktreeChanges(undefined);
     setChangesError(undefined);
     dispatchRightSidebar({ type: "open", tabId: "review" });
     if (!targetRunId || !task?.taskId || !modelApi) return;
     setChangesLoading(true);
-    void modelApi.getRunChanges(task.taskId, targetRunId)
-      .then((result) => {
+    void Promise.all([
+      modelApi.getRunChanges(task.taskId, targetRunId),
+      modelApi.getTaskWorktree(task.taskId),
+    ])
+      .then(async ([result, worktree]) => {
+        const aggregate = worktree?.workspaceMode === "WORKTREE"
+          && isTaskChangesVisible(worktree)
+          ? await modelApi.getTaskWorktreeChanges(task.taskId)
+          : undefined;
         setRunChanges(result);
-        const selected = result.files.find((file) =>
+        setTaskWorktree(worktree);
+        setTaskWorktreeChanges(aggregate);
+        const reviewedFiles = aggregate?.files ?? result.files;
+        const selected = reviewedFiles.find((file) =>
           requestedPath && (
             file.path === requestedPath
             || file.path.replaceAll("\\", "/").endsWith(
@@ -330,7 +350,7 @@ export const TaskPage = memo(function TaskPage({
           ));
         setSelectedChangeId(
           selected
-            ? `${result.runId}:${selected.path}`
+            ? `${aggregate ? `task:${aggregate.taskId}` : result.runId}:${selected.path}`
             : undefined,
         );
       })
@@ -367,6 +387,14 @@ export const TaskPage = memo(function TaskPage({
     try {
       const reverted = await modelApi.revertRun(taskId, runId);
       if (reviewRunId === runId) setRunChanges(reverted);
+      const worktree = await modelApi.getTaskWorktree(taskId);
+      setTaskWorktree(worktree);
+      setTaskWorktreeChanges(
+        worktree?.workspaceMode === "WORKTREE"
+          && isTaskChangesVisible(worktree)
+          ? await modelApi.getTaskWorktreeChanges(taskId)
+          : undefined,
+      );
       await store.getState().openTask(taskId);
       notify("本轮文件与对话已撤销", "success");
     } catch (error) {
@@ -381,11 +409,73 @@ export const TaskPage = memo(function TaskPage({
     if (!reviewRunId || !runChanges?.revertible) return;
     await revertRun(reviewRunId);
   }, [revertRun, reviewRunId, runChanges?.revertible]);
+  const runWorktreeAction = useCallback(async (
+    action: "apply" | "branch" | "discard",
+    branchName?: string,
+  ) => {
+    const taskId = task?.taskId;
+    if (!taskId || !modelApi || worktreeAction) return;
+    if (action === "apply" && !globalThis.confirm(
+      "将隔离 Worktree 的修改三方合并到 Local 工作区。无冲突时会自动清理临时目录，是否继续？",
+    )) return;
+    if (action === "discard" && !globalThis.confirm(
+      "放弃后会删除这份隔离修改和临时 Worktree，是否继续？",
+    )) return;
+    setWorktreeAction(action);
+    setChangesError(undefined);
+    try {
+      const result = action === "apply"
+        ? await modelApi.applyTaskWorktree(taskId)
+        : action === "branch"
+          ? await modelApi.createTaskWorktreeBranch(taskId, branchName ?? "")
+          : await modelApi.discardTaskWorktree(taskId);
+      setTaskWorktree(result);
+      if (result.worktreeState === "REMOVED"
+          || result.worktreeState === "RELEASED") {
+        setTaskWorktreeChanges(undefined);
+      } else {
+        setTaskWorktreeChanges(
+          await modelApi.getTaskWorktreeChanges(taskId),
+        );
+      }
+      if (result.worktreeState === "CONFLICTED") {
+        notify("Local 与 Worktree 修改存在冲突，隔离内容已完整保留", "info");
+      } else if (result.worktreeState === "CLEANUP_PENDING") {
+        notify("操作已完成，临时目录将在后台继续清理", "info");
+      } else if (action === "apply") {
+        notify("Worktree 修改已应用到 Local", "success");
+      } else if (action === "branch") {
+        notify(`已创建分支 ${result.branchName}`, "success");
+      } else {
+        notify("隔离修改已放弃并清理", "success");
+      }
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : "Worktree 操作失败";
+      setChangesError(message);
+      notify(message, "info");
+    } finally {
+      setWorktreeAction(undefined);
+    }
+  }, [modelApi, notify, task?.taskId, worktreeAction]);
+  const applyReviewedWorktree = useCallback(() => {
+    void runWorktreeAction("apply");
+  }, [runWorktreeAction]);
+  const createReviewedWorktreeBranch = useCallback((branchName: string) => {
+    void runWorktreeAction("branch", branchName);
+  }, [runWorktreeAction]);
+  const discardReviewedWorktree = useCallback(() => {
+    void runWorktreeAction("discard");
+  }, [runWorktreeAction]);
 
   useEffect(() => {
     dispatchRightSidebar({ type: "reset" });
     setReviewRunId(undefined);
     setRunChanges(undefined);
+    setTaskWorktree(undefined);
+    setTaskWorktreeChanges(undefined);
+    setWorktreeAction(undefined);
     setChangesError(undefined);
   }, [task?.taskId]);
 
@@ -963,20 +1053,32 @@ export const TaskPage = memo(function TaskPage({
     requestAnimationFrame(() => followUpInputRef.current?.focus());
   }, [runtime]);
 
-  const fileChanges = runChanges
-    ? runChanges.files.map((change) => ({
-        changeId: `${runChanges.runId}:${change.path}`,
-        path: change.path,
-        previousPath: change.previousPath || undefined,
-        status: change.status,
-        additions: change.additions,
-        deletions: change.deletions,
-        binary: change.binary,
-        patch: change.patch,
-        patchTruncated: change.patchTruncated,
-        previewAvailable: !change.binary && Boolean(change.patch),
-      }))
-    : fileChangesFromMessages(displayMessages);
+  const reviewedChanges = taskWorktreeChanges ?? runChanges;
+  const fallbackChangeMessages = reviewedChanges ? undefined : displayMessages;
+  const fileChanges = useMemo(
+    () => reviewedChanges
+      ? reviewedChanges.files.map((change) => ({
+          changeId: `${taskWorktreeChanges
+            ? `task:${taskWorktreeChanges.taskId}`
+            : runChanges?.runId}:${change.path}`,
+          path: change.path,
+          previousPath: change.previousPath || undefined,
+          status: change.status,
+          additions: change.additions,
+          deletions: change.deletions,
+          binary: change.binary,
+          patch: change.patch,
+          patchTruncated: change.patchTruncated,
+          previewAvailable: !change.binary && Boolean(change.patch),
+        }))
+      : fileChangesFromMessages(fallbackChangeMessages ?? []),
+    [
+      fallbackChangeMessages,
+      reviewedChanges,
+      runChanges?.runId,
+      taskWorktreeChanges?.taskId,
+    ],
+  );
   const questionEntries = displayMessages.flatMap((message, messageIndex) => {
     if (message.role !== "user") {
       return [];
@@ -2053,12 +2155,18 @@ export const TaskPage = memo(function TaskPage({
             <DiffReviewPane
               changes={fileChanges}
               runChanges={runChanges}
+              taskChanges={taskWorktreeChanges}
+              taskWorktree={taskWorktree}
               selectedChangeId={selectedChangeId}
               loading={changesLoading}
               reverting={revertingRunId === reviewRunId}
+              worktreeAction={worktreeAction}
               error={changesError}
               onSelectChange={setSelectedChangeId}
               onRevert={revertReviewedRun}
+              onApplyWorktree={applyReviewedWorktree}
+              onCreateWorktreeBranch={createReviewedWorktreeBranch}
+              onDiscardWorktree={discardReviewedWorktree}
             />
           )}
           {activeAgentId && (
@@ -2266,6 +2374,13 @@ function lineCount(value: string): number {
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function isTaskChangesVisible(worktree: TaskWorktreeStatus): boolean {
+  return worktree.worktreeState === "WAITING_REVIEW"
+    || worktree.worktreeState === "CONFLICTED"
+    || worktree.worktreeState === "CLEANUP_PENDING"
+    || worktree.worktreeState === "BRANCHED";
 }
 
 function modelDisplayName(model: string): string {

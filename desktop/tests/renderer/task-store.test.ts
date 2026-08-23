@@ -583,7 +583,114 @@ describe("task store", () => {
     expect(store.getState().chatWasStopped).toBe(true);
   });
 
-  it("keeps the stream alive while pausing and seals it on the paused event", async () => {
+  it("settles without a pause error when the run completes during the request", async () => {
+    const api = createApi();
+    const modelApi = createModelApi();
+    const cancel = vi.fn();
+    vi.mocked(modelApi.streamMessage).mockReturnValue(cancel);
+    vi.mocked(modelApi.getActiveRun).mockResolvedValue(activeRun("RUNNING"));
+    vi.mocked(modelApi.pauseRun).mockResolvedValue(activeRun("COMPLETED"));
+    vi.mocked(modelApi.listMessages)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { messageId: "user-1", role: "user", content: "继续整理" },
+        {
+          messageId: "assistant-1",
+          role: "assistant",
+          content: "已经自然完成",
+        },
+      ]);
+    const store = createTaskStore(api, modelApi);
+    await store.getState().openTask(createdTask.taskId);
+
+    const pendingSend = store.getState().sendMessage("继续整理");
+    await expect(store.getState().stopChat()).resolves.toBeUndefined();
+    await pendingSend;
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(store.getState().isChatting).toBe(false);
+    expect(store.getState().isPausing).toBe(false);
+    expect(store.getState().chatWasStopped).toBe(false);
+    expect(store.getState().chatError).toBeUndefined();
+    expect(store.getState().messages.at(-1)?.content).toBe("已经自然完成");
+  });
+
+  it("clears the optimistic pause when a pausing run completes naturally", async () => {
+    const api = createApi();
+    const modelApi = createModelApi();
+    let onEvent: Parameters<LumoraModelApi["streamMessage"]>[2] | undefined;
+    vi.mocked(modelApi.streamMessage).mockImplementation(
+      (_taskId, _content, eventHandler) => {
+        onEvent = eventHandler;
+        return () => undefined;
+      },
+    );
+    vi.mocked(modelApi.getActiveRun).mockResolvedValue(activeRun("RUNNING"));
+    vi.mocked(modelApi.pauseRun).mockResolvedValue(activeRun("PAUSING"));
+    vi.mocked(modelApi.listMessages)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { messageId: "user-1", role: "user", content: "继续整理" },
+        {
+          messageId: "assistant-1",
+          role: "assistant",
+          content: "刚好完成",
+        },
+      ]);
+    const store = createTaskStore(api, modelApi);
+    await store.getState().openTask(createdTask.taskId);
+
+    const pendingSend = store.getState().sendMessage("继续整理");
+    await store.getState().stopChat();
+    expect(store.getState().isPausing).toBe(true);
+    onEvent?.({
+      type: "completed",
+      delta: "",
+      model: "test-model",
+      errorMessage: "",
+    });
+    await pendingSend;
+
+    expect(store.getState().activeRun?.status).toBe("COMPLETED");
+    expect(store.getState().isPausing).toBe(false);
+    expect(store.getState().chatWasStopped).toBe(false);
+    expect(store.getState().messages.at(-1)?.content).toBe("刚好完成");
+  });
+
+  it("tolerates an older Core reporting that a raced run already ended", async () => {
+    const api = createApi();
+    const modelApi = createModelApi();
+    vi.mocked(modelApi.getActiveRun)
+      .mockResolvedValueOnce(activeRun("RUNNING"))
+      .mockResolvedValueOnce(undefined);
+    vi.mocked(modelApi.pauseRun).mockRejectedValue(
+      new Error("已结束的运行不能暂停"),
+    );
+    vi.mocked(modelApi.listMessages)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { messageId: "user-1", role: "user", content: "继续整理" },
+        {
+          messageId: "assistant-1",
+          role: "assistant",
+          content: "运行已经结束",
+        },
+      ]);
+    const store = createTaskStore(api, modelApi);
+    await store.getState().openTask(createdTask.taskId);
+
+    const pendingSend = store.getState().sendMessage("继续整理");
+    await expect(store.getState().stopChat()).resolves.toBeUndefined();
+    await pendingSend;
+
+    expect(store.getState().isChatting).toBe(false);
+    expect(store.getState().isPausing).toBe(false);
+    expect(store.getState().chatWasStopped).toBe(false);
+    expect(store.getState().chatError).toBeUndefined();
+    expect(store.getState().messages.at(-1)?.content).toBe("运行已经结束");
+  });
+
+  it("freezes output immediately while the pause settles in the background", async () => {
     const api = createApi();
     const modelApi = createModelApi();
     const cancel = vi.fn();
@@ -595,7 +702,14 @@ describe("task store", () => {
       },
     );
     vi.mocked(modelApi.getActiveRun).mockResolvedValue(activeRun("RUNNING"));
-    vi.mocked(modelApi.pauseRun).mockResolvedValue(activeRun("PAUSING"));
+    let resolvePause:
+      | ((run: ConversationRunSnapshot) => void)
+      | undefined;
+    vi.mocked(modelApi.pauseRun).mockImplementation(
+      () => new Promise<ConversationRunSnapshot>((resolve) => {
+        resolvePause = resolve;
+      }),
+    );
     vi.mocked(modelApi.listMessages)
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
@@ -613,12 +727,23 @@ describe("task store", () => {
     const pendingSend = store.getState().sendMessage("继续整理").then(() => {
       settled = true;
     });
-    await store.getState().stopChat();
+    const stopping = store.getState().stopChat();
 
     expect(store.getState().isPausing).toBe(true);
-    expect(store.getState().isChatting).toBe(true);
+    expect(store.getState().isChatting).toBe(false);
     expect(cancel).not.toHaveBeenCalled();
     expect(settled).toBe(false);
+    onEvent?.({
+      type: "text_delta",
+      delta: "这段迟到的输出不应继续展示",
+      model: "test-model",
+      errorMessage: "",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(store.getState().messages.at(-1)?.content).toBe("");
+
+    resolvePause?.(activeRun("PAUSING"));
+    await stopping;
 
     onEvent?.({
       type: "paused",
@@ -1283,6 +1408,11 @@ function createModelApi(): LumoraModelApi {
     cancelRun: vi.fn(),
     getRunChanges: vi.fn(),
     revertRun: vi.fn(),
+    getTaskWorktree: vi.fn(async () => undefined),
+    getTaskWorktreeChanges: vi.fn(async () => undefined),
+    applyTaskWorktree: vi.fn(),
+    createTaskWorktreeBranch: vi.fn(),
+    discardTaskWorktree: vi.fn(),
     subscribeRun: vi.fn(() => () => undefined),
     streamMessage: vi.fn(() => () => undefined),
     regenerateMessage: vi.fn(() => () => undefined),

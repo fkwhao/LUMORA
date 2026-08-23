@@ -280,3 +280,12 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 032-task-worktree
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V32__task_worktree.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

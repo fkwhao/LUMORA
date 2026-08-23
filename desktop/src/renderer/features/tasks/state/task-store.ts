@@ -942,7 +942,53 @@ export function createTaskStore(
       if (!modelApi || !taskId) {
         throw new Error("当前运行无法暂停");
       }
-      set({ isPausing: true, chatError: undefined });
+      const settlePauseRequest = async (
+        settledRun: ConversationRunSnapshot | undefined,
+        paused: boolean,
+      ) => {
+        clearChatEventBatcher(true);
+        unsubscribeChat?.();
+        unsubscribeChat = undefined;
+        if (get().activeTask?.taskId === taskId) {
+          set({
+            activeRun: settledRun,
+            isChatting: false,
+            isPausing: false,
+            chatWasStopped: paused,
+            chatStartedAt: undefined,
+            lastChatDurationMs: chatStartedAt
+              ? Date.now() - chatStartedAt
+              : undefined,
+            pendingToolApproval: undefined,
+            isDecidingToolApproval: false,
+            chatError: undefined,
+          });
+        }
+        try {
+          const persistedMessages = await modelApi.listMessages(taskId);
+          if (get().activeTask?.taskId === taskId) {
+            set({
+              messages: paused
+                ? reconcilePausedMessages(get().messages, persistedMessages)
+                : reconcilePersistedMessages(get().messages, persistedMessages),
+            });
+          }
+        } catch {
+          // Run 已安全收敛；历史刷新失败不应重新激活运行。
+        }
+        const resolve = resolveChat;
+        resolveChat = undefined;
+        resolve?.();
+      };
+      // Freeze the answer immediately. Core keeps the subscription alive in
+      // the background until an already-started tool reaches a safe boundary.
+      set({
+        isPausing: true,
+        isChatting: false,
+        chatWasStopped: false,
+        chatError: undefined,
+      });
+      let pauseTarget: ConversationRunSnapshot | undefined;
       try {
         const cachedRun = get().activeRun;
         const currentRun = cachedRun && isPausableRun(cachedRun)
@@ -950,6 +996,16 @@ export function createTaskStore(
           : await waitForActiveRun(modelApi, taskId);
         if (!currentRun) {
           throw new Error("运行状态尚未建立，请稍后重试");
+        }
+        pauseTarget = currentRun;
+        if (get().activeTask?.taskId === taskId) {
+          set({
+            activeRun: {
+              ...currentRun,
+              status: "PAUSING",
+              updatedAt: new Date().toISOString(),
+            },
+          });
         }
         const pausedRun = await modelApi.pauseRun(taskId, currentRun.runId);
         if (get().activeTask?.taskId === taskId) {
@@ -959,41 +1015,33 @@ export function createTaskStore(
           });
         }
         if (pausedRun.status === "PAUSED") {
-          clearChatEventBatcher(true);
-          unsubscribeChat?.();
-          unsubscribeChat = undefined;
-          if (get().activeTask?.taskId === taskId) {
-            set({
-              isChatting: false,
-              isPausing: false,
-              chatWasStopped: true,
-              chatStartedAt: undefined,
-              lastChatDurationMs: chatStartedAt
-                ? Date.now() - chatStartedAt
-                : undefined,
-              pendingToolApproval: undefined,
-              isDecidingToolApproval: false,
-            });
-          }
-          try {
-            const persistedMessages = await modelApi.listMessages(taskId);
-            if (get().activeTask?.taskId === taskId) {
-              set({
-                messages: reconcilePausedMessages(
-                  get().messages,
-                  persistedMessages,
-                ),
-              });
-            }
-          } catch {
-            // Run 已成功暂停；历史刷新失败不应把状态回滚为运行中。
-          }
-          const resolve = resolveChat;
-          resolveChat = undefined;
-          resolve?.();
+          await settlePauseRequest(pausedRun, true);
+        } else if (!isRunProcessing(pausedRun)) {
+          // The Run naturally completed while the pause request was in
+          // flight. This is a successful terminal outcome, not a pause error.
+          await settlePauseRequest(pausedRun, false);
         }
       } catch (error) {
-        set({ isPausing: false, chatError: toErrorMessage(error) });
+        let runAlreadySettled = false;
+        try {
+          runAlreadySettled = !(await modelApi.getActiveRun(taskId));
+        } catch {
+          // Preserve the original pause error when Core cannot be queried.
+        }
+        if (runAlreadySettled) {
+          await settlePauseRequest(undefined, false);
+          return;
+        }
+        if (get().activeTask?.taskId === taskId) {
+          set({
+            activeRun: pauseTarget,
+            isChatting: Boolean(
+              pauseTarget && isRunProcessing(pauseTarget),
+            ),
+            isPausing: false,
+            chatError: toErrorMessage(error),
+          });
+        }
         throw error;
       }
     },
@@ -1453,6 +1501,9 @@ function applyRunEnvelope(
     status === "COMPLETED" ||
     status === "FAILED" ||
     status === "CANCELLED";
+  const pausePending = get().isPausing;
+  const pausing = !terminal && status !== "PAUSED"
+    && (pausePending || status === "PAUSING");
   set({
     activeRun: {
       ...currentRun,
@@ -1463,8 +1514,10 @@ function applyRunEnvelope(
       ),
       updatedAt: runEvent.occurredAt,
     },
-    isPausing: status === "PAUSING",
-    isChatting: terminal || status === "PAUSED" ? false : get().isChatting,
+    isPausing: pausing,
+    isChatting: terminal || status === "PAUSED" || pausing
+      ? false
+      : get().isChatting,
     chatWasStopped: status === "PAUSED",
   });
   return true;
