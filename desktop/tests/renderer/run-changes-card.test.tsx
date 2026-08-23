@@ -1,7 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { RunChangesCard } from "../../src/renderer/features/tasks/components/RunChangesCard";
+import {
+  provisionalRunChangesFromWorkLog,
+  RunChangesCard,
+} from "../../src/renderer/features/tasks/components/RunChangesCard";
 import type { ConversationRunChanges } from "../../src/shared/model-contract";
 
 const CHANGES: ConversationRunChanges = {
@@ -27,6 +30,46 @@ afterEach(() => {
 });
 
 describe("RunChangesCard", () => {
+  it("builds an immediate bounded summary from completed file tools", () => {
+    const changes = provisionalRunChangesFromWorkLog("run-live", [
+      {
+        itemId: "tool-1",
+        kind: "tool",
+        status: "completed",
+        toolName: "apply_patch",
+        arguments: {
+          path: "src/auth.ts",
+          oldText: "const token = legacy;",
+          newText: "const token = session;\nreturn token;",
+        },
+      },
+      {
+        itemId: "tool-2",
+        kind: "tool",
+        status: "failed",
+        toolName: "write_file",
+        arguments: { path: "src/ignored.ts", content: "ignored" },
+      },
+    ]);
+
+    expect(changes).toMatchObject({
+      runId: "run-live",
+      status: "TRACKING",
+      additions: 2,
+      deletions: 1,
+      revertible: false,
+    });
+    expect(changes?.files).toHaveLength(1);
+    expect(changes?.files[0]).toMatchObject({
+      path: "src/auth.ts",
+      additions: 2,
+      deletions: 1,
+      patchTruncated: false,
+    });
+    expect(changes?.files[0]?.patch).toContain("-const token = legacy;");
+    expect(changes?.files[0]?.patch).toContain("+const token = session;");
+  });
+
   it("shows the run totals, expands files, and exposes review and revert actions", () => {
     vi.useFakeTimers();
     const onReview = vi.fn();
@@ -73,8 +116,8 @@ describe("RunChangesCard", () => {
     expect(preview.style.width).toBe("660px");
     expect(within(preview).getByText("src/")).toBeInTheDocument();
     expect(within(preview).getByText("auth.ts")).toBeInTheDocument();
-    expect(within(preview).getByText("const previous = true;")).toBeInTheDocument();
-    expect(within(preview).getByText("const current = true;")).toBeInTheDocument();
+    expect(hasCodeLine(preview, "const previous = true;")).toBe(true);
+    expect(hasCodeLine(preview, "const current = true;")).toBe(true);
     expect(within(preview).queryByText(/点击|预览/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "再显示 2 个文件" }));
@@ -110,6 +153,11 @@ describe("RunChangesCard", () => {
     );
   });
 });
+
+function hasCodeLine(root: ParentNode, source: string): boolean {
+  return Array.from(root.querySelectorAll("code"))
+    .some((code) => code.textContent === source);
+}
 
 function file(path: string, additions: number, deletions: number) {
   return {

@@ -18,11 +18,76 @@ import {
 import type {
   ConversationFileChange,
   ConversationRunChanges,
+  WorkLogItem,
 } from "../../../../shared/model-contract";
 import { FileDiff, rowsFromPatch, splitFilePath } from "./FileDiff";
 import styles from "./RunChangesCard.module.css";
 
 const HOVER_PREVIEW_DELAY_MS = 320;
+const PROVISIONAL_PATCH_LINE_LIMIT = 180;
+
+/**
+ * Builds an immediate, bounded Changes summary from completed file tools.
+ * The Git checkpoint result replaces this provisional value as soon as it is
+ * available, so the answer layout does not jump while Core captures the diff.
+ */
+export function provisionalRunChangesFromWorkLog(
+  runId: string,
+  workLog?: WorkLogItem[],
+): ConversationRunChanges | undefined {
+  const files = new Map<string, ConversationFileChange>();
+
+  for (const item of workLog ?? []) {
+    if (
+      item.status !== "completed"
+      || (item.toolName !== "apply_patch" && item.toolName !== "write_file")
+    ) continue;
+
+    const path = stringArgument(item.arguments?.path);
+    if (!path) continue;
+    const oldText = item.toolName === "apply_patch"
+      ? stringArgument(item.arguments?.oldText)
+      : "";
+    const newText = item.toolName === "apply_patch"
+      ? stringArgument(item.arguments?.newText)
+      : stringArgument(item.arguments?.content);
+    const part = provisionalPatch(path, oldText, newText);
+    const key = path.replaceAll("\\", "/");
+    const current = files.get(key);
+
+    if (current) {
+      current.additions += lineCount(newText);
+      current.deletions += lineCount(oldText);
+      current.patch = [current.patch, part.patch].filter(Boolean).join("\n");
+      current.patchTruncated ||= part.truncated;
+      continue;
+    }
+
+    files.set(key, {
+      path,
+      previousPath: "",
+      status: item.toolName === "write_file" ? "ADDED" : "MODIFIED",
+      additions: lineCount(newText),
+      deletions: lineCount(oldText),
+      binary: false,
+      patch: part.patch,
+      patchTruncated: part.truncated,
+    });
+  }
+
+  const changedFiles = [...files.values()];
+  if (changedFiles.length === 0) return undefined;
+  return {
+    runId,
+    status: "TRACKING",
+    repositoryRoot: "",
+    reason: "正在确认 Git 变更",
+    additions: changedFiles.reduce((sum, file) => sum + file.additions, 0),
+    deletions: changedFiles.reduce((sum, file) => sum + file.deletions, 0),
+    revertible: false,
+    files: changedFiles,
+  };
+}
 
 interface RunChangesCardProps {
   changes: ConversationRunChanges;
@@ -282,6 +347,46 @@ function resolvePreviewLayout(anchor: DOMRect): PreviewLayout {
     },
     bodyHeight,
   };
+}
+
+function provisionalPatch(
+  path: string,
+  oldText: string,
+  newText: string,
+): { patch: string; truncated: boolean } {
+  const unavailableMarker = "[内容未持久化]";
+  if (oldText === unavailableMarker || newText === unavailableMarker) {
+    return { patch: "", truncated: true };
+  }
+  const oldLines = lines(oldText);
+  const newLines = lines(newText);
+  const visibleOldLines = oldLines.slice(0, PROVISIONAL_PATCH_LINE_LIMIT);
+  const visibleNewLines = newLines.slice(0, PROVISIONAL_PATCH_LINE_LIMIT);
+  return {
+    patch: [
+      `diff --git a/${path} b/${path}`,
+      `--- a/${path}`,
+      `+++ b/${path}`,
+      `@@ -1,${oldLines.length} +1,${newLines.length} @@`,
+      ...visibleOldLines.map((line) => `-${line}`),
+      ...visibleNewLines.map((line) => `+${line}`),
+    ].join("\n"),
+    truncated:
+      oldLines.length > visibleOldLines.length
+      || newLines.length > visibleNewLines.length,
+  };
+}
+
+function lines(value: string): string[] {
+  return value ? value.split(/\r?\n/) : [];
+}
+
+function lineCount(value: string): number {
+  return lines(value).length;
+}
+
+function stringArgument(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 function snapToDevicePixel(value: number): number {

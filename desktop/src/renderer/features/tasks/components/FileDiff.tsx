@@ -1,3 +1,6 @@
+import hljs from "highlight.js";
+import { useMemo } from "react";
+
 import styles from "./FileDiff.module.css";
 
 export interface FileDiffRow {
@@ -35,6 +38,13 @@ export function FileDiff({
   emptyMessage = "该文件没有可展示的文本补丁",
 }: FileDiffProps) {
   const filePath = splitFilePath(file);
+  const syntaxLanguage = useMemo(() => languageForFile(file), [file]);
+  const highlightedRows = useMemo(
+    () => rows.map((row) => row.type === "gap"
+      ? undefined
+      : highlightDiffLine(row.text || " ", syntaxLanguage)),
+    [rows, syntaxLanguage],
+  );
 
   return (
     <div
@@ -99,7 +109,16 @@ export function FileDiff({
               <span className={styles.sign}>
                 {row.type === "add" ? "+" : row.type === "del" ? "−" : ""}
               </span>
-              <code>{row.text || " "}</code>
+              {highlightedRows[index] === undefined ? (
+                <code>{row.text || " "}</code>
+              ) : (
+                <code
+                  className={styles.syntaxCode}
+                  data-language={syntaxLanguage}
+                  // highlight.js 会转义源代码，仅返回用于着色的 span。
+                  dangerouslySetInnerHTML={{ __html: highlightedRows[index] }}
+                />
+              )}
             </div>
           ))}
         </div>
@@ -111,6 +130,102 @@ export function FileDiff({
       )}
     </div>
   );
+}
+
+const EXTENSION_LANGUAGES: Record<string, string> = {
+  bash: "bash",
+  c: "c",
+  cc: "cpp",
+  cpp: "cpp",
+  cs: "csharp",
+  css: "css",
+  cts: "typescript",
+  cxx: "cpp",
+  dart: "dart",
+  fs: "fsharp",
+  go: "go",
+  gradle: "gradle",
+  graphql: "graphql",
+  groovy: "groovy",
+  h: "c",
+  hpp: "cpp",
+  htm: "xml",
+  html: "xml",
+  ini: "ini",
+  java: "java",
+  js: "javascript",
+  json: "json",
+  jsonc: "json",
+  jsx: "javascript",
+  kt: "kotlin",
+  kts: "kotlin",
+  less: "less",
+  lua: "lua",
+  md: "markdown",
+  markdown: "markdown",
+  mjs: "javascript",
+  mts: "typescript",
+  php: "php",
+  properties: "properties",
+  proto: "protobuf",
+  ps1: "powershell",
+  py: "python",
+  r: "r",
+  rb: "ruby",
+  rs: "rust",
+  sass: "scss",
+  scala: "scala",
+  scss: "scss",
+  sh: "bash",
+  sql: "sql",
+  svelte: "xml",
+  svg: "xml",
+  swift: "swift",
+  toml: "ini",
+  ts: "typescript",
+  tsx: "typescript",
+  vue: "xml",
+  xml: "xml",
+  yaml: "yaml",
+  yml: "yaml",
+  zsh: "bash",
+};
+
+/** Resolve a deterministic highlighter from the project-relative file path. */
+export function languageForFile(path: string): string | undefined {
+  const fileName = splitFilePath(path).name;
+  const normalizedName = fileName.toLowerCase();
+  let language: string | undefined;
+
+  if (normalizedName === "makefile" || normalizedName.startsWith("makefile.")) {
+    language = "makefile";
+  } else if (normalizedName === "cmakelists.txt") {
+    language = "cmake";
+  } else if (normalizedName === "dockerfile" || normalizedName.startsWith("dockerfile.")) {
+    language = "dockerfile";
+  } else {
+    const extension = normalizedName.includes(".")
+      ? normalizedName.slice(normalizedName.lastIndexOf(".") + 1)
+      : "";
+    language = EXTENSION_LANGUAGES[extension];
+  }
+
+  return language && hljs.getLanguage(language) ? language : undefined;
+}
+
+function highlightDiffLine(
+  source: string,
+  language: string | undefined,
+): string | undefined {
+  if (!language) return undefined;
+  try {
+    return hljs.highlight(source, {
+      language,
+      ignoreIllegals: true,
+    }).value;
+  } catch {
+    return undefined;
+  }
 }
 
 function displayLineNumber(row: FileDiffRow): number | "" {

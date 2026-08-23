@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   FileDiff,
+  languageForFile,
   rowsFromPatch,
   splitFilePath,
 } from "../../src/renderer/features/tasks/components/FileDiff";
@@ -62,5 +63,31 @@ describe("FileDiff", () => {
     expect(deletionNumber?.className).toBe(additionNumber?.className);
     expect(deletionNumber?.parentElement?.children).toHaveLength(3);
     expect(additionNumber?.parentElement?.children).toHaveLength(3);
+  });
+
+  it("highlights code from the file language in every shared diff surface", () => {
+    const { container } = render(
+      <FileDiff
+        file="desktop/src/theme.ts"
+        additions={1}
+        deletions={0}
+        rows={[
+          {
+            old: null,
+            cur: 8,
+            type: "add",
+            text: 'const theme = "dark";',
+          },
+        ]}
+      />,
+    );
+
+    const code = container.querySelector<HTMLElement>('code[data-language="typescript"]');
+    expect(code).toBeInTheDocument();
+    expect(code?.querySelector(".hljs-keyword")).toHaveTextContent("const");
+    expect(code?.querySelector(".hljs-string")).toHaveTextContent('"dark"');
+    expect(languageForFile("src/App.tsx")).toBe("typescript");
+    expect(languageForFile("Dockerfile.dev")).toBe("dockerfile");
+    expect(languageForFile("LICENSE")).toBeUndefined();
   });
 });

@@ -478,9 +478,25 @@ globalStyle(".conversation-scroll", {
   scrollbarGutter: "stable",
 });
 
+globalStyle(".conversation-scroll.is-restoring-position", {
+  opacity: "0",
+  pointerEvents: "none",
+});
+
 globalStyle(
-  '.conversation-scroll.is-restoring-position, [data-slot="aui_thread-viewport"].is-restoring-position',
+  '.task-stage [data-slot="aui_message-group"], .task-stage .question-rail-list',
   {
+    transition: "opacity 110ms cubic-bezier(0.2, 0.72, 0.22, 1)",
+    "@media": {
+      "(prefers-reduced-motion: reduce)": { transition: "none" },
+    },
+  },
+);
+
+globalStyle(
+  '.task-stage.is-loading-history [data-slot="aui_message-group"], .task-stage.is-loading-history .question-rail-list, [data-slot="aui_thread-viewport"].is-restoring-position [data-slot="aui_message-group"]',
+  {
+    visibility: "hidden",
     opacity: "0",
     pointerEvents: "none",
   },
@@ -957,7 +973,7 @@ globalStyle(".markdown-code-toolbar button.is-copied", {
 
 globalStyle(".markdown-body pre code", {
   padding: "0",
-  color: "inherit",
+  color: "#24292f",
   border: "0",
   borderRadius: "0",
   background: "transparent",
@@ -965,38 +981,33 @@ globalStyle(".markdown-body pre code", {
 });
 
 globalStyle(".markdown-body .hljs-comment,\n.markdown-body .hljs-quote", {
-  color: "#81878d",
+  color: "#6e7781",
   fontStyle: "italic",
 });
 
 globalStyle(
-  ".markdown-body .hljs-keyword,\n.markdown-body .hljs-selector-tag,\n.markdown-body .hljs-literal,\n.markdown-body .hljs-type,\n.markdown-body .hljs-name,\n.markdown-body .hljs-tag",
-  { color: "#7d5964" },
+  ".markdown-body .hljs-keyword,\n.markdown-body .hljs-selector-tag,\n.markdown-body .hljs-name,\n.markdown-body .hljs-tag",
+  { color: "#0969da" },
 );
 
 globalStyle(
-  ".markdown-body .hljs-string,\n.markdown-body .hljs-regexp,\n.markdown-body .hljs-addition,\n.markdown-body .hljs-attribute,\n.markdown-body .hljs-template-tag",
-  { color: "#587064" },
-);
-
-globalStyle(
-  ".markdown-body .hljs-number,\n.markdown-body .hljs-symbol,\n.markdown-body .hljs-bullet,\n.markdown-body .hljs-link",
-  { color: "#5f7085" },
+  ".markdown-body .hljs-type,\n.markdown-body .hljs-literal,\n.markdown-body .hljs-number,\n.markdown-body .hljs-symbol,\n.markdown-body .hljs-bullet",
+  { color: "#a40e4c" },
 );
 
 globalStyle(
   ".markdown-body .hljs-title,\n.markdown-body .hljs-section,\n.markdown-body .hljs-function,\n.markdown-body .hljs-selector-class,\n.markdown-body .hljs-selector-id",
-  { color: "#69617c" },
+  { color: "#cf222e" },
 );
 
 globalStyle(
-  ".markdown-body .hljs-variable,\n.markdown-body .hljs-template-variable,\n.markdown-body .hljs-params,\n.markdown-body .hljs-attr,\n.markdown-body .hljs-property",
-  { color: "#786653" },
+  ".markdown-body .hljs-string,\n.markdown-body .hljs-regexp,\n.markdown-body .hljs-addition,\n.markdown-body .hljs-attribute,\n.markdown-body .hljs-template-tag",
+  { color: "#116329" },
 );
 
 globalStyle(
-  ".markdown-body .hljs-built_in,\n.markdown-body .hljs-meta,\n.markdown-body .hljs-class .hljs-title,\n.markdown-body .hljs-doctag",
-  { color: "#577174" },
+  ".markdown-body .hljs-variable,\n.markdown-body .hljs-template-variable,\n.markdown-body .hljs-params,\n.markdown-body .hljs-attr,\n.markdown-body .hljs-property,\n.markdown-body .hljs-built_in,\n.markdown-body .hljs-meta,\n.markdown-body .hljs-doctag,\n.markdown-body .hljs-link",
+  { color: "#24292f" },
 );
 
 globalStyle(".markdown-body .hljs-deletion", {
@@ -1009,42 +1020,37 @@ globalStyle(".markdown-body pre code.language-diff", {
 });
 
 globalStyle(".aui-md .hljs", {
-  color: "#34383d",
+  color: "#24292f",
 });
 
 globalStyle(".aui-md .hljs-comment,\n.aui-md .hljs-quote", {
-  color: "#81878d",
+  color: "#6e7781",
   fontStyle: "italic",
 });
 
 globalStyle(
-  ".aui-md .hljs-keyword,\n.aui-md .hljs-selector-tag,\n.aui-md .hljs-literal,\n.aui-md .hljs-type,\n.aui-md .hljs-name,\n.aui-md .hljs-tag",
-  { color: "#7d5964" },
+  ".aui-md .hljs-keyword,\n.aui-md .hljs-selector-tag,\n.aui-md .hljs-name,\n.aui-md .hljs-tag",
+  { color: "#0969da" },
 );
 
 globalStyle(
-  ".aui-md .hljs-string,\n.aui-md .hljs-regexp,\n.aui-md .hljs-addition,\n.aui-md .hljs-attribute,\n.aui-md .hljs-template-tag",
-  { color: "#587064" },
-);
-
-globalStyle(
-  ".aui-md .hljs-number,\n.aui-md .hljs-symbol,\n.aui-md .hljs-bullet,\n.aui-md .hljs-link",
-  { color: "#5f7085" },
+  ".aui-md .hljs-type,\n.aui-md .hljs-literal,\n.aui-md .hljs-number,\n.aui-md .hljs-symbol,\n.aui-md .hljs-bullet",
+  { color: "#a40e4c" },
 );
 
 globalStyle(
   ".aui-md .hljs-title,\n.aui-md .hljs-section,\n.aui-md .hljs-function,\n.aui-md .hljs-selector-class,\n.aui-md .hljs-selector-id",
-  { color: "#69617c" },
+  { color: "#cf222e" },
 );
 
 globalStyle(
-  ".aui-md .hljs-variable,\n.aui-md .hljs-template-variable,\n.aui-md .hljs-params,\n.aui-md .hljs-attr,\n.aui-md .hljs-property",
-  { color: "#786653" },
+  ".aui-md .hljs-string,\n.aui-md .hljs-regexp,\n.aui-md .hljs-addition,\n.aui-md .hljs-attribute,\n.aui-md .hljs-template-tag",
+  { color: "#116329" },
 );
 
 globalStyle(
-  ".aui-md .hljs-built_in,\n.aui-md .hljs-meta,\n.aui-md .hljs-class .hljs-title,\n.aui-md .hljs-doctag",
-  { color: "#577174" },
+  ".aui-md .hljs-variable,\n.aui-md .hljs-template-variable,\n.aui-md .hljs-params,\n.aui-md .hljs-attr,\n.aui-md .hljs-property,\n.aui-md .hljs-built_in,\n.aui-md .hljs-meta,\n.aui-md .hljs-doctag,\n.aui-md .hljs-link",
+  { color: "#24292f" },
 );
 
 globalStyle(".aui-md .hljs-deletion", {
@@ -3532,7 +3538,7 @@ globalStyle(".right-sidebar-scroll-content", {
 });
 
 globalStyle(
-  ".right-sidebar-scroll-content::-webkit-scrollbar,\n.review-diff::-webkit-scrollbar",
+  ".right-sidebar-scroll-content::-webkit-scrollbar,\n.review-file-accordion::-webkit-scrollbar,\n.review-diff::-webkit-scrollbar",
   {
     width: "10px",
     height: "10px",
@@ -3540,12 +3546,12 @@ globalStyle(
 );
 
 globalStyle(
-  ".right-sidebar-scroll-content::-webkit-scrollbar-track,\n.review-diff::-webkit-scrollbar-track",
+  ".right-sidebar-scroll-content::-webkit-scrollbar-track,\n.review-file-accordion::-webkit-scrollbar-track,\n.review-diff::-webkit-scrollbar-track",
   { background: "transparent" },
 );
 
 globalStyle(
-  ".right-sidebar-scroll-content::-webkit-scrollbar-thumb,\n.review-diff::-webkit-scrollbar-thumb",
+  ".right-sidebar-scroll-content::-webkit-scrollbar-thumb,\n.review-file-accordion::-webkit-scrollbar-thumb,\n.review-diff::-webkit-scrollbar-thumb",
   {
     minHeight: "44px",
     border: "3px solid transparent",
@@ -3556,7 +3562,7 @@ globalStyle(
 );
 
 globalStyle(
-  ".right-sidebar-scroll-content::-webkit-scrollbar-thumb:hover,\n.review-diff::-webkit-scrollbar-thumb:hover",
+  ".right-sidebar-scroll-content::-webkit-scrollbar-thumb:hover,\n.review-file-accordion::-webkit-scrollbar-thumb:hover,\n.review-diff::-webkit-scrollbar-thumb:hover",
   {
     background:
       "color-mix(in srgb, var(--muted) 58%, transparent) padding-box",
@@ -3564,7 +3570,7 @@ globalStyle(
 );
 
 globalStyle(
-  ".right-sidebar-scroll-content::-webkit-scrollbar-thumb:active,\n.review-diff::-webkit-scrollbar-thumb:active",
+  ".right-sidebar-scroll-content::-webkit-scrollbar-thumb:active,\n.review-file-accordion::-webkit-scrollbar-thumb:active,\n.review-diff::-webkit-scrollbar-thumb:active",
   {
     background:
       "color-mix(in srgb, var(--blue) 62%, var(--muted)) padding-box",
@@ -3572,8 +3578,13 @@ globalStyle(
 );
 
 globalStyle(
-  ".right-sidebar-scroll-content::-webkit-scrollbar-corner,\n.review-diff::-webkit-scrollbar-corner",
+  ".right-sidebar-scroll-content::-webkit-scrollbar-corner,\n.review-file-accordion::-webkit-scrollbar-corner,\n.review-diff::-webkit-scrollbar-corner",
   { background: "transparent" },
+);
+
+globalStyle(
+  ".right-sidebar-scroll-content::-webkit-scrollbar-button,\n.review-file-accordion::-webkit-scrollbar-button,\n.review-diff::-webkit-scrollbar-button",
+  { display: "none", width: "0", height: "0" },
 );
 
 globalStyle(".conversation-usage-scroll.subagent-session-scroll", {
@@ -4885,6 +4896,9 @@ globalStyle(".review-file-accordion", {
   overflowY: "auto",
   overscrollBehaviorY: "contain",
   scrollbarGutter: "stable",
+  scrollbarWidth: "thin",
+  scrollbarColor:
+    "color-mix(in srgb, var(--muted) 34%, transparent) transparent",
 });
 
 globalStyle(".review-file-item", {

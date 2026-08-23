@@ -37,8 +37,8 @@ describe("DiffReviewPane", () => {
       />,
     );
 
-    expect(screen.getByText("const count = 1;")).toBeInTheDocument();
-    expect(screen.getByText("const count = 2;")).toBeInTheDocument();
+    expect(hasCodeLine(document, "const count = 1;")).toBe(true);
+    expect(hasCodeLine(document, "const count = 2;")).toBe(true);
     const firstFile = screen.getByRole("button", { name: "折叠 src/example.ts" });
     expect(firstFile).toHaveAttribute("aria-expanded", "true");
     const otherFile = screen.getByRole("button", { name: "展开 src/other.ts" });
@@ -49,7 +49,7 @@ describe("DiffReviewPane", () => {
     expect(screen.getByText("old")).toBeInTheDocument();
     expect(screen.getByText("new")).toBeInTheDocument();
     fireEvent.click(firstFile);
-    expect(screen.queryByText("const count = 1;")).not.toBeInTheDocument();
+    expect(hasCodeLine(document, "const count = 1;")).toBe(false);
   });
 
   it("delegates expanded diff scrolling to the native file-list container", () => {
@@ -118,8 +118,8 @@ describe("DiffReviewPane", () => {
       />,
     );
 
-    expect(screen.getByText("return localStorage.token;")).toBeInTheDocument();
-    expect(screen.getByText('return cookies.get("session");')).toBeInTheDocument();
+    expect(hasCodeLine(document, "  return localStorage.token;")).toBe(true);
+    expect(hasCodeLine(document, '  return cookies.get("session");')).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "撤回本轮" }));
     expect(onRevert).toHaveBeenCalledOnce();
   });
@@ -319,3 +319,8 @@ describe("DiffReviewPane", () => {
     expect(screen.getByText("当前环境没有未提交改动。")).toBeInTheDocument();
   });
 });
+
+function hasCodeLine(root: ParentNode, source: string): boolean {
+  return Array.from(root.querySelectorAll("code"))
+    .some((code) => code.textContent === source);
+}

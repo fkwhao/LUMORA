@@ -92,7 +92,10 @@ import { ApprovalDock } from "../components/ApprovalDock";
 import { ToolApprovalDialog } from "../components/ToolApprovalDialog";
 import { AgentRunSummary } from "../components/AgentRunSummary";
 import { DiffReviewPane, type FileChange } from "../components/DiffReviewPane";
-import { RunChangesCard } from "../components/RunChangesCard";
+import {
+  provisionalRunChangesFromWorkLog,
+  RunChangesCard,
+} from "../components/RunChangesCard";
 import { ConversationUsagePane } from "../components/ConversationUsagePane";
 import {
   SubagentSessionPane,
@@ -277,6 +280,14 @@ export const TaskPage = memo(function TaskPage({
   const runtimeMessageCacheRef = useRef(
     new Map<string, RuntimeMessageCacheEntry>(),
   );
+  const runChangesCacheRef = useRef(
+    new Map<string, ConversationRunChanges>(),
+  );
+  const runChangesRequestsRef = useRef(
+    new Map<string, Promise<ConversationRunChanges>>(),
+  );
+  const activeTaskIdRef = useRef(task?.taskId);
+  activeTaskIdRef.current = task?.taskId;
   const workspacePath = useStore(store, (state) =>
     task?.taskId ? state.taskProjectPaths[task.taskId] : undefined,
   );
@@ -290,6 +301,11 @@ export const TaskPage = memo(function TaskPage({
     setWorkspaceContext(context);
     setGitBranches(context.branches);
   }, []);
+
+  useEffect(() => {
+    runChangesCacheRef.current.clear();
+    runChangesRequestsRef.current.clear();
+  }, [task?.taskId]);
 
   useEffect(() => {
     if (!skillApi) return;
@@ -418,10 +434,34 @@ export const TaskPage = memo(function TaskPage({
       .finally(() => setChangesLoading(false));
   }, [activeRun?.runId, modelApi, task?.taskId, workspaceApi]);
   const loadRunChanges = useCallback(async (runId: string) => {
-    if (!task?.taskId || !modelApi) {
+    const taskId = task?.taskId;
+    if (!taskId || !modelApi) {
       throw new Error("当前任务无法读取 Git 变更");
     }
-    return modelApi.getRunChanges(task.taskId, runId);
+    const cacheKey = `${taskId}:${runId}`;
+    const cached = runChangesCacheRef.current.get(cacheKey);
+    if (cached) return cached;
+    const pending = runChangesRequestsRef.current.get(cacheKey);
+    if (pending) return pending;
+
+    let request: Promise<ConversationRunChanges>;
+    request = modelApi.getRunChanges(taskId, runId)
+      .then((result) => {
+        if (
+          result.status !== "TRACKING"
+          && activeTaskIdRef.current === taskId
+        ) {
+          runChangesCacheRef.current.set(cacheKey, result);
+        }
+        return result;
+      })
+      .finally(() => {
+        if (runChangesRequestsRef.current.get(cacheKey) === request) {
+          runChangesRequestsRef.current.delete(cacheKey);
+        }
+      });
+    runChangesRequestsRef.current.set(cacheKey, request);
+    return request;
   }, [modelApi, task?.taskId]);
   const reviewRun = useCallback((runId: string, filePath?: string) => {
     openChangeReview(undefined, runId, filePath);
@@ -532,6 +572,7 @@ export const TaskPage = memo(function TaskPage({
     setChangesError(undefined);
     try {
       const reverted = await modelApi.revertRun(taskId, runId);
+      runChangesCacheRef.current.set(`${taskId}:${runId}`, reverted);
       if (reviewRunId === runId) setRunChanges(reverted);
       setWorkspaceRefreshToken((value) => value + 1);
       try {
@@ -1755,7 +1796,13 @@ export const TaskPage = memo(function TaskPage({
         </div>
       </header>
 
-      <div className="task-stage">
+      <div
+        className={`task-stage${
+          isLoadingHistory || isHydratingHistory
+            ? " is-loading-history"
+            : ""
+        }`}
+      >
         <aside
           ref={questionRailContainerRef}
           className="question-rail"
@@ -2460,10 +2507,21 @@ function TaskAssistantMessageChanges() {
     ?? (index === context.displayMessages.length - 1
       ? context.activeRunId
       : undefined);
+  const provisionalChanges = useMemo(
+    () => runId
+      ? provisionalRunChangesFromWorkLog(runId, originalMessage?.workLog)
+      : undefined,
+    [originalMessage?.workLog, runId],
+  );
+  const provisionalSignature = provisionalChanges?.files
+    .map((file) => `${file.path}:${file.additions}:${file.deletions}`)
+    .join("|") ?? "";
+  const loadedChanges = changes?.runId === runId ? changes : undefined;
+  const visibleChanges = loadedChanges ?? (running ? undefined : provisionalChanges);
 
   useEffect(() => {
-    setChanges(undefined);
-    if (!runId || running) return;
+    setChanges((current) => current?.runId === runId ? current : undefined);
+    if (!runId || (running && !provisionalSignature)) return;
     let cancelled = false;
     let retryTimer: number | undefined;
 
@@ -2471,15 +2529,20 @@ function TaskAssistantMessageChanges() {
       try {
         const result = await context.loadRunChanges(runId);
         if (cancelled) return;
+        if (result.status === "TRACKING") {
+          if (result.files.length > 0) setChanges(result);
+          if (running) return;
+        }
         if (result.status === "TRACKING" && attempt < 4) {
           retryTimer = window.setTimeout(() => {
             void readChanges(attempt + 1);
           }, 500);
           return;
         }
+        if (result.status === "TRACKING" && result.files.length === 0) return;
         setChanges(result);
       } catch {
-        if (!cancelled) setChanges(undefined);
+        // Keep the work-log summary visible when Git confirmation is delayed.
       }
     };
 
@@ -2488,13 +2551,15 @@ function TaskAssistantMessageChanges() {
       cancelled = true;
       if (retryTimer !== undefined) window.clearTimeout(retryTimer);
     };
-  }, [context.loadRunChanges, runId, running]);
+  }, [context.loadRunChanges, provisionalSignature, runId, running]);
 
-  if (!runId || !changes || changes.files.length === 0) return null;
+  if (!runId || !visibleChanges || visibleChanges.files.length === 0) {
+    return null;
+  }
 
   return (
     <RunChangesCard
-      changes={changes}
+      changes={visibleChanges}
       reverting={context.revertingRunId === runId}
       onReview={(filePath) => context.onReviewRun(runId, filePath)}
       onRevert={() => context.onRevertRun(runId)}
