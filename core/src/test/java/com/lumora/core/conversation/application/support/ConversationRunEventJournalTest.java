@@ -10,9 +10,11 @@ import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
@@ -146,6 +148,42 @@ class ConversationRunEventJournalTest {
                             ConversationRunEventEnvelope.class
                     )
             );
+        } finally {
+            journal.close();
+        }
+    }
+
+    @Test
+    void quarantinesAPermanentlyFailingBatchInsteadOfRetryingForever()
+            throws Exception {
+        ConversationRunStore runStore = mock(ConversationRunStore.class);
+        ConversationRunEventStreamRegistry streams = mock(
+                ConversationRunEventStreamRegistry.class
+        );
+        AtomicInteger attempts = new AtomicInteger();
+        CountDownLatch exhausted = new CountDownLatch(5);
+        when(runStore.appendEvents(eq("run-poison"), anyList()))
+                .thenAnswer(invocation -> {
+                    attempts.incrementAndGet();
+                    exhausted.countDown();
+                    throw new IllegalStateException("projection failed");
+                });
+        ConversationRunEventJournal journal =
+                new ConversationRunEventJournal(runStore, streams, 5L);
+        try {
+            journal.append("run-poison", event("poison"));
+
+            assertThat(exhausted.await(2L, TimeUnit.SECONDS)).isTrue();
+            Thread.sleep(100L);
+            assertThat(attempts).hasValue(5);
+
+            journal.append("run-poison", event("later"));
+            Thread.sleep(50L);
+            assertThat(attempts).hasValue(5);
+            assertThatThrownBy(() -> journal.flush("run-poison"))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("自动重试已停止");
+            assertThat(attempts).hasValue(5);
         } finally {
             journal.close();
         }

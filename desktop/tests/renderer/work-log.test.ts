@@ -146,4 +146,36 @@ describe("subagent work log", () => {
       metadata: { childEventType: "tool_started" },
     });
   });
+
+  it("projects Team mailbox delivery as a dedicated communication item", () => {
+    const message = workLogItemFromEvent({
+      type: "agent_peer_message_delivered",
+      delta: "请复核接口契约。",
+      model: "deepseek-v4",
+      errorMessage: "",
+      itemId: "message-1",
+      metadata: {
+        messageId: "message-1",
+        agentId: "agent-b",
+        senderAgentId: "agent-a",
+        senderAgentLabel: "架构研究",
+        targetAgentId: "agent-b",
+        targetAgentLabel: "后端实现",
+        messageStatus: "delivered",
+        deliveryMode: "quiet",
+      },
+    });
+
+    expect(message).toMatchObject({
+      itemId: "message-1",
+      kind: "message",
+      status: "running",
+      content: "请复核接口契约。",
+      metadata: {
+        senderAgentId: "agent-a",
+        targetAgentId: "agent-b",
+        messageStatus: "delivered",
+      },
+    });
+  });
 });

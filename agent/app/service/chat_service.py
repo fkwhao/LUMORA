@@ -250,6 +250,7 @@ class ChatService:
             session_manager = ContinuableSessionManager(
                 subagent_runtime,
                 tuple(request.prompt_context.agent_sessions),
+                team_id=request.prompt_context.task_id or run_id,
             )
             subagent_runtime.bind_session_manager(session_manager)
             runtime_registry.register(
@@ -550,6 +551,8 @@ class ChatService:
                 "list_agent_sessions",
                 "interrupt_agent",
                 "report_to_parent",
+                "list_team_agents",
+                "send_peer_message",
                 "create_workflow",
                 "list_workflows",
                 "run_workflow",

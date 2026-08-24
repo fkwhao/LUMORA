@@ -298,3 +298,12 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 034-agent-team-message-plane
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V34__agent_team_message_plane.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

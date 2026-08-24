@@ -122,4 +122,49 @@ class WorkLogEventProjectorTest {
                 entry("totalTokens", 42)
         );
     }
+
+    @Test
+    void retainsBoundedAgentTeamMessageRoutingMetadata() {
+        ChatStreamEvent event = new ChatStreamEvent(
+                ChatStreamEventType.AGENT_PEER_MESSAGE_DELIVERED,
+                "请复核接口契约。",
+                "model",
+                null,
+                "",
+                "message-1",
+                "",
+                "",
+                "架构研究 → 后端实现",
+                Map.of(),
+                "",
+                0L,
+                null,
+                Map.of(
+                        "teamId", "task-1",
+                        "messageId", "message-1",
+                        "senderAgentId", "agent-a",
+                        "senderAgentLabel", "架构研究",
+                        "targetAgentId", "agent-b",
+                        "targetAgentLabel", "后端实现",
+                        "messageStatus", "delivered",
+                        "messageKind", "peer",
+                        "deliveryMode", "quiet",
+                        "transcript", "hidden"
+                )
+        );
+
+        ChatStreamEvent projected = WorkLogEventProjector.project(event);
+
+        assertThat(projected.getMetadata()).containsOnly(
+                entry("teamId", "task-1"),
+                entry("messageId", "message-1"),
+                entry("senderAgentId", "agent-a"),
+                entry("senderAgentLabel", "架构研究"),
+                entry("targetAgentId", "agent-b"),
+                entry("targetAgentLabel", "后端实现"),
+                entry("messageStatus", "delivered"),
+                entry("messageKind", "peer"),
+                entry("deliveryMode", "quiet")
+        );
+    }
 }

@@ -4,6 +4,7 @@ from dataclasses import replace
 from typing import Any, ClassVar
 
 import httpx
+import pytest
 
 from app.dto.response.chat_completion_response import TokenUsageResponse
 from app.harness.contracts import ProviderTurn
@@ -665,11 +666,152 @@ def test_anthropic_adapter_moves_system_and_groups_tool_results() -> None:
     }
 
 
+def test_anthropic_adapter_replays_native_tool_turn_with_thinking_signature() -> None:
+    native_content = [
+        {
+            "type": "thinking",
+            "thinking": "I should inspect the file.",
+            "signature": "signed-thinking",
+        },
+        {"type": "text", "text": "I will inspect it."},
+        {
+            "type": "tool_use",
+            "id": "tool-1",
+            "name": "file_read",
+            "input": {"path": "a"},
+        },
+    ]
+
+    _system, messages = _anthropic_messages([
+        {"role": "user", "content": "inspect"},
+        {
+            "role": "assistant",
+            "content": "I will inspect it.",
+            "tool_calls": [{
+                "id": "tool-1",
+                "function": {"name": "file_read", "arguments": '{"path":"a"}'},
+            }],
+            "provider_state": {
+                "apiFormat": "anthropic",
+                "contentBlocks": native_content,
+            },
+        },
+        {"role": "tool", "tool_call_id": "tool-1", "content": "ok"},
+    ])
+
+    assert messages[1] == {"role": "assistant", "content": native_content}
+    assert messages[2]["content"][0]["tool_use_id"] == "tool-1"
+
+
+def test_anthropic_adapter_migrates_completed_legacy_tool_turn() -> None:
+    body = anthropic_request_body(
+        _settings("anthropic"),
+        [
+            {"role": "user", "content": "inspect"},
+            {
+                "role": "assistant",
+                "content": "I inspected it.",
+                "tool_calls": [{
+                    "id": "tool-1",
+                    "function": {
+                        "name": "file_read",
+                        "arguments": '{"path":"a"}',
+                    },
+                }],
+            },
+            {"role": "tool", "tool_call_id": "tool-1", "content": "ok"},
+        ],
+        (),
+        None,
+        stream=True,
+    )
+
+    assert body["messages"][-1]["role"] == "user"
+    migrated = body["messages"][-1]["content"][0]["text"]
+    assert "兼容迁移" in migrated
+    assert '"callId":"tool-1"' in migrated
+    assert not any(
+        block.get("type") in {"tool_use", "tool_result"}
+        for message in body["messages"]
+        for block in message["content"]
+    )
+
+
+def test_anthropic_adapter_rejects_incomplete_legacy_tool_turn() -> None:
+    with pytest.raises(ValueError, match="无法安全恢复"):
+        anthropic_request_body(
+            _settings("anthropic"),
+            [{
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "tool-1",
+                    "function": {
+                        "name": "file_write",
+                        "arguments": '{"path":"a"}',
+                    },
+                }],
+            }],
+            (),
+            None,
+            stream=True,
+        )
+
+
+def test_anthropic_adapter_does_not_replay_state_from_another_model() -> None:
+    body = anthropic_request_body(
+        _settings("anthropic"),
+        [
+            {
+                "role": "assistant",
+                "content": "checking",
+                "tool_calls": [{
+                    "id": "tool-1",
+                    "function": {
+                        "name": "file_read",
+                        "arguments": '{"path":"a"}',
+                    },
+                }],
+                "provider_state": {
+                    "apiFormat": "anthropic",
+                    "scope": "another-model-scope",
+                    "contentBlocks": [
+                        {
+                            "type": "thinking",
+                            "thinking": "old",
+                            "signature": "old-signature",
+                        },
+                        {
+                            "type": "tool_use",
+                            "id": "tool-1",
+                            "name": "file_read",
+                            "input": {"path": "a"},
+                        },
+                    ],
+                },
+            },
+            {"role": "tool", "tool_call_id": "tool-1", "content": "ok"},
+        ],
+        (),
+        None,
+        stream=True,
+    )
+
+    serialized = json.dumps(body["messages"], ensure_ascii=False)
+    assert "old-signature" not in serialized
+    assert "兼容迁移" in serialized
+
+
 def test_anthropic_adapter_parses_native_tool_use() -> None:
     turn = parse_anthropic_turn(
         {
             "model": "claude-example",
             "content": [
+                {
+                    "type": "thinking",
+                    "thinking": "I should inspect the file.",
+                    "signature": "signed-thinking",
+                },
                 {"type": "text", "text": "checking"},
                 {
                     "type": "tool_use",
@@ -686,6 +828,23 @@ def test_anthropic_adapter_parses_native_tool_use() -> None:
     assert turn.content == "checking"
     assert json.loads(turn.tool_calls[0].arguments_json) == {"path": "a"}
     assert turn.usage.total_tokens == 7
+    assert turn.provider_state == {
+        "apiFormat": "anthropic",
+        "contentBlocks": [
+            {
+                "type": "thinking",
+                "thinking": "I should inspect the file.",
+                "signature": "signed-thinking",
+            },
+            {"type": "text", "text": "checking"},
+            {
+                "type": "tool_use",
+                "id": "tool-1",
+                "name": "file_read",
+                "input": {"path": "a"},
+            },
+        ],
+    }
 
 
 def test_anthropic_adapter_enables_hosted_web_search() -> None:
@@ -987,6 +1146,314 @@ class _AnthropicCompletionClient:
         )
         self._response_index += 1
         return response
+
+
+def test_anthropic_stream_round_trips_signed_native_tool_turn(monkeypatch) -> None:
+    _AnthropicContinuationClient.bodies = []
+    _AnthropicContinuationClient.responses = [[
+        {
+            "type": "message_start",
+            "message": {
+                "model": "example-model",
+                "usage": {"input_tokens": 4},
+            },
+        },
+        {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "thinking", "thinking": ""},
+        },
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {
+                "type": "thinking_delta",
+                "thinking": "I should inspect the file.",
+            },
+        },
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {
+                "type": "signature_delta",
+                "signature": "signed-thinking",
+            },
+        },
+        {"type": "content_block_stop", "index": 0},
+        {
+            "type": "content_block_start",
+            "index": 1,
+            "content_block": {"type": "text", "text": ""},
+        },
+        {
+            "type": "content_block_delta",
+            "index": 1,
+            "delta": {
+                "type": "text_delta",
+                "text": "I will inspect it.",
+            },
+        },
+        {"type": "content_block_stop", "index": 1},
+        {
+            "type": "content_block_start",
+            "index": 2,
+            "content_block": {
+                "type": "tool_use",
+                "id": "tool-1",
+                "name": "file_read",
+                "input": {},
+            },
+        },
+        {
+            "type": "content_block_delta",
+            "index": 2,
+            "delta": {
+                "type": "input_json_delta",
+                "partial_json": (
+                    '{"path":"a","optional":null,"items":[null,"x"]}'
+                ),
+            },
+        },
+        {"type": "content_block_stop", "index": 2},
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": "tool_use"},
+            "usage": {"output_tokens": 3},
+        },
+    ]]
+    monkeypatch.setattr(
+        "app.provider.anthropic_provider.httpx.AsyncClient",
+        _AnthropicContinuationClient,
+    )
+    settings = _settings("anthropic")
+
+    async def collect():
+        return [
+            event
+            async for event in AnthropicProvider().stream_agent_turn(
+                settings,
+                [{"role": "user", "content": "inspect"}],
+                (),
+                None,
+            )
+        ]
+
+    events = asyncio.run(collect())
+    turn = events[-1].turn
+    assert turn is not None
+    assert turn.provider_state is not None
+    assert len(turn.provider_state["scope"]) == 64
+    native_content = [
+        {
+            "type": "thinking",
+            "thinking": "I should inspect the file.",
+            "signature": "signed-thinking",
+        },
+        {"type": "text", "text": "I will inspect it."},
+        {
+            "type": "tool_use",
+            "id": "tool-1",
+            "name": "file_read",
+            "input": {
+                "path": "a",
+                "optional": None,
+                "items": [None, "x"],
+            },
+        },
+    ]
+    assert turn.provider_state["contentBlocks"] == native_content
+
+    next_body = anthropic_request_body(
+        settings,
+        [
+            {"role": "user", "content": "inspect"},
+            {
+                "role": "assistant",
+                "content": turn.content,
+                "tool_calls": [{
+                    "id": turn.tool_calls[0].call_id,
+                    "function": {
+                        "name": turn.tool_calls[0].name,
+                        "arguments": turn.tool_calls[0].arguments_json,
+                    },
+                }],
+                "provider_state": turn.provider_state,
+            },
+            {"role": "tool", "tool_call_id": "tool-1", "content": "ok"},
+        ],
+        (),
+        None,
+        stream=True,
+    )
+
+    assert next_body["messages"][1] == {
+        "role": "assistant",
+        "content": native_content,
+    }
+
+
+def test_anthropic_stream_keeps_pause_turn_blocks_before_local_tool(
+    monkeypatch,
+) -> None:
+    _AnthropicContinuationClient.bodies = []
+    _AnthropicContinuationClient.responses = [
+        [
+            {
+                "type": "message_start",
+                "message": {
+                    "model": "example-model",
+                    "usage": {"input_tokens": 3},
+                },
+            },
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "thinking", "thinking": ""},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "thinking_delta", "thinking": "search"},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {
+                    "type": "signature_delta",
+                    "signature": "search-signature",
+                },
+            },
+            {"type": "content_block_stop", "index": 0},
+            {
+                "type": "content_block_start",
+                "index": 1,
+                "content_block": {
+                    "type": "server_tool_use",
+                    "id": "search-1",
+                    "name": "web_search",
+                    "input": {},
+                },
+            },
+            {
+                "type": "content_block_delta",
+                "index": 1,
+                "delta": {
+                    "type": "input_json_delta",
+                    "partial_json": '{"query":"docs"}',
+                },
+            },
+            {"type": "content_block_stop", "index": 1},
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": "pause_turn"},
+                "usage": {"output_tokens": 2},
+            },
+        ],
+        [
+            {
+                "type": "message_start",
+                "message": {
+                    "model": "example-model",
+                    "usage": {"input_tokens": 5},
+                },
+            },
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {
+                    "type": "web_search_tool_result",
+                    "tool_use_id": "search-1",
+                    "content": [{
+                        "type": "web_search_result",
+                        "title": "Docs",
+                        "url": "https://example.com/docs",
+                    }],
+                },
+            },
+            {"type": "content_block_stop", "index": 0},
+            {
+                "type": "content_block_start",
+                "index": 1,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": "tool-1",
+                    "name": "file_read",
+                    "input": {},
+                },
+            },
+            {
+                "type": "content_block_delta",
+                "index": 1,
+                "delta": {
+                    "type": "input_json_delta",
+                    "partial_json": '{"path":"README.md"}',
+                },
+            },
+            {"type": "content_block_stop", "index": 1},
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": "tool_use"},
+                "usage": {"output_tokens": 3},
+            },
+        ],
+    ]
+    monkeypatch.setattr(
+        "app.provider.anthropic_provider.httpx.AsyncClient",
+        _AnthropicContinuationClient,
+    )
+    settings = replace(_settings("anthropic"), web_search_enabled=True)
+
+    async def collect():
+        return [
+            event
+            async for event in AnthropicProvider().stream_agent_turn(
+                settings,
+                [{"role": "user", "content": "search then inspect"}],
+                (),
+                None,
+            )
+        ]
+
+    events = asyncio.run(collect())
+    turn = events[-1].turn
+    assert turn is not None
+    assert turn.provider_state is not None
+    blocks = turn.provider_state["contentBlocks"]
+    assert [block["type"] for block in blocks] == [
+        "thinking",
+        "server_tool_use",
+        "web_search_tool_result",
+        "tool_use",
+    ]
+    assert blocks[0]["signature"] == "search-signature"
+    assert blocks[-1]["input"] == {"path": "README.md"}
+    assert _AnthropicContinuationClient.bodies[1]["messages"][-1][
+        "content"
+    ] == blocks[:2]
+
+    next_body = anthropic_request_body(
+        settings,
+        [
+            {"role": "user", "content": "search then inspect"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "tool-1",
+                    "function": {
+                        "name": "file_read",
+                        "arguments": '{"path":"README.md"}',
+                    },
+                }],
+                "provider_state": turn.provider_state,
+            },
+            {"role": "tool", "tool_call_id": "tool-1", "content": "ok"},
+        ],
+        (),
+        None,
+        stream=True,
+    )
+    assert next_body["messages"][1]["content"] == blocks
 
 
 def test_anthropic_stream_buffers_search_narration(monkeypatch) -> None:

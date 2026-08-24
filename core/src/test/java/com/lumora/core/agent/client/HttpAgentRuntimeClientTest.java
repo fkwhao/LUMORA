@@ -13,6 +13,7 @@ import com.lumora.core.shared.api.constant.HttpContractConstants;
 import com.lumora.core.shared.config.CoreProperties;
 import com.lumora.core.conversation.domain.model.ChatCompletion;
 import com.lumora.core.conversation.domain.model.ChatMessage;
+import com.lumora.core.conversation.domain.model.ChatToolCall;
 import com.lumora.core.memory.domain.model.MemoryCandidate;
 import com.lumora.core.memory.application.model.MemoryExtractionBatch;
 import com.lumora.core.conversation.domain.model.ChatStreamEvent;
@@ -29,6 +30,7 @@ import org.springframework.web.client.RestClient;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -64,6 +66,41 @@ class HttpAgentRuntimeClientTest {
                 CONNECTION,
                 "   "
         ).getReasoningEffort());
+    }
+
+    @Test
+    void preservesProviderStateAtTheAgentBoundary() {
+        Map<String, Object> providerState = Map.of(
+                "apiFormat", "anthropic",
+                "contentBlocks", List.of(Map.of(
+                        "type", "thinking",
+                        "thinking", "inspect",
+                        "signature", "signed"
+                ))
+        );
+        ChatMessage message = new ChatMessage(
+                "assistant",
+                null,
+                null,
+                1,
+                List.of(new ChatToolCall(
+                        "call-1", "read_file", "{\"path\":\"a\"}"
+                )),
+                null,
+                List.of(),
+                providerState
+        );
+
+        var request = new AgentDtoMapper().toChatRequest(
+                List.of(message),
+                CONNECTION,
+                "none"
+        );
+
+        assertEquals(
+                providerState,
+                request.getMessages().getFirst().getProviderState()
+        );
     }
 
     @BeforeEach

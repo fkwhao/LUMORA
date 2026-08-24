@@ -51,7 +51,10 @@ class ChatStreamEventMapper:
 def _without_none_values(values: dict[str, Any]) -> dict[str, Any]:
     """Keep Java's immutable-map transport contract free of null values."""
     return {
-        key: _clean_transport_value(value)
+        # Provider continuation payloads are protocol-opaque. A JSON null in a
+        # tool input, citation, or provider block is data rather than a Java
+        # transport placeholder and must survive the SSE/Core round trip.
+        key: value if key == "providerState" else _clean_transport_value(value)
         for key, value in values.items()
         if value is not None
     }

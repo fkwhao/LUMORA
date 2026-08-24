@@ -36,6 +36,7 @@ public class ConversationRunEventJournal implements AutoCloseable {
     private static final Logger LOGGER = LoggerFactory.getLogger(
             ConversationRunEventJournal.class
     );
+    private static final int MAX_PERSISTENCE_ATTEMPTS = 5;
 
     private final ConversationRunStore runStore;
     private final ConversationRunEventStreamRegistry eventStreams;
@@ -43,6 +44,10 @@ public class ConversationRunEventJournal implements AutoCloseable {
     private final long flushIntervalMillis;
     private final Object queueMonitor = new Object();
     private final Map<String, ArrayDeque<ChatStreamEvent>> pending =
+            new LinkedHashMap<>();
+    private final Map<String, Integer> persistenceAttempts =
+            new LinkedHashMap<>();
+    private final Map<String, ArrayDeque<ChatStreamEvent>> quarantined =
             new LinkedHashMap<>();
     private final AtomicReference<Thread> writerThread =
             new AtomicReference<>();
@@ -94,6 +99,13 @@ public class ConversationRunEventJournal implements AutoCloseable {
         }
         synchronized (queueMonitor) {
             ensureOpen();
+            ArrayDeque<ChatStreamEvent> isolated = quarantined.get(runId);
+            if (isolated != null) {
+                // Preserve ordering and evidence after a permanent projection
+                // failure, but do not restart the tight automatic retry loop.
+                isolated.addLast(event);
+                return;
+            }
             pending.computeIfAbsent(runId, ignored -> new ArrayDeque<>())
                     .addLast(event);
             scheduleFlushLocked();
@@ -115,14 +127,23 @@ public class ConversationRunEventJournal implements AutoCloseable {
     }
 
     private void flushRunNow(String runId) {
+        synchronized (queueMonitor) {
+            if (quarantined.containsKey(runId)) {
+                throw new IllegalStateException(
+                        "运行事件批次已在连续落库失败后隔离，自动重试已停止: "
+                                + runId
+                );
+            }
+        }
         List<ChatStreamEvent> batch = take(runId);
         if (batch.isEmpty()) {
             return;
         }
         try {
             persistAndPublish(runId, batch);
+            clearPersistenceAttempts(runId);
         } catch (RuntimeException error) {
-            requeueFirst(runId, batch);
+            retainFailedBatch(runId, batch, error);
             throw error;
         }
     }
@@ -134,8 +155,9 @@ public class ConversationRunEventJournal implements AutoCloseable {
                 : batches.entrySet()) {
             try {
                 persistAndPublish(entry.getKey(), entry.getValue());
+                clearPersistenceAttempts(entry.getKey());
             } catch (RuntimeException error) {
-                requeueFirst(entry.getKey(), entry.getValue());
+                retainFailedBatch(entry.getKey(), entry.getValue(), error);
                 if (firstFailure == null) {
                     firstFailure = error;
                 }
@@ -230,11 +252,15 @@ public class ConversationRunEventJournal implements AutoCloseable {
         }
     }
 
-    private void requeueFirst(
+    private void retainFailedBatch(
             String runId,
-            List<ChatStreamEvent> failedBatch
+            List<ChatStreamEvent> failedBatch,
+            RuntimeException error
     ) {
+        int attempt;
+        boolean isolated;
         synchronized (queueMonitor) {
+            attempt = persistenceAttempts.merge(runId, 1, Integer::sum);
             ArrayDeque<ChatStreamEvent> combined = new ArrayDeque<>(
                     failedBatch
             );
@@ -242,7 +268,32 @@ public class ConversationRunEventJournal implements AutoCloseable {
             if (newer != null) {
                 combined.addAll(newer);
             }
-            pending.put(runId, combined);
+            isolated = attempt >= MAX_PERSISTENCE_ATTEMPTS;
+            if (isolated) {
+                pending.remove(runId);
+                quarantined.put(runId, combined);
+            } else {
+                pending.put(runId, combined);
+            }
+        }
+        if (isolated) {
+            LOGGER.error(
+                    "Quarantined {} run events for {} after {} failed "
+                            + "persistence attempts; automatic retries stopped",
+                    failedBatch.size(), runId, attempt, error
+            );
+        } else if (attempt == 1) {
+            LOGGER.warn(
+                    "Failed to persist run event batch for {}; retrying "
+                            + "automatically (attempt {}/{})",
+                    runId, attempt, MAX_PERSISTENCE_ATTEMPTS, error
+            );
+        }
+    }
+
+    private void clearPersistenceAttempts(String runId) {
+        synchronized (queueMonitor) {
+            persistenceAttempts.remove(runId);
         }
     }
 
@@ -264,7 +315,9 @@ public class ConversationRunEventJournal implements AutoCloseable {
         try {
             flushAllNow();
         } catch (RuntimeException error) {
-            LOGGER.error("Failed to flush run event batch", error);
+            // retainFailedBatch logs the first failure and the final isolation.
+            // Intermediate retries stay quiet so one poison event cannot flood
+            // the Java console every flush interval.
         } finally {
             synchronized (queueMonitor) {
                 if (!closed && !pending.isEmpty()) {
@@ -318,7 +371,26 @@ public class ConversationRunEventJournal implements AutoCloseable {
         } catch (RuntimeException error) {
             LOGGER.error("Failed to flush run events during shutdown", error);
         } finally {
+            logQuarantinedEventsAtShutdown();
             writer.shutdown();
+        }
+    }
+
+    private void logQuarantinedEventsAtShutdown() {
+        int runCount;
+        int eventCount;
+        synchronized (queueMonitor) {
+            runCount = quarantined.size();
+            eventCount = quarantined.values().stream()
+                    .mapToInt(ArrayDeque::size)
+                    .sum();
+        }
+        if (eventCount > 0) {
+            LOGGER.error(
+                    "Shutting down with {} quarantined run events across {} "
+                            + "runs; the batches were not persisted",
+                    eventCount, runCount
+            );
         }
     }
 }

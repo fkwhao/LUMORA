@@ -538,8 +538,10 @@ components:
         messageId: { type: string, minLength: 1, maxLength: 160 }
         sequence: { type: integer, minimum: 1 }
         senderAgentId: { type: string, minLength: 1, maxLength: 160 }
+        senderLabel: { type: string, maxLength: 120 }
         content: { type: string, minLength: 1, maxLength: 100000 }
         status: { type: string, enum: [pending, consumed] }
+        messageKind: { type: string, enum: [task, peer], default: task }
     AgentCheckpoint:
       type: object
       additionalProperties: false
@@ -571,6 +573,8 @@ components:
         sessionId: { type: string, minLength: 1, maxLength: 500 }
         parentAgentId: { type: string, minLength: 1, maxLength: 160 }
         parentSessionId: { type: string, minLength: 1, maxLength: 500 }
+        teamId: { type: string, maxLength: 160 }
+        activeActivationId: { type: string, maxLength: 160 }
         label: { type: string, minLength: 1, maxLength: 120 }
         status:
           type: string
@@ -818,6 +822,10 @@ components:
           description: 附件路径引用；不包含文件字节或 Base64 持久化内容。
           items:
             $ref: "#/components/schemas/ChatAttachment"
+        providerState:
+          type: object
+          additionalProperties: true
+          description: Provider 工具回合续传所需的隐藏协议状态；不投影为用户消息。
     ChatAttachment:
       type: object
       additionalProperties: false
@@ -900,6 +908,9 @@ components:
             - agent_activation_interrupted
             - agent_reported
             - agent_checkpointed
+            - agent_peer_message_queued
+            - agent_peer_message_delivered
+            - agent_peer_message_consumed
             - context_compaction_started
             - context_compaction_progress
             - context_compacted

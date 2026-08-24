@@ -12,6 +12,7 @@ import {
   FileSearch,
   FolderSearch,
   Minimize2,
+  MessagesSquare,
   PackageOpen,
   ShieldCheck,
   TerminalSquare,
@@ -41,6 +42,13 @@ interface WorkPhase {
   phaseId: string;
   title: string;
   items: WorkLogItem[];
+}
+
+interface AgentCallProjection {
+  index: number;
+  activationId: string;
+  toolCallId: string;
+  hasActivation: boolean;
 }
 
 interface LiveClock {
@@ -73,8 +81,11 @@ export const AgentRunSummary = memo(function AgentRunSummary({
       )
     : durationMs ?? 0;
   const phases = useMemo(
-    () => buildWorkPhases(workLog.length > 0 ? workLog : taskEventsAsWorkLog(events)),
-    [events, workLog],
+    () => buildWorkPhases(
+      workLog.length > 0 ? workLog : taskEventsAsWorkLog(events),
+      running,
+    ),
+    [events, running, workLog],
   );
   const hasDetails = phases.length > 0;
   const label = summaryLabel(running, stopped, elapsedMs, durationMs);
@@ -237,6 +248,8 @@ function ToolGroupEntry({
         <div className="tool-call-list-inner">
           {items.map((item) => item.kind === "search" ? (
             <WebSearch item={item} key={item.itemId} />
+          ) : item.kind === "message" ? (
+            <PeerMessageItem item={item} key={item.itemId} />
           ) : item.kind === "agent" ? (
             <AgentCallItem
               item={item}
@@ -254,6 +267,32 @@ function ToolGroupEntry({
         </div>
       </div>
     </section>
+  );
+}
+
+function PeerMessageItem({ item }: { item: WorkLogItem }) {
+  const sender = stringMetadata(item, "senderAgentLabel")
+    || shortAgentId(stringMetadata(item, "senderAgentId"))
+    || "Agent";
+  const target = stringMetadata(item, "targetAgentLabel")
+    || shortAgentId(stringMetadata(item, "targetAgentId"))
+    || "Agent";
+  const status = stringMetadata(item, "messageStatus");
+  const statusText = status === "consumed"
+    ? "已读入上下文"
+    : status === "delivered"
+      ? "已送达 · 等待下轮"
+      : "正在投递";
+
+  return (
+    <article className="peer-message-item" data-status={status}>
+      <MessagesSquare size={14} aria-hidden="true" />
+      <span>
+        <strong>{sender} → {target}</strong>
+        <small>{statusText}</small>
+      </span>
+      {item.content && <p>{item.content}</p>}
+    </article>
   );
 }
 
@@ -394,7 +433,10 @@ function ToolCallItem({
   );
 }
 
-function buildWorkPhases(items: WorkLogItem[]): WorkPhase[] {
+function buildWorkPhases(
+  items: WorkLogItem[],
+  parentRunning: boolean,
+): WorkPhase[] {
   const phases: WorkPhase[] = [];
   let current: WorkPhase | undefined;
   for (const item of items) {
@@ -429,7 +471,124 @@ function buildWorkPhases(items: WorkLogItem[]): WorkPhase[] {
     }
     current.items.push(item);
   }
-  return phases;
+  return phases.map((phase) => ({
+    ...phase,
+    items: collapseAgentCallItems(phase.items, parentRunning),
+  }));
+}
+
+/**
+ * Runtime keeps every Session/Activation lifecycle event for durable replay and
+ * for the detailed Agent pane. The main chat should project those events into
+ * one call card instead of rendering each lifecycle record as another Agent.
+ */
+function collapseAgentCallItems(
+  items: WorkLogItem[],
+  parentRunning: boolean,
+): WorkLogItem[] {
+  const collapsed: WorkLogItem[] = [];
+  const currentBySession = new Map<string, AgentCallProjection>();
+
+  for (const item of items) {
+    if (item.kind !== "agent") {
+      collapsed.push(item);
+      continue;
+    }
+    const sessionKey = stringMetadata(item, "sessionId")
+      || stringMetadata(item, "agentId");
+    if (!sessionKey) {
+      collapsed.push(settleAgentCall(item, parentRunning));
+      continue;
+    }
+    const activationId = stringMetadata(item, "activationId");
+    const sessionEventType = stringMetadata(item, "sessionEventType");
+    const current = currentBySession.get(sessionKey);
+    const currentItem = current ? collapsed[current.index] : undefined;
+    const startsAnotherToolCall = Boolean(
+      item.toolCallId
+      && current?.toolCallId
+      && item.toolCallId !== current.toolCallId,
+    );
+    const sharesExplicitToolCall = Boolean(
+      item.toolCallId
+      && current?.toolCallId
+      && item.toolCallId === current.toolCallId,
+    );
+    const startsAnotherActivation = Boolean(
+      activationId
+      && current?.activationId
+      && activationId !== current.activationId
+      && !sharesExplicitToolCall,
+    );
+    const startsPendingActivation = Boolean(
+      !activationId
+      && current?.hasActivation
+      && currentItem?.status !== "running"
+      && (
+        sessionEventType === "agent_inbox_enqueued"
+        || sessionEventType === "agent_started"
+      ),
+    );
+
+    if (
+      !current
+      || startsAnotherToolCall
+      || startsAnotherActivation
+      || startsPendingActivation
+    ) {
+      const nextIndex = collapsed.length;
+      collapsed.push(settleAgentCall(item, parentRunning));
+      currentBySession.set(sessionKey, {
+        index: nextIndex,
+        activationId,
+        toolCallId: item.toolCallId ?? "",
+        hasActivation: Boolean(activationId)
+          || sessionEventType === "agent_started",
+      });
+      continue;
+    }
+
+    collapsed[current.index] = settleAgentCall(
+      mergeAgentCallItems(currentItem!, item),
+      parentRunning,
+    );
+    current.activationId ||= activationId;
+    current.toolCallId ||= item.toolCallId ?? "";
+    current.hasActivation ||= Boolean(activationId)
+      || sessionEventType === "agent_started";
+  }
+  return collapsed;
+}
+
+function mergeAgentCallItems(
+  current: WorkLogItem,
+  incoming: WorkLogItem,
+): WorkLogItem {
+  return {
+    ...current,
+    ...incoming,
+    itemId: current.itemId,
+    toolCallId: incoming.toolCallId || current.toolCallId,
+    title: incoming.title || current.title,
+    content: incoming.content || current.content,
+    output: incoming.output || current.output,
+    errorMessage: incoming.errorMessage || current.errorMessage,
+    model: incoming.model || current.model,
+    durationMs: incoming.durationMs ?? current.durationMs,
+    metadata: {
+      ...(current.metadata ?? {}),
+      ...(incoming.metadata ?? {}),
+    },
+  };
+}
+
+function settleAgentCall(
+  item: WorkLogItem,
+  parentRunning: boolean,
+): WorkLogItem {
+  return !parentRunning && item.status === "running"
+    ? { ...item, status: "completed" }
+    : item;
 }
 
 function phaseTitle(content?: string): string {
@@ -445,6 +604,7 @@ function phaseTitle(content?: string): string {
 }
 
 function fallbackPhaseTitle(item: WorkLogItem): string {
+  if (item.kind === "message") return "同步 Agent Team 信息";
   if (item.kind === "agent") return "正在协同子 Agent";
   if (item.kind === "search") return "正在搜索网络资料";
   if (item.kind === "context") return "整理上下文";
@@ -542,7 +702,8 @@ function toolGroupLabel(items: WorkLogItem[]): string {
       item.kind === "tool" ||
       item.kind === "approval" ||
       item.kind === "search" ||
-      item.kind === "agent",
+      item.kind === "agent" ||
+      item.kind === "message",
   );
   const commands = actionable
     .map((item) => stringArgument(item, "command"))
@@ -552,6 +713,10 @@ function toolGroupLabel(items: WorkLogItem[]): string {
 
   if (actionable.some((item) => item.kind === "agent")) {
     return actionable.length > 1 ? "协同多个 Agent" : "协同 Agent";
+  }
+
+  if (actionable.some((item) => item.kind === "message")) {
+    return actionable.length > 1 ? "同步多条 Team 消息" : "同步 Team 消息";
   }
 
   if (actionable.length > 0 && actionable.every((item) => item.kind === "search")) {
@@ -602,6 +767,11 @@ function toolGroupLabel(items: WorkLogItem[]): string {
     return "整理上下文";
   }
   return commands.length > 0 ? "执行相关命令" : "执行相关工具";
+}
+
+function shortAgentId(value: string): string {
+  if (!value) return "";
+  return value.length > 12 ? `${value.slice(0, 8)}…` : value;
 }
 
 function fileName(path: string): string {

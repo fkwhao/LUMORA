@@ -423,14 +423,12 @@ public class ConversationRunCoordinator {
 
     public ConversationRun pause(String taskId, String runId) {
         ConversationRun run;
-        ConversationRunStatus previousStatus;
+        ConversationRunStatus previousStatus = null;
         boolean pauseWorker;
+        boolean transitionedToPausing = false;
         synchronized (this) {
             run = runStore.requireForTask(taskId, runId);
             if (run.getStatus() == ConversationRunStatus.PAUSED) {
-                return run;
-            }
-            if (run.getStatus() == ConversationRunStatus.PAUSING) {
                 return run;
             }
             if (run.getStatus().isTerminal()) {
@@ -443,26 +441,43 @@ public class ConversationRunCoordinator {
                 run = runStore.updateStatus(
                         runId, ConversationRunStatus.PAUSED, ""
                 );
-                publishLifecycle(runId, "任务已暂停", "PAUSED");
+                publishLifecycleBestEffort(
+                        runId, "任务已暂停", "PAUSED"
+                );
                 return run;
             }
-            previousStatus = run.getStatus();
-            runStore.updateStatus(
-                    runId, ConversationRunStatus.PAUSING, ""
-            );
-            publishLifecycle(runId, "正在安全暂停任务", "PAUSING");
+            if (run.getStatus() != ConversationRunStatus.PAUSING) {
+                previousStatus = run.getStatus();
+                runStore.updateStatus(
+                        runId, ConversationRunStatus.PAUSING, ""
+                );
+                transitionedToPausing = true;
+            }
             pauseWorker = executingRunIds.contains(runId);
         }
         if (!pauseWorker) {
+            if (transitionedToPausing) {
+                publishLifecycleBestEffort(
+                        runId, "正在安全暂停任务", "PAUSING"
+                );
+            }
             synchronized (this) {
                 run = runStore.updateStatus(
                         runId, ConversationRunStatus.PAUSED, ""
                 );
-                publishLifecycle(runId, "任务已暂停", "PAUSED");
+                publishLifecycleBestEffort(
+                        runId, "任务已暂停", "PAUSED"
+                );
                 return run;
             }
         }
-        if (conversationService.pauseGeneration(taskId)) {
+        boolean pauseAccepted = conversationService.pauseGeneration(taskId);
+        if (transitionedToPausing) {
+            publishLifecycleBestEffort(
+                    runId, "正在安全暂停任务", "PAUSING"
+            );
+        }
+        if (pauseAccepted) {
             return runStore.require(runId);
         }
         synchronized (this) {
@@ -470,7 +485,9 @@ public class ConversationRunCoordinator {
             if (current.getStatus().isTerminal()) {
                 return current;
             }
-            if (current.getStatus() == ConversationRunStatus.PAUSING) {
+            if (transitionedToPausing
+                    && current.getStatus() == ConversationRunStatus.PAUSING
+                    && previousStatus != null) {
                 runStore.updateStatus(runId, previousStatus, "");
             }
         }
@@ -479,16 +496,47 @@ public class ConversationRunCoordinator {
 
     public synchronized ConversationRun resume(String taskId, String runId) {
         ConversationRun run = runStore.requireForTask(taskId, runId);
-        if (run.getStatus() == ConversationRunStatus.QUEUED
-                || run.getStatus() == ConversationRunStatus.RUNNING
+        if (run.getStatus() == ConversationRunStatus.QUEUED) {
+            // Repair a persisted QUEUED run that is not present in the
+            // process-local queue (for example after an interrupted resume).
+            enqueue(runId);
+            drainQueue();
+            return runStore.require(runId);
+        }
+        if (run.getStatus() == ConversationRunStatus.RUNNING
                 || run.getStatus() == ConversationRunStatus.WAITING_APPROVAL) {
             return run;
         }
         if (run.getStatus() != ConversationRunStatus.PAUSED) {
             throw new IllegalStateException("只有已暂停的运行可以继续");
         }
+        // Reject a quarantined event lane before prepareResume changes the
+        // authoritative status from PAUSED to QUEUED.
+        eventJournal.flush(runId);
         run = runStore.prepareResume(runId);
-        publishLifecycle(runId, "正在继续任务", "QUEUED");
+        try {
+            publishLifecycle(runId, "正在继续任务", "QUEUED");
+        } catch (RuntimeException error) {
+            // prepareResume is already durable at this point. Roll it back so
+            // a failed lifecycle write cannot leave an unqueued QUEUED run.
+            try {
+                runStore.updateStatus(
+                        runId, ConversationRunStatus.PAUSED,
+                        "继续任务失败，运行仍保持暂停"
+                );
+            } catch (RuntimeException rollbackError) {
+                // If the durable rollback itself fails, preserve the opposite
+                // invariant: every durable QUEUED run must be process-queued.
+                error.addSuppressed(rollbackError);
+                enqueue(runId);
+                try {
+                    drainQueue();
+                } catch (RuntimeException drainError) {
+                    error.addSuppressed(drainError);
+                }
+            }
+            throw error;
+        }
         enqueue(runId);
         drainQueue();
         return runStore.require(runId);
@@ -938,92 +986,108 @@ public class ConversationRunCoordinator {
     }
 
     private synchronized void complete(String runId) {
-        eventJournal.flush(runId);
-        ConversationRun run = runStore.require(runId);
-        boolean paused = pausedTurnRunIds.remove(runId);
-        if (paused && !run.getStatus().isTerminal()) {
-            runStore.updateStatus(runId, ConversationRunStatus.PAUSED, "");
-            publishLifecycle(runId, "任务已暂停", "PAUSED");
-        } else {
-            mutationGate.execute(() -> {
-                ConversationRun current = runStore.require(runId);
-                if (!current.getStatus().isTerminal()
-                        && current.getStatus()
-                        != ConversationRunStatus.PAUSED) {
-                    inputStore.moveOpenSteersToNextTurn(runId);
-                    runStore.updateStatus(
-                            runId, ConversationRunStatus.COMPLETED, ""
-                    );
-                }
-                ConversationRun settled = runStore.require(runId);
-                if (settled.getStatus().isTerminal()) {
-                    gitRunChangeService.captureTerminal(settled);
-                    taskWorktreeService.onRunTerminal(settled);
-                }
-            });
+        try {
+            flushTerminalEventsBestEffort(runId, "completion");
+            ConversationRun run = runStore.require(runId);
+            boolean paused = pausedTurnRunIds.remove(runId);
+            if (paused && !run.getStatus().isTerminal()) {
+                runStore.updateStatus(
+                        runId, ConversationRunStatus.PAUSED, ""
+                );
+                publishTerminalLifecycleBestEffort(
+                        runId, "任务已暂停", "PAUSED"
+                );
+            } else {
+                mutationGate.execute(() -> {
+                    ConversationRun current = runStore.require(runId);
+                    if (!current.getStatus().isTerminal()
+                            && current.getStatus()
+                            != ConversationRunStatus.PAUSED) {
+                        inputStore.moveOpenSteersToNextTurn(runId);
+                        runStore.updateStatus(
+                                runId, ConversationRunStatus.COMPLETED, ""
+                        );
+                    }
+                    ConversationRun settled = runStore.require(runId);
+                    if (settled.getStatus().isTerminal()) {
+                        gitRunChangeService.captureTerminal(settled);
+                        taskWorktreeService.onRunTerminal(settled);
+                    }
+                });
+            }
+            if (!paused && runStore.require(runId).getStatus()
+                    == ConversationRunStatus.COMPLETED) {
+                enqueueNextTurn(run.getTaskId());
+            }
+        } finally {
+            completeStreamAndReleaseExecution(runId);
         }
-        ConversationRun settled = runStore.require(runId);
-        eventStreams.complete(runId);
-        releaseExecution(runId);
-        if (!paused && runStore.require(runId).getStatus()
-                == ConversationRunStatus.COMPLETED) {
-            enqueueNextTurn(run.getTaskId());
-        }
-        drainQueue();
     }
 
     private synchronized void fail(String runId, Throwable error) {
-        eventJournal.flush(runId);
-        ConversationRun run = runStore.require(runId);
-        boolean pauseRequested = pausedTurnRunIds.remove(runId)
-                || run.getStatus() == ConversationRunStatus.PAUSING;
-        if (pauseRequested && !run.getStatus().isTerminal()) {
-            try {
-                conversationService.sealRecoveredTurn(
-                        run.getTaskId(),
-                        runtimeTurnId(run),
-                        runStore.listChatEventsAfter(
-                                runId, run.getReplayFromSequence()
-                        )
+        try {
+            boolean journalFlushed = flushTerminalEventsBestEffort(
+                    runId, "failure"
+            );
+            ConversationRun run = runStore.require(runId);
+            boolean pauseRequested = pausedTurnRunIds.remove(runId)
+                    || run.getStatus() == ConversationRunStatus.PAUSING;
+            if (pauseRequested && !run.getStatus().isTerminal()) {
+                if (journalFlushed) {
+                    try {
+                        conversationService.sealRecoveredTurn(
+                                run.getTaskId(),
+                                runtimeTurnId(run),
+                                runStore.listChatEventsAfter(
+                                        runId, run.getReplayFromSequence()
+                                )
+                        );
+                    } catch (RuntimeException recoveryError) {
+                        LOGGER.warn(
+                                "Failed to seal paused turn {} after stream failure",
+                                runtimeTurnId(run), recoveryError
+                        );
+                    }
+                } else {
+                    LOGGER.warn(
+                            "Skipping fallback sealing for paused turn {} "
+                                    + "because its event journal is incomplete",
+                            runtimeTurnId(run)
+                    );
+                }
+                runStore.updateStatus(
+                        runId, ConversationRunStatus.PAUSED, ""
                 );
-            } catch (RuntimeException recoveryError) {
-                LOGGER.warn(
-                        "Failed to seal paused turn {} after stream failure",
-                        runtimeTurnId(run), recoveryError
+                publishTerminalLifecycleBestEffort(
+                        runId, "任务已暂停", "PAUSED"
                 );
+                return;
             }
-            runStore.updateStatus(
-                    runId, ConversationRunStatus.PAUSED, ""
+            if (run.getStatus() == ConversationRunStatus.PAUSED
+                    || run.getStatus() == ConversationRunStatus.CANCELLED) {
+                return;
+            }
+            String message = safeMessage(error);
+            inputStore.moveOpenSteersToNextTurn(runId);
+            ChatStreamEvent failed = new ChatStreamEvent(
+                    ChatStreamEventType.FAILED,
+                    "",
+                    run.getModel(),
+                    null,
+                    message
             );
-            publishLifecycle(runId, "任务已暂停", "PAUSED");
-            eventStreams.complete(runId);
-            releaseExecution(runId);
-            drainQueue();
-            return;
+            appendTerminalEventBestEffort(runId, failed, "FAILED");
+            mutationGate.execute(() -> {
+                runStore.updateStatus(
+                        runId, ConversationRunStatus.FAILED, message
+                );
+                ConversationRun failedRun = runStore.require(runId);
+                gitRunChangeService.captureTerminal(failedRun);
+                taskWorktreeService.onRunTerminal(failedRun);
+            });
+        } finally {
+            completeStreamAndReleaseExecution(runId);
         }
-        if (run.getStatus() == ConversationRunStatus.PAUSED
-                || run.getStatus() == ConversationRunStatus.CANCELLED) {
-            releaseExecution(runId);
-            drainQueue();
-            return;
-        }
-        String message = safeMessage(error);
-        inputStore.moveOpenSteersToNextTurn(runId);
-        ChatStreamEvent failed = new ChatStreamEvent(
-                ChatStreamEventType.FAILED, "", run.getModel(), null, message
-        );
-        eventJournal.appendImmediately(runId, failed);
-        mutationGate.execute(() -> {
-            runStore.updateStatus(
-                    runId, ConversationRunStatus.FAILED, message
-            );
-            ConversationRun failedRun = runStore.require(runId);
-            gitRunChangeService.captureTerminal(failedRun);
-            taskWorktreeService.onRunTerminal(failedRun);
-        });
-        eventStreams.complete(runId);
-        releaseExecution(runId);
-        drainQueue();
     }
 
     private void publishLifecycle(
@@ -1032,8 +1096,18 @@ public class ConversationRunCoordinator {
             String status
     ) {
         eventJournal.flush(runId);
+        eventJournal.appendImmediately(
+                runId, lifecycleEvent(runId, message, status)
+        );
+    }
+
+    private ChatStreamEvent lifecycleEvent(
+            String runId,
+            String message,
+            String status
+    ) {
         ConversationRun run = runStore.require(runId);
-        ChatStreamEvent event = new ChatStreamEvent(
+        return new ChatStreamEvent(
                 ChatStreamEventType.PROGRESS_MESSAGE,
                 message,
                 run.getModel(),
@@ -1049,7 +1123,82 @@ public class ConversationRunCoordinator {
                 null,
                 Map.of("runStatus", status)
         );
-        eventJournal.appendImmediately(runId, event);
+    }
+
+    private boolean flushTerminalEventsBestEffort(
+            String runId,
+            String terminalPath
+    ) {
+        try {
+            eventJournal.flush(runId);
+            return true;
+        } catch (RuntimeException error) {
+            LOGGER.warn(
+                    "Failed to flush event journal during {} convergence "
+                            + "for run {}; continuing terminal convergence",
+                    terminalPath, runId, error
+            );
+            return false;
+        }
+    }
+
+    private void publishTerminalLifecycleBestEffort(
+            String runId,
+            String message,
+            String status
+    ) {
+        appendTerminalEventBestEffort(
+                runId, lifecycleEvent(runId, message, status), status
+        );
+    }
+
+    private void appendTerminalEventBestEffort(
+            String runId,
+            ChatStreamEvent event,
+            String terminalStatus
+    ) {
+        try {
+            eventJournal.appendImmediately(runId, event);
+        } catch (RuntimeException error) {
+            LOGGER.warn(
+                    "Failed to append terminal event while settling run {} as "
+                            + "{}; continuing terminal convergence",
+                    runId, terminalStatus, error
+            );
+        }
+    }
+
+    private void publishLifecycleBestEffort(
+            String runId,
+            String message,
+            String status
+    ) {
+        try {
+            publishLifecycle(runId, message, status);
+        } catch (RuntimeException error) {
+            // A diagnostic/projection failure must never prevent the Runtime
+            // from receiving an idempotent pause signal.
+            LOGGER.warn(
+                    "Failed to persist {} lifecycle for run {}; "
+                            + "continuing the control-plane action",
+                    status, runId, error
+            );
+        }
+    }
+
+    private void completeStreamAndReleaseExecution(String runId) {
+        try {
+            eventStreams.complete(runId);
+        } catch (RuntimeException error) {
+            LOGGER.warn(
+                    "Failed to complete event stream for run {}; releasing "
+                            + "the execution slot anyway",
+                    runId, error
+            );
+        } finally {
+            releaseExecution(runId);
+            drainQueue();
+        }
     }
 
     private void releaseExecution(String runId) {

@@ -1,3 +1,5 @@
+import json
+
 from app.controller.http.chat_stream_event_mapper import ChatStreamEventMapper
 from app.harness.run_event import RunEvent, RunUsage
 
@@ -82,3 +84,36 @@ def test_mapper_removes_null_values_from_transport_metadata() -> None:
         "nested": {"present": 1},
         "items": ["log"],
     }
+
+
+def test_mapper_preserves_nulls_inside_opaque_provider_state() -> None:
+    provider_state = {
+        "apiFormat": "anthropic",
+        "scope": "scope-1",
+        "contentBlocks": [{
+            "type": "tool_use",
+            "id": "call-1",
+            "name": "example",
+            "input": {
+                "optional": None,
+                "items": [None, "x"],
+            },
+        }],
+    }
+    response = ChatStreamEventMapper.to_response(
+        RunEvent(
+            type="protocol_message",
+            metadata={
+                "hidden": True,
+                "message": {
+                    "role": "assistant",
+                    "providerState": provider_state,
+                    "discarded": None,
+                },
+            },
+        )
+    )
+
+    assert response.metadata["message"]["providerState"] == provider_state
+    encoded = json.loads(response.model_dump_json(by_alias=True))
+    assert encoded["metadata"]["message"]["providerState"] == provider_state

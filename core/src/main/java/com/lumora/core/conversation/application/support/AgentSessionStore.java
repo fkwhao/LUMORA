@@ -51,11 +51,21 @@ public class AgentSessionStore {
                 && event.getType() != ChatStreamEventType.AGENT_SESSION_CREATED)) {
             return;
         }
+        if (event.getType() != ChatStreamEventType.AGENT_SESSION_CREATED
+                && sessionMapper.selectById(sessionId) == null) {
+            // The Runtime merges root tool events and background Activation
+            // events. Durable projection must remain replay-safe even if a
+            // dependent event reaches Core before the explicit create event.
+            createSession(run, event, metadata, sessionId, occurredAt);
+        }
         switch (event.getType()) {
             case AGENT_SESSION_CREATED -> createSession(
                     run, event, metadata, sessionId, occurredAt
             );
             case AGENT_INBOX_ENQUEUED -> enqueue(
+                    event, metadata, sessionId, occurredAt
+            );
+            case AGENT_PEER_MESSAGE_QUEUED -> enqueue(
                     event, metadata, sessionId, occurredAt
             );
             case AGENT_ACTIVATION_STARTED -> startActivation(
@@ -109,6 +119,7 @@ public class AgentSessionStore {
         session.setTaskId(run.getTaskId());
         session.setParentSessionId(text(metadata, "parentSessionId"));
         session.setParentAgentId(text(metadata, "parentAgentId"));
+        session.setTeamId(firstText(text(metadata, "teamId"), run.getTaskId()));
         session.setLabel(firstText(text(metadata, "agentLabel"), event.getTitle()));
         session.setMode("continuable");
         session.setStatus(firstText(text(metadata, "agentStatus"), "idle"));
@@ -129,19 +140,28 @@ public class AgentSessionStore {
             Instant now
     ) {
         AgentSession session = requireSession(sessionId);
+        long sequence = number(metadata, "inboxSequence");
+        boolean alreadyConsumed = sequence <= session.getConsumedInboxSequence();
         if (inboxMapper.selectById(event.getItemId()) == null) {
             AgentInboxMessage message = new AgentInboxMessage();
             message.setMessageId(event.getItemId());
             message.setSessionId(sessionId);
-            message.setSequence(number(metadata, "inboxSequence"));
+            message.setSequence(sequence);
             message.setSenderAgentId(text(metadata, "senderAgentId"));
+            message.setSenderLabel(text(metadata, "senderAgentLabel"));
+            message.setMessageKind(firstText(
+                    text(metadata, "messageKind"), "task"
+            ));
             message.setContent(safe(event.getDelta()));
-            message.setStatus("pending");
+            message.setStatus(alreadyConsumed ? "consumed" : "pending");
             message.setCreatedAt(now);
+            if (alreadyConsumed) {
+                message.setConsumedAt(now);
+            }
             inboxMapper.insert(message);
         }
         session.setLastInboxSequence(Math.max(
-                session.getLastInboxSequence(), number(metadata, "inboxSequence")
+                session.getLastInboxSequence(), sequence
         ));
         session.setUpdatedAt(now);
         sessionMapper.updateById(session);
@@ -286,7 +306,8 @@ public class AgentSessionStore {
                         .last("LIMIT 2000")
         ).stream().map(message -> new AgentInboxSnapshot(
                 message.getMessageId(), message.getSequence(),
-                message.getSenderAgentId(), message.getContent(), message.getStatus()
+                message.getSenderAgentId(), message.getSenderLabel(),
+                message.getContent(), message.getStatus(), message.getMessageKind()
         )).sorted(java.util.Comparator.comparingLong(
                 AgentInboxSnapshot::sequence
         )).toList();
@@ -304,6 +325,7 @@ public class AgentSessionStore {
         return new AgentSessionSnapshot(
                 session.getAgentId(), session.getSessionId(),
                 session.getParentAgentId(), session.getParentSessionId(),
+                session.getTeamId(), session.getActiveActivationId(),
                 session.getLabel(), session.getStatus(), session.getMode(),
                 session.getDelegationDepth(), session.getModel(),
                 session.getUnreadReportCount(), session.getLatestReport(),

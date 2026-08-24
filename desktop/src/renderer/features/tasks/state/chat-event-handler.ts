@@ -100,6 +100,9 @@ export function applyChatEvent(
     event.type === "agent_activation_interrupted" ||
     event.type === "agent_reported" ||
     event.type === "agent_checkpointed" ||
+    event.type === "agent_peer_message_queued" ||
+    event.type === "agent_peer_message_delivered" ||
+    event.type === "agent_peer_message_consumed" ||
     event.type === "tool_started" ||
     event.type === "tool_completed" ||
     event.type === "tool_failed" ||

@@ -3663,6 +3663,238 @@ globalStyle('.subagent-session-status[data-status="failed"] > i', {
   background: "#c45f3a",
 });
 
+globalStyle(".subagent-pending-messages", {
+  display: "flex",
+  flexDirection: "column",
+  gap: "7px",
+  padding: "14px 0",
+  borderBottom: "1px solid var(--line)",
+});
+
+globalStyle(".subagent-pending-messages > header", {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  color: "var(--muted)",
+  fontSize: "11px",
+});
+
+globalStyle(".subagent-pending-messages > header span", {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "6px",
+  fontWeight: "560",
+});
+
+globalStyle(".subagent-pending-messages > header small", {
+  color: "var(--subtle)",
+  fontSize: "9.5px",
+});
+
+globalStyle(".subagent-pending-messages > article", {
+  display: "grid",
+  gridTemplateColumns: "18px minmax(0, 1fr)",
+  gap: "7px",
+  padding: "9px 10px",
+  color: "var(--muted)",
+  border: "1px solid color-mix(in srgb, var(--blue) 14%, var(--line))",
+  borderRadius: "9px",
+  background: "color-mix(in srgb, var(--blue) 3%, var(--surface-soft))",
+});
+
+globalStyle(".subagent-pending-messages > article > svg", {
+  marginTop: "2px",
+  color: "var(--blue)",
+});
+
+globalStyle(".subagent-pending-messages strong", {
+  display: "block",
+  color: "var(--ink)",
+  fontSize: "10.5px",
+  fontWeight: "560",
+});
+
+globalStyle(".subagent-pending-messages p", {
+  margin: "3px 0 0",
+  color: "var(--subtle)",
+  fontSize: "10px",
+  lineHeight: "1.55",
+  overflowWrap: "anywhere",
+  whiteSpace: "pre-wrap",
+});
+
+globalStyle(".subagent-activation-list", {
+  position: "relative",
+  display: "flex",
+  flexDirection: "column",
+  padding: "14px 0 4px",
+});
+
+globalStyle(".subagent-activation-list::before", {
+  position: "absolute",
+  top: "28px",
+  bottom: "24px",
+  left: "13px",
+  width: "1px",
+  background: "color-mix(in srgb, var(--line) 78%, transparent)",
+  content: '""',
+});
+
+globalStyle(".subagent-activation", {
+  position: "relative",
+  minWidth: "0",
+  paddingBottom: "7px",
+});
+
+globalStyle(".subagent-activation-toggle", {
+  position: "relative",
+  zIndex: "1",
+  display: "grid",
+  width: "100%",
+  minWidth: "0",
+  gridTemplateColumns: "27px minmax(0, 1fr) auto",
+  alignItems: "center",
+  gap: "9px",
+  padding: "7px 0",
+  color: "var(--muted)",
+  border: "0",
+  background: "transparent",
+  textAlign: "left",
+  cursor: "pointer",
+  fontFamily: "inherit",
+});
+
+globalStyle(".subagent-activation-index", {
+  display: "grid",
+  width: "27px",
+  height: "27px",
+  placeItems: "center",
+  color: "var(--subtle)",
+  border: "1px solid var(--line)",
+  borderRadius: "50%",
+  background: "var(--surface)",
+  fontSize: "9px",
+  fontVariantNumeric: "tabular-nums",
+  transition: "border-color 150ms ease, color 150ms ease, background 150ms ease",
+});
+
+globalStyle('.subagent-activation[data-status="running"] .subagent-activation-index', {
+  color: "#248d69",
+  borderColor: "color-mix(in srgb, #248d69 38%, var(--line))",
+  background: "color-mix(in srgb, #248d69 7%, var(--surface))",
+  animation: `${agentAvatarPulse} 1.8s ease-out infinite`,
+});
+
+globalStyle('.subagent-activation[data-status="failed"] .subagent-activation-index', {
+  color: "#b65a37",
+  borderColor: "color-mix(in srgb, #b65a37 34%, var(--line))",
+});
+
+globalStyle(".subagent-activation-toggle > span:nth-child(2)", {
+  display: "flex",
+  minWidth: "0",
+  flexDirection: "column",
+  gap: "2px",
+});
+
+globalStyle(".subagent-activation-toggle strong", {
+  color: "var(--ink)",
+  fontSize: "11.5px",
+  fontWeight: "580",
+});
+
+globalStyle(".subagent-activation-toggle small", {
+  overflow: "hidden",
+  color: "var(--subtle)",
+  fontSize: "9.5px",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(".subagent-activation-toggle > svg", {
+  color: "var(--subtle)",
+});
+
+globalStyle(".subagent-activation-region", {
+  display: "grid",
+  gridTemplateRows: "0fr",
+  overflow: "hidden",
+  opacity: "0",
+  transition:
+    "grid-template-rows 190ms cubic-bezier(0.2, 0.75, 0.25, 1), opacity 140ms ease",
+});
+
+globalStyle(".subagent-activation.is-open .subagent-activation-region", {
+  gridTemplateRows: "1fr",
+  opacity: "1",
+});
+
+globalStyle(".subagent-activation-content", {
+  minHeight: "0",
+  minWidth: "0",
+  overflow: "hidden",
+  padding: "3px 0 18px 36px",
+});
+
+globalStyle(".subagent-activation-input", {
+  margin: "0 0 10px",
+  padding: "9px 11px",
+  border: "1px solid var(--line)",
+  borderRadius: "10px 10px 10px 3px",
+  background: "var(--surface-soft)",
+});
+
+globalStyle('.subagent-activation-input[data-kind="peer"]', {
+  borderColor: "color-mix(in srgb, var(--blue) 18%, var(--line))",
+  background: "color-mix(in srgb, var(--blue) 4%, var(--surface-soft))",
+});
+
+globalStyle(".subagent-activation-input > header", {
+  display: "flex",
+  alignItems: "center",
+  gap: "6px",
+  marginBottom: "5px",
+  color: "var(--subtle)",
+  fontSize: "9.5px",
+  fontWeight: "560",
+});
+
+globalStyle(".subagent-activation-input > p", {
+  margin: "0",
+  color: "var(--muted)",
+  fontSize: "10.5px",
+  lineHeight: "1.6",
+  overflowWrap: "anywhere",
+  whiteSpace: "pre-wrap",
+});
+
+globalStyle(".subagent-activation-content > .agent-run", {
+  margin: "2px 0 8px",
+});
+
+globalStyle(".subagent-activation-content .agent-run-toggle", {
+  fontSize: "11px",
+});
+
+globalStyle(".subagent-activation-empty", {
+  position: "relative",
+  zIndex: "1",
+  padding: "16px 0 18px 36px",
+  color: "var(--subtle)",
+});
+
+globalStyle(".subagent-activation-empty span", {
+  color: "var(--muted)",
+  fontSize: "11px",
+  fontWeight: "560",
+});
+
+globalStyle(".subagent-activation-empty p", {
+  margin: "5px 0 0",
+  fontSize: "10px",
+  lineHeight: "1.55",
+});
+
 globalStyle(".subagent-trace, .subagent-children", {
   display: "flex",
   minWidth: "0",
@@ -3878,7 +4110,7 @@ globalStyle(".subagent-pane-back", {
 });
 
 globalStyle(".subagent-answer", {
-  padding: "22px 0 0",
+  padding: "12px 0 0",
   borderBottom: "0",
 });
 
@@ -3896,6 +4128,57 @@ globalStyle(".subagent-answer-meta", {
   gap: "8px",
   paddingTop: "6px",
   color: "var(--subtle)",
+});
+
+globalStyle(".subagent-answer-meta > span", {
+  color: "var(--subtle)",
+  fontSize: "9.5px",
+  fontVariantNumeric: "tabular-nums",
+});
+
+globalStyle(".peer-message-item", {
+  display: "grid",
+  minWidth: "0",
+  gridTemplateColumns: "18px minmax(0, 1fr)",
+  gap: "7px",
+  padding: "7px 8px",
+  color: "var(--muted)",
+  border: "1px solid color-mix(in srgb, var(--blue) 15%, var(--line))",
+  borderRadius: "8px",
+  background: "color-mix(in srgb, var(--blue) 3%, transparent)",
+});
+
+globalStyle(".peer-message-item > svg", {
+  marginTop: "2px",
+  color: "var(--blue)",
+});
+
+globalStyle(".peer-message-item > span", {
+  display: "flex",
+  minWidth: "0",
+  flexDirection: "column",
+  gap: "1px",
+});
+
+globalStyle(".peer-message-item strong", {
+  color: "var(--ink)",
+  fontSize: "10.5px",
+  fontWeight: "560",
+});
+
+globalStyle(".peer-message-item small", {
+  color: "var(--subtle)",
+  fontSize: "9px",
+});
+
+globalStyle(".peer-message-item > p", {
+  gridColumn: "2",
+  margin: "2px 0 0",
+  color: "var(--subtle)",
+  fontSize: "10px",
+  lineHeight: "1.55",
+  overflowWrap: "anywhere",
+  whiteSpace: "pre-wrap",
 });
 
 globalStyle(".subagent-answer-meta button", {

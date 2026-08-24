@@ -141,6 +141,11 @@ Agent 名称、职责和数量由 Supervisor 根据当前任务动态产生。`d
 Checkpoint、DAG checkpoint 与 Effect 恢复均已由 Core 耐久状态支撑；只有出现
 多实例或跨节点需求后才考虑外部消息队列。
 
+管理关系仍是 Supervisor/直接父级控制的 Session 树；同一根任务的 continuable Session 另以稳定
+`teamId` 组成受限通信面。`list_team_agents` 只公开成员身份和状态，`send_peer_message` 可在平级或
+跨层级 Agent 之间耐久投递信息，但采用 quiet 语义，不创建、不唤醒、不恢复目标，也不授予中止、
+关闭、改权限或写文件的能力。目标只会在下一次由管理面启动的 Activation 中消费这些信息。
+
 ## 4. 统一运行事件
 
 Python 会话执行过程已经统一使用 transport-neutral 的简化 `RunEvent`，覆盖模型文本、推理、
@@ -150,6 +155,9 @@ Python 会话执行过程已经统一使用 transport-neutral 的简化 `RunEven
 ```text
 text_delta / text_reset / reasoning_delta / progress_message
 agent_started / agent_event / agent_completed / agent_failed
+agent_session_created / agent_inbox_enqueued / agent_activation_started
+agent_activation_interrupted / agent_reported / agent_checkpointed
+agent_peer_message_queued / agent_peer_message_delivered / agent_peer_message_consumed
 tool_started / tool_completed / tool_failed
 tool_approval_requested / tool_approval_resolved
 approval_review_started / approval_review_completed
@@ -185,10 +193,16 @@ RunEvent
 事件在事务提交后才向 SSE 发布；完成、失败、暂停、取消和运行状态边界会强制刷盘，
 因此断线重放和重启恢复不依赖计时器。不同 Run 的 SSE 订阅只在各自锁域内回放和推送。
 子 Agent 生命周期与内部可见步骤已经写入同一父 Run 的事件日志，使用 `agentId`、`sessionId`、
-`parentAgentId` 和 `childSequence` 投影到工作记录并可由 Electron 重放；子模型正文只汇聚为
-`agent_completed.output`，不会混入父回答正文，隐藏推理也不向界面投影。完整的独立 Agent
-Snapshot/Checkpoint 仍是目标设计，但暂停与进程重启不再依赖保留 Python
-调用栈：Java 会封存当前 Turn 的中间轨迹，并在同一 Run 中创建新的内部续接 Turn。
+`parentAgentId`、`activationId` 和 `childSequence` 投影到工作记录并可由 Electron 重放；子模型正文
+只汇聚为每轮 `agent_completed.output`，不会混入父回答正文，隐藏推理也不向界面投影。Core 已用
+独立 Agent Session、Inbox、Activation 和 Checkpoint 表保存可恢复快照；暂停与进程重启不依赖保留
+Python 调用栈，running Activation 在恢复边界转为 interrupted，再由 Supervisor 决定是否续接。
+Session 控制事件与后台 Activation 事件共享同一个 FIFO；Core 仍对历史或断线造成的依赖事件乱序
+提供幂等补建，Checkpoint 先到时不会使整个 Run Event Journal 进入永久失败重试。
+Run Event Journal 对同一批次的永久落库错误最多自动尝试五次，只记录首次失败和最终隔离；达到上限后
+保留未落库批次的进程内隔离记录并停止定时重试，避免错误日志与 SQLite 事务空转。该降级记录不冒充
+耐久成功，应用关闭时会明确报告尚未落库的事件数。Runtime 已经返回暂停或终态时，Run 状态收敛、
+SSE 关闭和执行槽释放不再依赖诊断事件刷盘成功，因此投影故障不能把界面永久卡在 `PAUSING`。
 
 ### Run、Turn 与暂停恢复
 
@@ -218,6 +232,8 @@ PAUSED ←──────────── PAUSING ←───────�
 Desktop 在点击时立即冻结新增输出并退出“正在生成”视觉状态，显示“正在保存当前进度”；Core
 锁存暂停意图后立即确认请求，并在虚拟线程中把控制信号转发给 Runtime，避免本地控制面 HTTP
 响应拖住交互。后台仍保留事件订阅，直到 `PAUSED` 或自然终态到达后再用持久化消息校准界面。
+`PAUSING` 是可重入的控制状态：重复暂停会再次幂等转发给 Runtime；暂停阶段进度事件的持久化或
+投影失败只记录诊断，不能阻断控制信号，因而不能出现仅冻结 Desktop、后台仍继续生成的伪暂停。
 暂停请求与自然完成可能同时到达；Core 对已经进入终态的 Run 按幂等成功处理，Desktop 以最终
 持久化状态收敛，不把“运行恰好先结束”显示成远程调用错误。
 暂停控制信号即使早于 Python 流注册也会先锁存并立即确认；模型或 Reviewer 取消后的正常资源
@@ -454,6 +470,31 @@ POST   /api/v1/model/settings/providers/{providerId}/model-configurations/{model
 请求字段；会话上下文占比按当前选中模型的上下文窗口计算。Hosted Web Search 是模型级显式
 能力，仅 Responses 与 Anthropic 适配器当前提供，Chat Completions 暂不启用。
 
+#### 推理强度协议映射（待完善）
+
+`reasoningEffort` 当前仍是由模型配置声明并经 Desktop、Core、Agent Runtime 透传的字符串，
+尚未形成协议无关的推理策略。模型编辑器默认填入 `none/low/high/max`，同时允许配置 `medium`
+或其他供应商值；这些字符串不是三个 Provider 协议可以原样共用的稳定契约。当前适配情况如下：
+
+| `apiFormat` | 当前映射 | 已知欠缺 |
+| --- | --- | --- |
+| `chat-completions` | 非空值（包括 `none`）发送为 `reasoning: { effort }` | 不同兼容供应商可能要求 `reasoning_effort`、其他字段或不同枚举；当前未按供应商能力校验，`none` 也不保证等于显式关闭。 |
+| `responses` | 非空且不为 `none` 时发送 `reasoning: { effort }`；`none` 时省略 | 对默认开启推理的模型，省略字段不等于关闭；当前也未校验模型实际支持的 effort 集合。 |
+| `anthropic` | 非 `none` 时发送 `thinking.enabled + budget_tokens`；`none` 时省略 | 缺少显式 `thinking.disabled` 和供应商自己的 effort/output 配置映射；本地预算映射识别 `xhigh`，而设置页使用的 `max` 会静默退回默认比例，且 DeepSeek 会忽略 `budget_tokens`。 |
+
+此外，公开 Agent API 契约中的枚举尚未包含模型能力配置可以使用的 `medium`，也是同一适配欠账。
+后续应先把 UI 值规范化为明确的内部策略（至少区分 `disabled` 与 `effort`），再由各
+Provider 根据模型能力映射、校验或明确拒绝，不允许未知值静默降级；三种格式都需要覆盖
+`none/low/medium/high/max` 的请求体契约测试。
+
+推理强度字段映射与工具回合续传是两个独立问题。Anthropic 本地工具回合现在会在隐藏
+`providerState` 中耐久保存并原样回传原生 assistant content blocks（包括 thinking signature、
+托管工具续跑块和本地 `tool_use`），以保证暂停恢复、后续 Turn 和各 Agent Session 的协议合法性。
+该状态以请求地址和模型的不可逆摘要限定作用域，不能跨模型、连接或 Agent 混用；其中的 JSON
+`null` 属于原生协议数据，SSE/Core/Checkpoint 不得清洗。旧会话若缺少原生状态，只把已经取得完整
+结果的工具交互降级为“已完成兼容记录”，不会重新执行工具；不完整轮次在本地明确失败。该状态不
+投影为用户消息，也会在生成上下文摘要前剥离，避免隐藏推理进入摘要正文。
+
 ### MCP 与 Hosted Web Search
 
 远程 MCP Server 配置由 Desktop 设置页经白名单 IPC 写入 Java Core。Core 以
@@ -621,6 +662,12 @@ Checkpoint 和按需 Activation 在后续 Turn 续接。
 耐久 checkpoint、Effect 提交状态、跨进程写租约和三方合并使崩溃恢复与多写者冲突可审计。
 Activation 仍是可按需冷恢复的短期执行体，不是预创建 Worker Pool；耐久状态以 Core 的 Run、事件日志
 和 Checkpoint 为准，常驻对象不能成为暂停、队列或任务完成状态的唯一来源。
+
+同一 `teamId` 的 continuable Worker 还可以通过 `list_team_agents` 与 `send_peer_message` 交换信息。
+Team mailbox 以稳定 `messageId`、目标 FIFO 序号和 queued/delivered/consumed 事件投影到 Core；消息
+本身不触发 Activation，且平级通信不会扩大 Supervisor/直接父级的管理权限。Desktop 的 Agent 页签
+按 `Session -> Activation[]` 重建每轮输入、阶段、工具、上下文压缩、Team 消息、Markdown 回答与
+独立用量，并直接复用主聊天的 `AgentRunSummary` 展示语法；最新一轮展开，历史轮次可折叠回看。
 
 ### 8.5 Windows OS 权限隔离
 

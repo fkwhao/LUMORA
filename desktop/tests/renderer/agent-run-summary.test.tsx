@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentRunSummary } from "../../src/renderer/features/tasks/AgentRunSummary";
 import { AgentIdentityAvatar } from "../../src/renderer/features/tasks/components/AgentIdentityAvatar";
+import type { ChatStreamEvent, ChatStreamEventType } from "../../src/shared/model-contract";
+import { workLogFromEvents } from "../../src/shared/work-log";
 
 afterEach(() => {
   cleanup();
@@ -85,6 +87,175 @@ describe("AgentRunSummary", () => {
     ).not.toBeInTheDocument();
     fireEvent.click(avatarCall);
     expect(onOpenAgent).toHaveBeenCalledWith("agent-1");
+  });
+
+  it("collapses one continuable Activation into one settled Agent card", () => {
+    const common = {
+      agentId: "ping-agent",
+      sessionId: "session-ping",
+      parentAgentId: "supervisor",
+      agentLabel: "ping-agent 测试子Agent",
+      sessionMode: "continuable",
+    };
+    const event = (
+      type: ChatStreamEventType,
+      itemId: string,
+      agentStatus: string,
+      activationId?: string,
+    ): ChatStreamEvent => ({
+      type,
+      itemId,
+      toolCallId: "parent-tool-call-1",
+      title: "ping-agent 测试子Agent",
+      delta: "",
+      model: "deepseek-v4-pro",
+      errorMessage: "",
+      metadata: {
+        ...common,
+        agentStatus,
+        ...(activationId ? { activationId } : {}),
+      },
+    });
+    const workLog = workLogFromEvents([
+      event("agent_session_created", "ping-agent", "idle"),
+      event("agent_inbox_enqueued", "message-1", "idle"),
+      event("agent_activation_started", "activation-ping-1", "running", "activation-ping-1"),
+      event("agent_started", "activation-ping-1:started", "running", "activation-ping-1"),
+      event("agent_checkpointed", "session-ping:checkpoint:1", "idle", "activation-ping-1"),
+      event("agent_completed", "activation-ping-1:completed", "idle", "activation-ping-1"),
+    ]);
+
+    render(
+      <AgentRunSummary
+        durationMs={3_000}
+        onOpenAgent={() => undefined}
+        running={false}
+        workLog={workLog}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /已处理 3s/ }));
+    fireEvent.click(screen.getByRole("button", { name: "协同 Agent" }));
+
+    expect(screen.getAllByRole("button", {
+      name: "查看 ping-agent 测试子Agent 的执行过程",
+    })).toHaveLength(1);
+    expect(screen.getByText("已完成")).toBeInTheDocument();
+    expect(screen.queryByText("执行中")).not.toBeInTheDocument();
+  });
+
+  it("keeps a later Activation as a separate call without duplicating its lifecycle", () => {
+    const lifecycle = (
+      itemId: string,
+      sessionEventType: string,
+      activationId: string,
+      status: "running" | "completed",
+    ) => ({
+      itemId,
+      kind: "agent" as const,
+      status,
+      title: "持续核验",
+      metadata: {
+        agentId: "continuable-agent",
+        sessionId: "session-continuable",
+        parentAgentId: "supervisor",
+        agentLabel: "持续核验",
+        sessionEventType,
+        activationId,
+      },
+    });
+    render(
+      <AgentRunSummary
+        durationMs={4_000}
+        onOpenAgent={() => undefined}
+        running={false}
+        workLog={[
+          lifecycle("a1:start", "agent_started", "activation-1", "running"),
+          lifecycle("a1:done", "agent_completed", "activation-1", "completed"),
+          lifecycle("a2:start", "agent_started", "activation-2", "running"),
+          lifecycle("a2:done", "agent_completed", "activation-2", "completed"),
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /已处理 4s/ }));
+    fireEvent.click(screen.getByRole("button", { name: "协同多个 Agent" }));
+
+    expect(screen.getAllByRole("button", {
+      name: "查看 持续核验 的执行过程",
+    })).toHaveLength(2);
+    expect(screen.getAllByText("已完成")).toHaveLength(2);
+  });
+
+  it("keeps multiple Activations from one explicit parent tool call in one card", () => {
+    const lifecycle = (
+      itemId: string,
+      activationId: string,
+      status: "running" | "completed",
+    ) => ({
+      itemId,
+      kind: "agent" as const,
+      status,
+      toolCallId: "same-parent-call",
+      title: "单次委派",
+      metadata: {
+        agentId: "same-call-agent",
+        sessionId: "session-same-call",
+        parentAgentId: "supervisor",
+        agentLabel: "单次委派",
+        sessionEventType: status === "running"
+          ? "agent_started"
+          : "agent_completed",
+        activationId,
+      },
+    });
+    render(
+      <AgentRunSummary
+        durationMs={4_000}
+        onOpenAgent={() => undefined}
+        running={false}
+        workLog={[
+          lifecycle("a1:start", "activation-1", "running"),
+          lifecycle("a1:done", "activation-1", "completed"),
+          lifecycle("a2:start", "activation-2", "running"),
+          lifecycle("a2:done", "activation-2", "completed"),
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /已处理 4s/ }));
+    fireEvent.click(screen.getByRole("button", { name: "协同 Agent" }));
+
+    expect(screen.getAllByRole("button", {
+      name: "查看 单次委派 的执行过程",
+    })).toHaveLength(1);
+    expect(screen.getByText("已完成")).toBeInTheDocument();
+  });
+
+  it("settles an unfinished lifecycle label when the parent run has ended", () => {
+    render(
+      <AgentRunSummary
+        durationMs={2_000}
+        onOpenAgent={() => undefined}
+        running={false}
+        workLog={[{
+          itemId: "activation-running",
+          kind: "agent",
+          status: "running",
+          title: "状态核验",
+          metadata: {
+            agentId: "status-agent",
+            sessionId: "session-status",
+            parentAgentId: "supervisor",
+            agentLabel: "状态核验",
+            sessionEventType: "agent_activation_started",
+            activationId: "activation-running",
+          },
+        }]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /已处理 2s/ }));
+    fireEvent.click(screen.getByRole("button", { name: "协同 Agent" }));
+
+    expect(screen.getByText("已完成")).toBeInTheDocument();
+    expect(screen.queryByText("执行中")).not.toBeInTheDocument();
   });
 
   it("reveals a semantic phase and its shell script on demand", () => {

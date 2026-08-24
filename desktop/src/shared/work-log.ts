@@ -7,6 +7,27 @@ export function workLogItemFromEvent(
   if (event.metadata?.hidden === true) {
     return undefined;
   }
+  if (
+    event.type === "agent_peer_message_queued" ||
+    event.type === "agent_peer_message_delivered" ||
+    event.type === "agent_peer_message_consumed"
+  ) {
+    return {
+      itemId:
+        (typeof event.metadata?.messageId === "string"
+          ? event.metadata.messageId
+          : event.itemId) || createId(),
+      kind: "message",
+      status:
+        event.type === "agent_peer_message_consumed"
+          ? "completed"
+          : "running",
+      content: event.delta,
+      title: event.title || "Agent Team 消息",
+      model: event.model,
+      metadata: sessionMetadata(event),
+    };
+  }
   if (event.type === "progress_message") {
     return {
       itemId: event.itemId || createId(),

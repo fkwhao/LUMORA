@@ -15,23 +15,62 @@ const COMPLETED_SESSION: SubagentSession = {
   agentId: "agent-1",
   sessionId: "run-1:agent:aba45844-1234-5678-90ab-f596",
   parentAgentId: "supervisor",
+  teamId: "task-1",
   delegationDepth: 1,
   label: "测试子Agent功能",
   status: "completed",
   model: "deepseek-v4-flash",
-  durationMs: 8_000,
+  durationMs: 11_000,
   totalTokens: 12_615,
   createdAt: "2026-08-19T10:30:00",
-  answer: "已经完成子 Agent 功能检查。",
-  events: [{
-    itemId: "agent-1:tool-1",
-    kind: "agent",
-    status: "completed",
-    title: "检查项目结构",
-    output: "src/main.ts\nsrc/renderer/TaskPage.tsx",
-    durationMs: 1_000,
-    metadata: { childEventType: "tool_completed" },
-  }],
+  activations: [
+    {
+      activationId: "activation-1",
+      status: "completed",
+      activationStatus: "completed",
+      durationMs: 3_000,
+      totalTokens: 4_000,
+      createdAt: "2026-08-19T10:20:00",
+      inputs: [{
+        messageId: "input-1",
+        sequence: 1,
+        senderAgentId: "supervisor",
+        senderLabel: "",
+        kind: "task",
+        content: "先检查项目结构。",
+      }],
+      answer: "第一轮完成。",
+      events: [],
+    },
+    {
+      activationId: "activation-2",
+      status: "completed",
+      activationStatus: "completed",
+      durationMs: 8_000,
+      totalTokens: 8_615,
+      activeContextTokens: 2_048,
+      createdAt: "2026-08-19T10:30:00",
+      inputs: [{
+        messageId: "input-2",
+        sequence: 2,
+        senderAgentId: "supervisor",
+        senderLabel: "",
+        kind: "task",
+        content: "继续验证 Agent 页面。",
+      }],
+      answer: "已经完成子 Agent 功能检查。",
+      events: [{
+        itemId: "agent-1:tool-1",
+        kind: "tool",
+        status: "completed",
+        toolName: "read_file",
+        title: "检查项目结构",
+        output: "src/main.ts\nsrc/renderer/TaskPage.tsx",
+        durationMs: 1_000,
+      }],
+    },
+  ],
+  pendingPeerMessages: [],
   children: [],
 };
 
@@ -45,29 +84,26 @@ function renderPane(session: SubagentSession = COMPLETED_SESSION) {
 }
 
 describe("SubagentSessionPane", () => {
-  it("keeps completed execution steps compact and supports nested disclosure", () => {
-    const { container } = renderPane();
+  it("keeps historical Activations folded and opens the latest conversation", () => {
+    renderPane();
 
-    const toggle = screen.getByRole("button", { name: /执行步骤 1/ });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(container.querySelector(".subagent-trace-collapse"))
+    const first = screen.getByRole("button", { name: /Activation 1/ });
+    const second = screen.getByRole("button", { name: /Activation 2/ });
+    expect(first).toHaveAttribute("aria-expanded", "false");
+    expect(second).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("继续验证 Agent 页面。")).toBeVisible();
+    expect(screen.getByText("先检查项目结构。")
+      .closest(".subagent-activation-region"))
       .toHaveAttribute("aria-hidden", "true");
 
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
-    expect(container.querySelector(".subagent-trace-collapse"))
+    fireEvent.click(first);
+    expect(first).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("先检查项目结构。")
+      .closest(".subagent-activation-region"))
       .toHaveAttribute("aria-hidden", "false");
-
-    const detail = container.querySelector("details.subagent-trace-item");
-    const summary = detail?.querySelector("summary");
-    expect(detail).not.toHaveAttribute("open");
-    expect(summary).not.toBeNull();
-    fireEvent.click(summary!);
-    expect(detail).toHaveAttribute("open");
-    expect(screen.getByText(/src\/main\.ts/)).toBeVisible();
   });
 
-  it("copies only the answer and shows the session response time", async () => {
+  it("reuses the main run summary for tool details and copies the current answer", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -75,50 +111,46 @@ describe("SubagentSessionPane", () => {
     });
     renderPane();
 
-    expect(screen.queryByRole("button", { name: /喜欢|不喜欢|重新生成/ }))
-      .not.toBeInTheDocument();
-    const copy = screen.getByRole("button", { name: "复制子 Agent 回复" });
-    fireEvent.click(copy);
+    expect(screen.getByText("已处理 8s")).toBeVisible();
+    fireEvent.click(screen.getByText("已处理 8s"));
+    expect(screen.getByText("正在定位相关内容")).toBeVisible();
 
+    const copyButtons = screen.getAllByRole("button", { name: "复制子 Agent 回复" });
+    fireEvent.click(copyButtons.at(-1)!);
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith("已经完成子 Agent 功能检查。");
     });
-    expect(screen.getByRole("button", { name: "已复制子 Agent 回复" }))
-      .toBeVisible();
-    expect(screen.getByText(/10:30/).closest("time"))
-      .toHaveAttribute("dateTime", COMPLETED_SESSION.createdAt);
+    expect(screen.getByText("上下文 2,048")).toBeVisible();
   });
 
-  it("opens steps while the child Agent is still running", () => {
-    renderPane({
-      ...COMPLETED_SESSION,
-      status: "running",
-      answer: "",
-      durationMs: undefined,
-      createdAt: undefined,
-    });
-
-    expect(screen.getByRole("button", { name: /执行步骤 1/ }))
-      .toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("button", { name: "复制子 Agent 回复" }))
-      .toBeDisabled();
-  });
-
-  it("shows continuable runtime state without manual control buttons", () => {
+  it("shows quiet Team messages without adding management controls", () => {
     renderPane({
       ...COMPLETED_SESSION,
       mode: "continuable",
-      activationStatus: "interrupted",
-      pendingInboxCount: 2,
+      pendingInboxCount: 1,
       checkpointSequence: 3,
       recovered: true,
+      pendingPeerMessages: [{
+        itemId: "peer-1",
+        kind: "message",
+        status: "running",
+        content: "后端事件已经补齐。",
+        metadata: {
+          senderAgentId: "peer",
+          senderAgentLabel: "后端实现",
+          targetAgentId: "agent-1",
+          targetAgentLabel: "测试子Agent功能",
+          messageStatus: "delivered",
+        },
+      }],
     });
 
     expect(screen.getByText("Session 可续接")).toBeVisible();
-    expect(screen.getByText("Activation 已中止，可续接")).toBeVisible();
-    expect(screen.getByText("Inbox 2 待处理")).toBeVisible();
+    expect(screen.getByText("Inbox 1 待处理")).toBeVisible();
     expect(screen.getByText("Checkpoint #3")).toBeVisible();
-    expect(screen.getByText("可恢复")).toBeVisible();
+    expect(screen.getByText("已从 Checkpoint 恢复")).toBeVisible();
+    expect(screen.getByText("后端实现 → 测试子Agent功能")).toBeVisible();
+    expect(screen.getByText("后端事件已经补齐。")).toBeVisible();
     expect(screen.queryByRole("button", { name: /继续|中止/ }))
       .not.toBeInTheDocument();
   });

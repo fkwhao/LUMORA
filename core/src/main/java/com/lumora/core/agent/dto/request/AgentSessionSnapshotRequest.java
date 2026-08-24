@@ -9,6 +9,8 @@ public class AgentSessionSnapshotRequest {
     private final String sessionId;
     private final String parentAgentId;
     private final String parentSessionId;
+    private final String teamId;
+    private final String activeActivationId;
     private final String label;
     private final String status;
     private final String mode;
@@ -24,6 +26,8 @@ public class AgentSessionSnapshotRequest {
         this.sessionId = snapshot.sessionId();
         this.parentAgentId = snapshot.parentAgentId();
         this.parentSessionId = snapshot.parentSessionId();
+        this.teamId = snapshot.teamId();
+        this.activeActivationId = snapshot.activeActivationId();
         this.label = snapshot.label();
         this.status = snapshot.status();
         this.mode = snapshot.mode();
@@ -42,6 +46,8 @@ public class AgentSessionSnapshotRequest {
     public String getSessionId() { return sessionId; }
     public String getParentAgentId() { return parentAgentId; }
     public String getParentSessionId() { return parentSessionId; }
+    public String getTeamId() { return teamId; }
+    public String getActiveActivationId() { return activeActivationId; }
     public String getLabel() { return label; }
     public String getStatus() { return status; }
     public String getMode() { return mode; }

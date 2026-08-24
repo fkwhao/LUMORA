@@ -221,6 +221,18 @@ def test_harness_plans_and_compacts_persistable_agent_history() -> None:
         ChatMessageRequest(
             role="user" if index % 2 else "assistant",
             content=f"history-{index}-" + "x" * 10_000,
+            providerState=(
+                {
+                    "apiFormat": "anthropic",
+                    "contentBlocks": [{
+                        "type": "thinking",
+                        "thinking": "hidden reasoning",
+                        "signature": "signed",
+                    }],
+                }
+                if index == 2
+                else {}
+            ),
         )
         for index in range(1, 8)
     ]
@@ -233,6 +245,7 @@ def test_harness_plans_and_compacts_persistable_agent_history() -> None:
 
     assert plan is not None
     assert plan.compactable
+    assert any(message.provider_state for message in plan.compactable)
     assert len(plan.retained) >= 5
     compacted = asyncio.run(harness.compact_history(
         settings,
@@ -242,6 +255,10 @@ def test_harness_plans_and_compacts_persistable_agent_history() -> None:
     assert compacted.message == "更新摘要"
     assert provider.existing_summary == "旧摘要"
     assert len(provider.compacted_messages) == len(plan.compactable)
+    assert all(
+        "provider_state" not in message
+        for message in provider.compacted_messages
+    )
 
 
 def test_harness_never_treats_cumulative_token_usage_as_an_execution_limit(

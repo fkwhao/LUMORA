@@ -93,6 +93,286 @@ def test_child_run_control_never_consumes_parent_steers() -> None:
     assert child.pause_requested is True
 
 
+def test_provider_state_survives_checkpoint_snapshot_round_trip() -> None:
+    provider_state = {
+        "apiFormat": "anthropic",
+        "scope": "scope-1",
+        "contentBlocks": [
+            {
+                "type": "thinking",
+                "thinking": "hidden",
+                "signature": "signed",
+            },
+            {
+                "type": "tool_use",
+                "id": "call-1",
+                "name": "read_file",
+                "input": {"optional": None, "items": [None, "x"]},
+            },
+        ],
+    }
+    checkpoint = AgentCheckpointRequest(
+        sequence=2,
+        consumedInboxSequence=1,
+        transcript=[ChatMessageRequest(
+            role="assistant",
+            content="checking",
+            toolCalls=[{
+                "id": "call-1",
+                "name": "read_file",
+                "arguments": '{"optional":null}',
+            }],
+            providerState=provider_state,
+        )],
+    )
+
+    serialized = json.loads(json.dumps(
+        checkpoint.model_dump(by_alias=True),
+        ensure_ascii=False,
+    ))
+    restored = AgentCheckpointRequest.model_validate(serialized)
+
+    assert restored.transcript[0].provider_state == provider_state
+
+
+def test_continuable_provider_state_survives_checkpoint_reactivation(
+    tmp_path: Path,
+) -> None:
+    provider_state = {
+        "apiFormat": "anthropic",
+        "scope": "deepseek-anthropic-scope",
+        "contentBlocks": [
+            {
+                "type": "thinking",
+                "thinking": "inspect the target before continuing",
+                "signature": "signed-thinking-state",
+            },
+            {
+                "type": "tool_use",
+                "id": "call-provider-state",
+                "name": "read_file",
+                "input": {
+                    "path": "src/example.py",
+                    "optional": None,
+                    "items": [None, {"nested": None}],
+                },
+            },
+        ],
+    }
+
+    class CheckpointingHarness(ChildHarness):
+        async def stream(
+            self,
+            _settings: Any,
+            _prompt: Any,
+            _messages: Any,
+            _reasoning_effort: Any,
+            _registry: Any,
+            *_args: Any,
+        ) -> AsyncIterator[RunEvent]:
+            yield RunEvent(
+                type="protocol_message",
+                metadata={
+                    "message": {
+                        "role": "assistant",
+                        "content": "先读取目标文件。",
+                        "toolCalls": [{
+                            "id": "call-provider-state",
+                            "name": "read_file",
+                            "arguments": (
+                                '{"path":"src/example.py",'
+                                '"optional":null}'
+                            ),
+                        }],
+                        "providerState": provider_state,
+                    }
+                },
+            )
+            yield RunEvent(
+                type="protocol_message",
+                metadata={
+                    "message": {
+                        "role": "tool",
+                        "content": "file contents",
+                        "toolCallId": "call-provider-state",
+                    }
+                },
+            )
+            yield RunEvent(type="text_delta", delta="第一轮完成。")
+            yield RunEvent(type="completed", model="deepseek-v4-flash")
+
+    class ReactivationHarness(ChildHarness):
+        def __init__(self) -> None:
+            super().__init__()
+            self.activation_messages: list[list[ChatMessageRequest]] = []
+
+        async def stream(
+            self,
+            _settings: Any,
+            _prompt: Any,
+            messages: Any,
+            _reasoning_effort: Any,
+            _registry: Any,
+            *_args: Any,
+        ) -> AsyncIterator[RunEvent]:
+            self.activation_messages.append(list(messages))
+            yield RunEvent(type="text_delta", delta="续跑完成。")
+            yield RunEvent(type="completed", model="deepseek-v4-flash")
+
+    def build_runtime(harness: Any, home: str) -> SubagentRuntime:
+        return SubagentRuntime(
+            harness=harness,
+            settings=ModelConnectionSettings(
+                provider_name="DeepSeek",
+                base_url="https://api.deepseek.com",
+                api_key="secret",
+                model="deepseek-v4-flash",
+                api_format="anthropic",
+            ),
+            reasoning_effort=None,
+            source_registry=create_default_tool_registry(),
+            prompt_builder=PromptBuilder(),
+            project_instructions=(),
+            permission_engine=PermissionEngine(),
+            approval_broker=ApprovalBroker(),
+            permission_config_store=PermissionConfigStore(tmp_path / home),
+            permission_policy=PermissionPolicy(
+                mode=PermissionMode.FULL_ACCESS
+            ),
+            run_control=None,
+        )
+
+    first_events: list[RunEvent] = []
+    resumed_events: list[RunEvent] = []
+    reactivation_harness = ReactivationHarness()
+
+    async def scenario() -> None:
+        async def emit_first(event: RunEvent) -> None:
+            first_events.append(event)
+
+        first_runtime = build_runtime(CheckpointingHarness(), "first-home")
+        first_manager = ContinuableSessionManager(
+            first_runtime,
+            team_id="task-provider-state",
+        )
+        first_runtime.bind_session_manager(first_manager)
+        first_context = ToolContext(
+            workspace_path=tmp_path,
+            correlation_id="run-provider-state",
+            task_id="task-provider-state",
+            session_id="run-provider-state",
+            agent_id="supervisor",
+            background_event=emit_first,
+        )
+        start_result = await first_manager.start(
+            first_context,
+            description="Provider 状态恢复测试",
+            prompt="执行第一轮工具调用",
+        )
+        assert start_result.is_error is False
+        await first_manager.wait_for_activations()
+
+        final_checkpoint = [
+            event for event in first_events
+            if event.type == "agent_checkpointed"
+        ][-1]
+        checkpoint_transcript = final_checkpoint.metadata["transcript"]
+        checkpoint_assistant = next(
+            message for message in checkpoint_transcript
+            if message["role"] == "assistant" and message["toolCalls"]
+        )
+        assert checkpoint_assistant["providerState"] == provider_state
+
+        serialized_checkpoint = json.loads(json.dumps({
+            "sequence": final_checkpoint.metadata["checkpointSequence"],
+            "consumedInboxSequence": final_checkpoint.metadata[
+                "consumedInboxSequence"
+            ],
+            "transcript": checkpoint_transcript,
+            "summary": final_checkpoint.metadata["summary"],
+        }, ensure_ascii=False))
+        initial_inbox = next(
+            event for event in first_events
+            if event.type == "agent_inbox_enqueued"
+        )
+        snapshot = AgentSessionSnapshotRequest.model_validate(
+            json.loads(json.dumps({
+                "agentId": final_checkpoint.metadata["agentId"],
+                "sessionId": final_checkpoint.metadata["sessionId"],
+                "parentAgentId": final_checkpoint.metadata["parentAgentId"],
+                "parentSessionId": final_checkpoint.metadata[
+                    "parentSessionId"
+                ],
+                "teamId": final_checkpoint.metadata["teamId"],
+                "label": final_checkpoint.metadata["agentLabel"],
+                "status": "idle",
+                "delegationDepth": final_checkpoint.metadata[
+                    "delegationDepth"
+                ],
+                "model": "deepseek-v4-flash",
+                "inbox": [{
+                    "messageId": initial_inbox.item_id,
+                    "sequence": initial_inbox.metadata["inboxSequence"],
+                    "senderAgentId": initial_inbox.metadata["senderAgentId"],
+                    "content": initial_inbox.delta,
+                    "status": "consumed",
+                }],
+                "checkpoint": serialized_checkpoint,
+            }, ensure_ascii=False))
+        )
+        assert snapshot.checkpoint is not None
+        restored_assistant = next(
+            message for message in snapshot.checkpoint.transcript
+            if message.role == "assistant" and message.tool_calls
+        )
+        assert restored_assistant.provider_state == provider_state
+
+        async def emit_resumed(event: RunEvent) -> None:
+            resumed_events.append(event)
+
+        resumed_runtime = build_runtime(
+            reactivation_harness,
+            "resumed-home",
+        )
+        resumed_manager = ContinuableSessionManager(
+            resumed_runtime,
+            (snapshot,),
+            team_id="task-provider-state",
+        )
+        resumed_runtime.bind_session_manager(resumed_manager)
+        resumed_context = ToolContext(
+            workspace_path=tmp_path,
+            correlation_id="run-provider-state",
+            task_id="task-provider-state",
+            session_id="run-provider-state",
+            agent_id="supervisor",
+            background_event=emit_resumed,
+        )
+        send_result = await resumed_manager.send(
+            resumed_context,
+            snapshot.agent_id,
+            "基于第一轮结果继续",
+        )
+        assert send_result.is_error is False
+        await resumed_manager.wait_for_activations()
+
+    asyncio.run(scenario())
+
+    assert len(reactivation_harness.activation_messages) == 1
+    resumed_assistant = next(
+        message for message in reactivation_harness.activation_messages[0]
+        if message.role == "assistant" and message.tool_calls
+    )
+    assert resumed_assistant.provider_state == provider_state
+    assert any(
+        message.role == "user" and message.content == "基于第一轮结果继续"
+        for message in reactivation_harness.activation_messages[0]
+    )
+    assert any(
+        event.type == "agent_completed" for event in resumed_events
+    )
+
+
 def test_subagent_uses_isolated_messages_and_emits_observable_lifecycle(
     tmp_path: Path,
 ) -> None:
@@ -146,6 +426,9 @@ def test_subagent_uses_isolated_messages_and_emits_observable_lifecycle(
     assert emitted[1].metadata["childEventType"] == "progress_message"
     assert emitted[2].metadata["usageDelta"] is True
     assert emitted[3].output == "找到入口。"
+    assert emitted[0].metadata["activationInput"] == "只检查架构入口并报告证据"
+    assert emitted[3].metadata["activationInput"] == "只检查架构入口并报告证据"
+    assert emitted[0].metadata["activationId"] == emitted[3].metadata["activationId"]
     assert emitted[0].metadata["sessionId"].startswith("run-1:agent:")
     assert len(harness.messages) == 1
     assert harness.messages[0].content == "只检查架构入口并报告证据"
@@ -554,6 +837,11 @@ def test_continuable_session_uses_fifo_inbox_and_serial_activations(
             self.activation_messages.append(list(messages))
             await self.started.put(activation)
             await self.release.get()
+            yield RunEvent(
+                type="progress_message",
+                item_id="shared-progress-id",
+                delta=f"阶段 {activation}",
+            )
             yield RunEvent(type="text_delta", delta=f"报告 {activation}")
             yield RunEvent(type="completed", model="model")
 
@@ -579,10 +867,14 @@ def test_continuable_session_uses_fifo_inbox_and_serial_activations(
     manager = ContinuableSessionManager(runtime)
     runtime.bind_session_manager(manager)
     events: list[RunEvent] = []
+    tool_local_events: list[RunEvent] = []
 
     async def scenario() -> None:
         async def emit(event: RunEvent) -> None:
             events.append(event)
+
+        async def emit_tool_local(event: RunEvent) -> None:
+            tool_local_events.append(event)
 
         context = ToolContext(
             workspace_path=tmp_path,
@@ -590,6 +882,7 @@ def test_continuable_session_uses_fifo_inbox_and_serial_activations(
             task_id="task-1",
             session_id="run-continuable",
             agent_id="supervisor",
+            emit_event=emit_tool_local,
             background_event=emit,
         )
         result = await manager.start(
@@ -618,13 +911,205 @@ def test_continuable_session_uses_fifo_inbox_and_serial_activations(
 
     asyncio.run(scenario())
 
+    assert tool_local_events == []
+    assert [event.type for event in events[:2]] == [
+        "agent_session_created",
+        "agent_inbox_enqueued",
+    ]
     assert [event.type for event in events].count("agent_activation_started") == 2
     assert [event.type for event in events].count("agent_checkpointed") == 4
+    completed_events = [
+        event for event in events if event.type == "agent_completed"
+    ]
+    assert len({event.item_id for event in completed_events}) == 2
+    assert all(
+        event.item_id == f"{event.metadata['activationId']}:completed"
+        for event in completed_events
+    )
+    child_events = [event for event in events if event.type == "agent_event"]
+    assert len({event.item_id for event in child_events}) == 2
+    assert all(
+        str(event.item_id).startswith(str(event.metadata["activationId"]))
+        for event in child_events
+    )
     assert [
         event.metadata["consumedInboxSequence"]
         for event in events
         if event.type == "agent_activation_started"
     ] == [1, 2]
+
+
+def test_recovery_event_retains_the_active_activation_identity(
+    tmp_path: Path,
+) -> None:
+    runtime = SubagentRuntime(
+        harness=ChildHarness(),  # type: ignore[arg-type]
+        settings=ModelConnectionSettings(
+            provider_name="test",
+            base_url="https://example.com/v1",
+            api_key="secret",
+            model="model",
+        ),
+        reasoning_effort=None,
+        source_registry=create_default_tool_registry(),
+        prompt_builder=PromptBuilder(),
+        project_instructions=(),
+        permission_engine=PermissionEngine(),
+        approval_broker=ApprovalBroker(),
+        permission_config_store=PermissionConfigStore(tmp_path / "home"),
+        permission_policy=PermissionPolicy(mode=PermissionMode.FULL_ACCESS),
+        run_control=None,
+    )
+    manager = ContinuableSessionManager(runtime, (
+        AgentSessionSnapshotRequest(
+            agentId="agent-recovered",
+            sessionId="session-recovered",
+            parentAgentId="supervisor",
+            parentSessionId="run-recovered",
+            teamId="task-recovered",
+            activeActivationId="activation-before-restart",
+            label="恢复测试",
+            status="running",
+            delegationDepth=1,
+            model="model",
+        ),
+    ), team_id="task-recovered")
+    events: list[RunEvent] = []
+
+    async def scenario() -> None:
+        async def emit(event: RunEvent) -> None:
+            events.append(event)
+
+        context = ToolContext(
+            workspace_path=tmp_path,
+            task_id="task-recovered",
+            agent_id="supervisor",
+            background_event=emit,
+        )
+        await manager.publish_recovery_events(context)
+
+    asyncio.run(scenario())
+
+    assert events[0].metadata["activationId"] == "activation-before-restart"
+    assert events[0].item_id == "activation-before-restart:interrupted"
+
+
+def test_team_peer_message_is_cross_level_quiet_and_durable(
+    tmp_path: Path,
+) -> None:
+    harness = ChildHarness()
+    runtime = SubagentRuntime(
+        harness=harness,  # type: ignore[arg-type]
+        settings=ModelConnectionSettings(
+            provider_name="test",
+            base_url="https://example.com/v1",
+            api_key="secret",
+            model="model",
+        ),
+        reasoning_effort=None,
+        source_registry=create_default_tool_registry(),
+        prompt_builder=PromptBuilder(),
+        project_instructions=(),
+        permission_engine=PermissionEngine(),
+        approval_broker=ApprovalBroker(),
+        permission_config_store=PermissionConfigStore(tmp_path / "home"),
+        permission_policy=PermissionPolicy(mode=PermissionMode.FULL_ACCESS),
+        run_control=None,
+    )
+    snapshots = tuple(
+        AgentSessionSnapshotRequest(
+            agentId=agent_id,
+            sessionId=session_id,
+            parentAgentId=parent_agent_id,
+            parentSessionId=parent_session_id,
+            teamId="task-team",
+            label=label,
+            delegationDepth=depth,
+            model="model",
+        )
+        for agent_id, session_id, parent_agent_id, parent_session_id, label, depth in (
+            ("agent-a", "session-a", "supervisor", "root", "架构研究", 1),
+            ("agent-b", "session-b", "supervisor", "root", "后端实现", 1),
+            ("agent-b1", "session-b1", "agent-b", "session-b", "边界测试", 2),
+        )
+    )
+    manager = ContinuableSessionManager(
+        runtime,
+        snapshots,
+        team_id="task-team",
+    )
+    events: list[RunEvent] = []
+
+    async def scenario() -> None:
+        async def emit(event: RunEvent) -> None:
+            events.append(event)
+
+        agent_a = ToolContext(
+            workspace_path=tmp_path,
+            correlation_id="run-team",
+            task_id="task-team",
+            session_id="session-a",
+            agent_id="agent-a",
+            background_event=emit,
+        )
+        roster = json.loads(manager.list_team(agent_a).content)
+        assert {member["agentId"] for member in roster["members"]} == {
+            "agent-a", "agent-b", "agent-b1"
+        }
+
+        unauthorized_management = await manager.send(
+            agent_a,
+            "agent-b1",
+            "越级启动",
+        )
+        assert unauthorized_management.is_error is True
+
+        delivered = await manager.send_peer(
+            agent_a,
+            "agent-b1",
+            "请覆盖跨层级消息的恢复测试。",
+        )
+        assert delivered.is_error is False
+        assert harness.messages is None
+        listed = json.loads(manager.list(ToolContext(
+            workspace_path=tmp_path,
+            task_id="task-team",
+            agent_id="supervisor",
+        )).content)
+        assert next(
+            item for item in listed if item["agentId"] == "agent-b1"
+        )["pendingInbox"] == 1
+
+        supervisor = ToolContext(
+            workspace_path=tmp_path,
+            correlation_id="run-team",
+            task_id="task-team",
+            session_id="run-team",
+            agent_id="supervisor",
+            background_event=emit,
+        )
+        resumed = await manager.send(supervisor, "agent-b1", "现在继续边界测试。")
+        assert resumed.is_error is False
+        await manager.wait_for_activations()
+
+    asyncio.run(scenario())
+
+    user_messages = [
+        message.content for message in harness.messages if message.role == "user"
+    ]
+    assert "来自 Agent 架构研究" in user_messages[0]
+    assert "请覆盖跨层级消息的恢复测试。" in user_messages[0]
+    assert user_messages[1] == "现在继续边界测试。"
+    assert [event.type for event in events if "peer_message" in event.type] == [
+        "agent_peer_message_queued",
+        "agent_peer_message_delivered",
+        "agent_peer_message_consumed",
+    ]
+    assert all(
+        event.metadata["teamId"] == "task-team"
+        for event in events
+        if "peer_message" in event.type
+    )
 
 
 def test_continuable_session_compacts_and_recovers_its_own_context(

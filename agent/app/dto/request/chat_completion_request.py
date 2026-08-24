@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -43,6 +43,10 @@ class ChatMessageRequest(BaseModel):
         default_factory=list,
         max_length=10,
     )
+    provider_state: dict[str, Any] = Field(
+        default_factory=dict,
+        alias="providerState",
+    )
 
     @model_validator(mode="after")
     def validate_protocol_message(self) -> "ChatMessageRequest":
@@ -58,6 +62,8 @@ class ChatMessageRequest(BaseModel):
             raise ValueError("只有助手消息可以包含工具调用")
         if self.role != "user" and self.attachments:
             raise ValueError("只有用户消息可以包含附件")
+        if self.role != "assistant" and self.provider_state:
+            raise ValueError("只有助手消息可以包含 Provider 续传状态")
         return self
 
     def as_provider_message(self) -> dict[str, object]:
@@ -84,6 +90,8 @@ class ChatMessageRequest(BaseModel):
                 attachment.model_dump(by_alias=True)
                 for attachment in self.attachments
             ]
+        if self.provider_state:
+            message["provider_state"] = dict(self.provider_state)
         return message
 
 
@@ -97,6 +105,10 @@ class AgentInboxMessageRequest(BaseModel):
     )
     content: str = Field(min_length=1, max_length=100_000)
     status: Literal["pending", "consumed"] = "pending"
+    kind: Literal["task", "peer"] = Field(default="task", alias="messageKind")
+    sender_label: str | None = Field(
+        default=None, alias="senderLabel", max_length=120
+    )
 
 
 class AgentCheckpointRequest(BaseModel):
@@ -122,6 +134,10 @@ class AgentSessionSnapshotRequest(BaseModel):
     )
     parent_session_id: str = Field(
         alias="parentSessionId", min_length=1, max_length=500
+    )
+    team_id: str | None = Field(default=None, alias="teamId", max_length=160)
+    active_activation_id: str | None = Field(
+        default=None, alias="activeActivationId", max_length=160
     )
     label: str = Field(min_length=1, max_length=120)
     status: Literal[

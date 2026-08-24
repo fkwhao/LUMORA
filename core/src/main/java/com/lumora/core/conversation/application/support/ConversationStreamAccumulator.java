@@ -51,6 +51,9 @@ public class ConversationStreamAccumulator {
                 || event.getType() == ChatStreamEventType.AGENT_ACTIVATION_INTERRUPTED
                 || event.getType() == ChatStreamEventType.AGENT_REPORTED
                 || event.getType() == ChatStreamEventType.AGENT_CHECKPOINTED
+                || event.getType() == ChatStreamEventType.AGENT_PEER_MESSAGE_QUEUED
+                || event.getType() == ChatStreamEventType.AGENT_PEER_MESSAGE_DELIVERED
+                || event.getType() == ChatStreamEventType.AGENT_PEER_MESSAGE_CONSUMED
                 || event.getType() == ChatStreamEventType.TOOL_STARTED
                 || event.getType() == ChatStreamEventType.TOOL_COMPLETED
                 || event.getType() == ChatStreamEventType.TOOL_FAILED

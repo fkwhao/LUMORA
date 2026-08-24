@@ -20,6 +20,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -243,6 +245,15 @@ class ConversationPersistenceServiceTest {
         paused.setParentMessageId("user-1");
         paused.setMessageDepth(2);
         paused.setActivePath(true);
+        Map<String, Object> nativeInput = new LinkedHashMap<>();
+        nativeInput.put("command", "mvn test");
+        nativeInput.put("optional", null);
+        nativeInput.put("items", Arrays.asList(null, "x"));
+        Map<String, Object> nativeToolBlock = new LinkedHashMap<>();
+        nativeToolBlock.put("type", "tool_use");
+        nativeToolBlock.put("id", "call-1");
+        nativeToolBlock.put("name", "shell_command");
+        nativeToolBlock.put("input", nativeInput);
         paused.setWorkLogJson(objectMapper.writeValueAsString(List.of(
                 RunProtocolContextCodec.marker("model", List.of(
                         Map.of(
@@ -252,7 +263,18 @@ class ConversationPersistenceServiceTest {
                                         "id", "call-1",
                                         "name", "shell_command",
                                         "arguments", "{\"command\":\"mvn test\"}"
-                                ))
+                                )),
+                                "providerState", Map.of(
+                                        "apiFormat", "anthropic",
+                                        "contentBlocks", List.of(
+                                                Map.of(
+                                                        "type", "thinking",
+                                                        "thinking", "检查测试状态",
+                                                        "signature", "signed"
+                                                ),
+                                                nativeToolBlock
+                                        )
+                                )
                         ),
                         Map.of(
                                 "role", "tool",
@@ -298,6 +320,17 @@ class ConversationPersistenceServiceTest {
                 .isEqualTo("BUILD SUCCESS");
         assertThat(context.getModelMessages().get(1).getContent())
                 .doesNotContain("<interrupted_agent_run>");
+        assertThat(context.getModelMessages().get(1).getProviderState())
+                .containsEntry("apiFormat", "anthropic")
+                .containsKey("contentBlocks");
+        List<?> restoredBlocks = (List<?>) context.getModelMessages().get(1)
+                .getProviderState().get("contentBlocks");
+        Map<?, ?> restoredToolBlock = (Map<?, ?>) restoredBlocks.get(1);
+        Map<?, ?> restoredInput = (Map<?, ?>) restoredToolBlock.get("input");
+        assertThat(restoredInput.containsKey("optional")).isTrue();
+        assertThat(restoredInput.get("optional")).isNull();
+        assertThat(restoredInput.get("items"))
+                .isEqualTo(Arrays.asList(null, "x"));
     }
 
     private static ConversationMessage message(

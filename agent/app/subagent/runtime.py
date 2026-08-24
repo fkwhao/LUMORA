@@ -186,6 +186,8 @@ class SubagentRuntime:
             "parentAgentId": context.agent_id or "supervisor",
             "agentLabel": description,
             "agentRole": "worker",
+            "teamId": context.task_id or context.correlation_id or "local",
+            "activationId": f"{agent_id}:activation:1",
             "delegationDepth": delegation_depth,
             "writeScopes": [
                 scope.metadata() for scope in resolved_write_scopes
@@ -202,6 +204,7 @@ class SubagentRuntime:
                 **identity,
                 **error.metadata(),
                 "agentStatus": "failed",
+                "activationInput": prompt,
                 "toolExecutionState": "not_started",
             }
             await self._emit(context, RunEvent(
@@ -226,6 +229,7 @@ class SubagentRuntime:
                 metadata={
                     **identity,
                     "agentStatus": "failed",
+                    "activationInput": prompt,
                     "failureKind": "agent_concurrency_limit",
                     "retryable": True,
                     "toolExecutionState": "not_started",
@@ -267,7 +271,11 @@ class SubagentRuntime:
                 title=description,
                 delta="子 Agent 已开始执行",
                 model=self._settings.model,
-                metadata={**identity, "agentStatus": "running"},
+                metadata={
+                    **identity,
+                    "agentStatus": "running",
+                    "activationInput": prompt,
+                },
             ))
             child_registry = self._registry_for_context(context)
             child_prompt = self._build_prompt(context, child_registry)
@@ -341,6 +349,7 @@ class SubagentRuntime:
                 metadata={
                     **identity,
                     "agentStatus": "completed",
+                    "activationInput": prompt,
                     "visibleEventCount": forwarded_events,
                     **_usage_metadata(latest_usage),
                 },
@@ -369,6 +378,7 @@ class SubagentRuntime:
                 metadata={
                     **identity,
                     "agentStatus": "failed",
+                    "activationInput": prompt,
                     "failureKind": "agent_failed",
                     "retryable": False,
                     "toolExecutionState": "unknown",
@@ -383,6 +393,7 @@ class SubagentRuntime:
                 **identity,
                 **error.metadata(),
                 "agentStatus": "failed",
+                "activationInput": prompt,
                 "durationMs": duration_ms,
             }
             await self._emit(context, RunEvent(
@@ -411,6 +422,7 @@ class SubagentRuntime:
                 metadata={
                     **identity,
                     "agentStatus": "failed",
+                    "activationInput": prompt,
                     **_usage_metadata(latest_usage),
                 },
             ))
@@ -516,9 +528,10 @@ class SubagentRuntime:
         child_sequence: int,
     ) -> RunEvent:
         child_item_id = event.item_id or f"event-{child_sequence}"
+        event_scope_id = identity.get("activationId") or identity["agentId"]
         return RunEvent(
             type="agent_event",
-            item_id=f"{identity['agentId']}:{child_item_id}",
+            item_id=f"{event_scope_id}:{child_item_id}",
             tool_call_id=event.tool_call_id,
             tool_name=event.tool_name,
             title=event.title,

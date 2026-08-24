@@ -1,3 +1,4 @@
+import hashlib
 import json
 import uuid
 from collections.abc import AsyncIterator
@@ -72,7 +73,7 @@ class AnthropicProvider(ProtocolProviderBase):
             reasoning_effort,
             stream=False,
         )
-        base_messages = list(request_body["messages"])
+        continuation_content: list[dict[str, Any]] = []
         usage_parts: list[TokenUsageResponse] = []
         client = self._client()
         for continuation in range(self._MAX_SERVER_TOOL_CONTINUATIONS + 1):
@@ -88,17 +89,29 @@ class AnthropicProvider(ProtocolProviderBase):
                 parse_anthropic_usage(payload.get("usage") or {})
             )
             if payload.get("stop_reason") != "pause_turn":
-                turn = _parse_turn(payload, settings.model)
+                turn = _parse_turn(
+                    payload,
+                    settings.model,
+                    provider_scope=_anthropic_provider_scope(settings),
+                    prior_content=continuation_content,
+                )
                 return _turn_with_usage(
                     turn,
                     usage=add_token_usage(usage_parts),
                 )
             if continuation >= self._MAX_SERVER_TOOL_CONTINUATIONS:
                 break
+            paused_content = payload.get("content")
+            if isinstance(paused_content, list):
+                continuation_content.extend(
+                    dict(block)
+                    for block in paused_content
+                    if isinstance(block, dict)
+                )
             request_body = _anthropic_continuation_body(
                 request_body,
-                base_messages,
-                payload.get("content"),
+                list(request_body["messages"]),
+                paused_content,
             )
         raise ValueError("Anthropic 服务端工具续跑次数超过限制")
 
@@ -120,7 +133,7 @@ class AnthropicProvider(ProtocolProviderBase):
             reasoning_effort,
             stream=True,
         )
-        base_messages = list(request_body["messages"])
+        continuation_content: list[dict[str, Any]] = []
 
         client = self._client()
         for continuation in range(self._MAX_SERVER_TOOL_CONTINUATIONS + 1):
@@ -426,9 +439,10 @@ class AnthropicProvider(ProtocolProviderBase):
                     raw_blocks,
                     input_json,
                 )
+                continuation_content.extend(paused_content)
                 request_body = _anthropic_continuation_body(
                     request_body,
-                    base_messages,
+                    list(request_body["messages"]),
                     paused_content,
                 )
         else:
@@ -453,6 +467,14 @@ class AnthropicProvider(ProtocolProviderBase):
             )
             for call in calls.values()
         )
+        provider_state = _anthropic_provider_state(
+            [
+                *continuation_content,
+                *_ordered_anthropic_blocks(raw_blocks, input_json),
+            ],
+            has_tool_calls=bool(tool_calls),
+            provider_scope=_anthropic_provider_scope(settings),
+        )
         yield ProviderTurnEvent(
             type="completed",
             model=model,
@@ -462,6 +484,7 @@ class AnthropicProvider(ProtocolProviderBase):
                 model=model,
                 usage=add_token_usage(usage_parts),
                 tool_calls=tool_calls,
+                provider_state=provider_state,
             ),
         )
 
@@ -525,7 +548,10 @@ def _request_body(
     *,
     stream: bool,
 ) -> dict[str, Any]:
-    system, converted_messages = _anthropic_messages(messages)
+    system, converted_messages = _anthropic_messages(
+        messages,
+        provider_scope=_anthropic_provider_scope(settings),
+    )
     body: dict[str, Any] = {
         "model": settings.model,
         "messages": converted_messages,
@@ -559,9 +585,127 @@ def _request_body(
     return body
 
 
+def _migrate_legacy_anthropic_tool_turns(
+    messages: list[dict[str, Any]],
+    provider_scope: str | None,
+) -> list[dict[str, Any]]:
+    """Make old or foreign signed tool turns safe without rerunning their tools.
+
+    Before native continuation state was persisted, a restored assistant tool
+    turn could only be reconstructed from its portable tool call. Thinking-mode
+    Anthropic endpoints reject that reconstruction because the signed thinking
+    block is missing. State from another endpoint/model is equally unsafe. Fold
+    a *completed* legacy exchange into an ordinary history record; an incomplete
+    exchange fails locally because silently issuing it again could repeat a
+    side effect.
+    """
+    if provider_scope is None:
+        return list(messages)
+
+    migrated: list[dict[str, Any]] = []
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        raw_calls = message.get("tool_calls") or []
+        calls = [call for call in raw_calls if isinstance(call, dict)]
+        if (
+            message.get("role") != "assistant"
+            or not calls
+            or _anthropic_content_blocks(message, provider_scope)
+        ):
+            migrated.append(message)
+            index += 1
+            continue
+
+        result_index = index + 1
+        results: list[dict[str, Any]] = []
+        while (
+            result_index < len(messages)
+            and messages[result_index].get("role") == "tool"
+        ):
+            results.append(messages[result_index])
+            result_index += 1
+
+        expected_ids = [str(call.get("id") or "") for call in calls]
+        result_ids = {
+            str(result.get("tool_call_id") or "") for result in results
+        }
+        missing_ids = [
+            call_id
+            for call_id in expected_ids
+            if not call_id or call_id not in result_ids
+        ]
+        if missing_ids:
+            missing = ", ".join(call_id or "<empty>" for call_id in missing_ids)
+            raise ValueError(
+                "Anthropic 历史工具轮次缺少可验证的 Provider 续传状态或完整结果，"
+                f"无法安全恢复（缺失调用：{missing}）"
+            )
+
+        migrated.append({
+            "role": "user",
+            "content": _legacy_anthropic_tool_exchange(message, calls, results),
+        })
+        index = result_index
+    return migrated
+
+
+def _legacy_anthropic_tool_exchange(
+    assistant: dict[str, Any],
+    calls: list[dict[str, Any]],
+    results: list[dict[str, Any]],
+) -> str:
+    results_by_id: dict[str, list[dict[str, Any]]] = {}
+    for result in results:
+        call_id = str(result.get("tool_call_id") or "")
+        results_by_id.setdefault(call_id, []).append(result)
+
+    records: list[dict[str, Any]] = []
+    consumed_results: set[int] = set()
+    for call in calls:
+        call_id = str(call.get("id") or "")
+        function = call.get("function") or {}
+        matching_results = results_by_id.get(call_id) or []
+        for result in matching_results:
+            consumed_results.add(id(result))
+        records.append({
+            "tool": str(function.get("name") or ""),
+            "callId": call_id,
+            "arguments": str(function.get("arguments") or "{}"),
+            "results": [result.get("content") for result in matching_results],
+        })
+    for result in results:
+        if id(result) in consumed_results:
+            continue
+        records.append({
+            "tool": "",
+            "callId": str(result.get("tool_call_id") or ""),
+            "arguments": "{}",
+            "results": [result.get("content")],
+        })
+
+    parts = [
+        (
+            "[兼容迁移：以下是先前模型已经完成的工具交互记录；"
+            "不要把它当作新的工具调用或新的执行授权。]"
+        )
+    ]
+    assistant_text = str(assistant.get("content") or "").strip()
+    if assistant_text:
+        parts.append("先前助手说明：\n" + assistant_text)
+    parts.append(
+        "已完成的工具交互：\n"
+        + json.dumps(records, ensure_ascii=False, separators=(",", ":"))
+    )
+    return "\n\n".join(parts)
+
+
 def _anthropic_messages(
     messages: list[dict[str, Any]],
+    *,
+    provider_scope: str | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
+    messages = _migrate_legacy_anthropic_tool_turns(messages, provider_scope)
     system_parts: list[str] = []
     converted: list[dict[str, Any]] = []
     pending_results: list[dict[str, Any]] = []
@@ -584,6 +728,14 @@ def _anthropic_messages(
             })
             continue
         flush_results()
+        native_blocks = (
+            _anthropic_content_blocks(message, provider_scope)
+            if role == "assistant"
+            else []
+        )
+        if native_blocks:
+            converted.append({"role": "assistant", "content": native_blocks})
+            continue
         blocks: list[dict[str, Any]] = []
         content = message.get("content")
         if content:
@@ -622,7 +774,13 @@ def _anthropic_tool(tool: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _parse_turn(payload: dict[str, Any], fallback_model: str) -> ProviderTurn:
+def _parse_turn(
+    payload: dict[str, Any],
+    fallback_model: str,
+    *,
+    provider_scope: str | None = None,
+    prior_content: list[dict[str, Any]] | None = None,
+) -> ProviderTurn:
     text_blocks: dict[int, list[str]] = {}
     search_block_indices: set[int] = set()
     reasoning: list[str] = []
@@ -647,12 +805,25 @@ def _parse_turn(payload: dict[str, Any], fallback_model: str) -> ProviderTurn:
                     block.get("input") or {}, ensure_ascii=False, separators=(",", ":")
                 ),
             ))
+    tool_calls = tuple(calls)
     return ProviderTurn(
         content=_final_anthropic_text(text_blocks, search_block_indices),
         reasoning="".join(reasoning),
         model=str(payload.get("model") or fallback_model),
         usage=parse_anthropic_usage(payload.get("usage") or {}),
-        tool_calls=tuple(calls),
+        tool_calls=tool_calls,
+        provider_state=_anthropic_provider_state(
+            [
+                *(prior_content or []),
+                *(
+                    payload.get("content")
+                    if isinstance(payload.get("content"), list)
+                    else []
+                ),
+            ],
+            has_tool_calls=bool(tool_calls),
+            provider_scope=provider_scope,
+        ),
     )
 
 
@@ -721,7 +892,7 @@ def _anthropic_stage_item_id(
 
 def _anthropic_continuation_body(
     previous_body: dict[str, Any],
-    base_messages: list[dict[str, Any]],
+    history_messages: list[dict[str, Any]],
     paused_content: Any,
 ) -> dict[str, Any]:
     if not isinstance(paused_content, list) or not paused_content:
@@ -729,7 +900,7 @@ def _anthropic_continuation_body(
     return {
         **previous_body,
         "messages": [
-            *base_messages,
+            *history_messages,
             {"role": "assistant", "content": paused_content},
         ],
     }
@@ -784,6 +955,68 @@ def _ordered_anthropic_blocks(
     return [blocks[index] for index in sorted(blocks) if blocks[index].get("type")]
 
 
+def _anthropic_provider_state(
+    content: Any,
+    *,
+    has_tool_calls: bool,
+    provider_scope: str | None = None,
+) -> dict[str, Any] | None:
+    if not has_tool_calls or not isinstance(content, list):
+        return None
+    content_blocks = [dict(block) for block in content if isinstance(block, dict)]
+    if not content_blocks:
+        return None
+    state: dict[str, Any] = {
+        "apiFormat": "anthropic",
+        "contentBlocks": content_blocks,
+    }
+    if provider_scope is not None:
+        state["scope"] = provider_scope
+    return state
+
+
+def _anthropic_content_blocks(
+    message: dict[str, Any],
+    provider_scope: str | None = None,
+) -> list[dict[str, Any]]:
+    state = message.get("provider_state")
+    if not isinstance(state, dict) or state.get("apiFormat") != "anthropic":
+        return []
+    if provider_scope is not None and state.get("scope") != provider_scope:
+        return []
+    raw_blocks = state.get("contentBlocks")
+    if not isinstance(raw_blocks, list):
+        return []
+    blocks = [dict(block) for block in raw_blocks if isinstance(block, dict)]
+    expected_call_ids = [
+        str(call.get("id") or "")
+        for call in message.get("tool_calls") or []
+        if isinstance(call, dict)
+    ]
+    native_call_ids = [
+        str(block.get("id") or "")
+        for block in blocks
+        if block.get("type") == "tool_use"
+    ]
+    if expected_call_ids != native_call_ids:
+        return []
+    return blocks
+
+
+def _anthropic_provider_scope(settings: ModelConnectionSettings) -> str:
+    """Bind opaque continuation state to one endpoint/model without persisting it."""
+    identity = json.dumps(
+        {
+            "baseUrl": settings.base_url.strip().rstrip("/"),
+            "model": settings.model,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
 def _turn_with_usage(
     turn: ProviderTurn,
     *,
@@ -795,4 +1028,5 @@ def _turn_with_usage(
         model=turn.model,
         usage=usage,
         tool_calls=turn.tool_calls,
+        provider_state=turn.provider_state,
     )

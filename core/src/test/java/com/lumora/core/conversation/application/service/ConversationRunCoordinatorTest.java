@@ -36,10 +36,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -365,6 +367,76 @@ class ConversationRunCoordinatorTest {
     }
 
     @Test
+    void convergesPausedRunAndReleasesSlotWhenJournalPermanentlyFails() {
+        ConversationService conversationService = mock(
+                ConversationService.class
+        );
+        ConversationRunStore runStore = mock(ConversationRunStore.class);
+        ConversationRunEventStreamRegistry streams = mock(
+                ConversationRunEventStreamRegistry.class
+        );
+        ConversationRunEventJournal journal = mock(
+                ConversationRunEventJournal.class
+        );
+        Map<String, ConversationRun> runs = new LinkedHashMap<>();
+        stubRunStore(runStore, runs);
+        when(conversationService.pauseGeneration("task-1"))
+                .thenReturn(true);
+        List<String> startedTaskIds = new ArrayList<>();
+        List<Consumer<ChatStreamEvent>> eventConsumers = new ArrayList<>();
+        List<Runnable> completions = new ArrayList<>();
+        doAnswer(invocation -> {
+            startedTaskIds.add(invocation.getArgument(0));
+            eventConsumers.add(invocation.getArgument(7));
+            completions.add(invocation.getArgument(8));
+            return null;
+        }).when(conversationService).streamMessage(
+                anyString(), anyString(), any(), any(), any(), any(),
+                anyString(), any(), any(), any()
+        );
+        ConversationRunCoordinator coordinator = new ConversationRunCoordinator(
+                conversationService,
+                runStore,
+                mock(ConversationInputStore.class),
+                streams,
+                journal,
+                mock(TaskService.class),
+                mock(GitRunChangeService.class),
+                mock(TaskWorktreeService.class),
+                Clock.fixed(
+                        Instant.parse("2026-08-15T00:00:00Z"),
+                        ZoneOffset.UTC
+                ),
+                1
+        );
+
+        ConversationRun first = coordinator.startMessage(
+                "task-1", "first", null, null, null, null, "correlation-1"
+        );
+        ConversationRun second = coordinator.startMessage(
+                "task-2", "second", null, null, null, null, "correlation-2"
+        );
+        doThrow(new IllegalStateException("projection permanently failed"))
+                .when(journal).flush(first.getRunId());
+        doThrow(new IllegalStateException("projection permanently failed"))
+                .when(journal).appendImmediately(
+                        org.mockito.ArgumentMatchers.eq(first.getRunId()),
+                        any(ChatStreamEvent.class)
+                );
+
+        coordinator.pause("task-1", first.getRunId());
+        eventConsumers.getFirst().accept(new ChatStreamEvent(
+                ChatStreamEventType.PAUSED, "", "", null, ""
+        ));
+        completions.getFirst().run();
+
+        assertThat(first.getStatus()).isEqualTo(ConversationRunStatus.PAUSED);
+        assertThat(second.getStatus()).isEqualTo(ConversationRunStatus.RUNNING);
+        assertThat(startedTaskIds).containsExactly("task-1", "task-2");
+        verify(streams).complete(first.getRunId());
+    }
+
+    @Test
     void runsDifferentTasksConcurrentlyUpToTheConfiguredLimit() {
         ConversationService conversationService = mock(
                 ConversationService.class
@@ -491,6 +563,98 @@ class ConversationRunCoordinatorTest {
     }
 
     @Test
+    void leavesRunPausedWhenItsEventLaneCannotBeFlushedBeforeResume() {
+        ConversationService conversationService = mock(
+                ConversationService.class
+        );
+        ConversationRunStore runStore = mock(ConversationRunStore.class);
+        ConversationRunEventJournal journal = mock(
+                ConversationRunEventJournal.class
+        );
+        Map<String, ConversationRun> runs = new LinkedHashMap<>();
+        stubRunStore(runStore, runs);
+        ConversationRun paused = new ConversationRun();
+        paused.setRunId("run-quarantined");
+        paused.setTaskId("task-1");
+        paused.setStatus(ConversationRunStatus.PAUSED);
+        runs.put(paused.getRunId(), paused);
+        doThrow(new IllegalStateException("event lane quarantined"))
+                .when(journal).flush(paused.getRunId());
+        ConversationRunCoordinator coordinator = new ConversationRunCoordinator(
+                conversationService,
+                runStore,
+                mock(ConversationInputStore.class),
+                mock(ConversationRunEventStreamRegistry.class),
+                journal,
+                mock(TaskService.class),
+                mock(GitRunChangeService.class),
+                mock(TaskWorktreeService.class),
+                Clock.fixed(
+                        Instant.parse("2026-08-15T00:00:00Z"),
+                        ZoneOffset.UTC
+                ),
+                1
+        );
+
+        assertThatThrownBy(() -> coordinator.resume(
+                "task-1", paused.getRunId()
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("event lane quarantined");
+        assertThat(paused.getStatus()).isEqualTo(ConversationRunStatus.PAUSED);
+        verify(runStore, never()).prepareResume(paused.getRunId());
+    }
+
+    @Test
+    void rollsResumeBackToPausedWhenQueuedLifecycleCannotBePersisted() {
+        ConversationService conversationService = mock(
+                ConversationService.class
+        );
+        ConversationRunStore runStore = mock(ConversationRunStore.class);
+        ConversationRunEventJournal journal = mock(
+                ConversationRunEventJournal.class
+        );
+        Map<String, ConversationRun> runs = new LinkedHashMap<>();
+        stubRunStore(runStore, runs);
+        ConversationRun paused = new ConversationRun();
+        paused.setRunId("run-resume-write-failure");
+        paused.setTaskId("task-1");
+        paused.setStatus(ConversationRunStatus.PAUSED);
+        runs.put(paused.getRunId(), paused);
+        doThrow(new IllegalStateException("queued lifecycle failed"))
+                .when(journal).appendImmediately(
+                        org.mockito.ArgumentMatchers.eq(paused.getRunId()),
+                        any(ChatStreamEvent.class)
+                );
+        ConversationRunCoordinator coordinator = new ConversationRunCoordinator(
+                conversationService,
+                runStore,
+                mock(ConversationInputStore.class),
+                mock(ConversationRunEventStreamRegistry.class),
+                journal,
+                mock(TaskService.class),
+                mock(GitRunChangeService.class),
+                mock(TaskWorktreeService.class),
+                Clock.fixed(
+                        Instant.parse("2026-08-15T00:00:00Z"),
+                        ZoneOffset.UTC
+                ),
+                1
+        );
+
+        assertThatThrownBy(() -> coordinator.resume(
+                "task-1", paused.getRunId()
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("queued lifecycle failed");
+        assertThat(paused.getStatus()).isEqualTo(ConversationRunStatus.PAUSED);
+        assertThat(paused.getErrorMessage())
+                .isEqualTo("继续任务失败，运行仍保持暂停");
+        verify(conversationService, never()).continueMessage(
+                anyString(), any(), any(), any(), any(), anyString(),
+                any(), any(), any()
+        );
+    }
+
+    @Test
     void keepsARunResumableWhenItsPausingTurnFailsToSeal() {
         ConversationService conversationService = mock(
                 ConversationService.class
@@ -542,6 +706,53 @@ class ConversationRunCoordinatorTest {
         );
         assertThat(coordinator.resume("task-1", run.getRunId()).getStatus())
                 .isEqualTo(ConversationRunStatus.RUNNING);
+    }
+
+    @Test
+    void forwardsAndRetriesPauseWhenLifecyclePersistenceFails() {
+        ConversationService conversationService = mock(
+                ConversationService.class
+        );
+        ConversationRunStore runStore = mock(ConversationRunStore.class);
+        ConversationRunEventJournal journal = mock(
+                ConversationRunEventJournal.class
+        );
+        Map<String, ConversationRun> runs = new LinkedHashMap<>();
+        stubRunStore(runStore, runs);
+        when(conversationService.pauseGeneration("task-1"))
+                .thenReturn(true);
+        doAnswer(invocation -> null).when(conversationService).streamMessage(
+                anyString(), anyString(), any(), any(), any(), any(),
+                anyString(), any(), any(), any()
+        );
+        ConversationRunCoordinator coordinator = new ConversationRunCoordinator(
+                conversationService,
+                runStore,
+                mock(ConversationInputStore.class),
+                mock(ConversationRunEventStreamRegistry.class),
+                journal,
+                mock(TaskService.class),
+                mock(GitRunChangeService.class),
+                mock(TaskWorktreeService.class),
+                Clock.fixed(
+                        Instant.parse("2026-08-15T00:00:00Z"),
+                        ZoneOffset.UTC
+                ),
+                1
+        );
+        ConversationRun run = coordinator.startMessage(
+                "task-1", "执行长期任务", null, null,
+                null, null, "correlation-pause-retry"
+        );
+        doThrow(new IllegalStateException("projection failed"))
+                .when(journal).flush(run.getRunId());
+
+        ConversationRun first = coordinator.pause("task-1", run.getRunId());
+        ConversationRun second = coordinator.pause("task-1", run.getRunId());
+
+        assertThat(first.getStatus()).isEqualTo(ConversationRunStatus.PAUSING);
+        assertThat(second.getStatus()).isEqualTo(ConversationRunStatus.PAUSING);
+        verify(conversationService, times(2)).pauseGeneration("task-1");
     }
 
     @Test
@@ -878,6 +1089,7 @@ class ConversationRunCoordinatorTest {
                 .thenAnswer(invocation -> {
                     ConversationRun run = runs.get(invocation.getArgument(0));
                     run.setStatus(invocation.getArgument(1));
+                    run.setErrorMessage(invocation.getArgument(2));
                     if (run.getStatus() == ConversationRunStatus.RUNNING
                             && run.getStartedAt() == null) {
                         run.setStartedAt(Instant.parse(

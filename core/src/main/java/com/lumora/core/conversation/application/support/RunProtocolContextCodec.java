@@ -139,6 +139,9 @@ final class RunProtocolContextCodec {
             String content = nullableText(raw.get("content"));
             List<ChatToolCall> calls = decodeToolCalls(raw.get("toolCalls"));
             String toolCallId = nullableText(raw.get("toolCallId"));
+            Map<String, Object> providerState = stringMap(
+                    raw.get("providerState")
+            );
             if ("assistant".equals(role)
                     && (content == null || content.isBlank())
                     && calls.isEmpty()) {
@@ -154,7 +157,9 @@ final class RunProtocolContextCodec {
                     null,
                     sequence,
                     calls,
-                    toolCallId
+                    toolCallId,
+                    List.of(),
+                    providerState
             ));
         }
         if (messages.isEmpty()) {
@@ -167,7 +172,9 @@ final class RunProtocolContextCodec {
                 messageId,
                 sequence,
                 last.getToolCalls(),
-                last.getToolCallId()
+                last.getToolCallId(),
+                last.getAttachments(),
+                last.getProviderState()
         ));
         return List.copyOf(messages);
     }
@@ -195,6 +202,19 @@ final class RunProtocolContextCodec {
             }
         }
         return List.copyOf(calls);
+    }
+
+    private static Map<String, Object> stringMap(Object value) {
+        if (!(value instanceof Map<?, ?> raw)) {
+            return Map.of();
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        raw.forEach((key, item) -> {
+            if (key instanceof String stringKey) {
+                result.put(stringKey, item);
+            }
+        });
+        return Map.copyOf(result);
     }
 
     private static String text(Object value) {

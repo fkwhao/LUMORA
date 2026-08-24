@@ -7,6 +7,8 @@ public record AgentSessionSnapshot(
         String sessionId,
         String parentAgentId,
         String parentSessionId,
+        String teamId,
+        String activeActivationId,
         String label,
         String status,
         String mode,

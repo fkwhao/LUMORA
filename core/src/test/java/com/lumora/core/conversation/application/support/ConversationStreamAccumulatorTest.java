@@ -134,6 +134,35 @@ class ConversationStreamAccumulatorTest {
     }
 
     @Test
+    void persistsAndMergesAgentTeamMessageDeliveryStates() {
+        ConversationStreamAccumulator accumulator =
+                new ConversationStreamAccumulator();
+        accumulator.accept(peerMessageEvent(
+                ChatStreamEventType.AGENT_PEER_MESSAGE_QUEUED,
+                "queued"
+        ));
+        accumulator.accept(peerMessageEvent(
+                ChatStreamEventType.AGENT_PEER_MESSAGE_DELIVERED,
+                "delivered"
+        ));
+        accumulator.accept(peerMessageEvent(
+                ChatStreamEventType.AGENT_PEER_MESSAGE_CONSUMED,
+                "consumed"
+        ));
+
+        assertThat(accumulator.getWorkLogEvents()).singleElement()
+                .satisfies(event -> {
+                    assertThat(event.getType()).isEqualTo(
+                            ChatStreamEventType.AGENT_PEER_MESSAGE_CONSUMED
+                    );
+                    assertThat(event.getDelta()).isEqualTo("复核接口契约");
+                    assertThat(event.getMetadata())
+                            .containsEntry("messageStatus", "consumed")
+                            .containsEntry("targetAgentId", "agent-2");
+                });
+    }
+
+    @Test
     void keepsTheLatestCumulativeUsageSnapshot() {
         ConversationStreamAccumulator accumulator =
                 new ConversationStreamAccumulator();
@@ -299,6 +328,36 @@ class ConversationStreamAccumulatorTest {
                 type,
                 "", "model", null, "", itemId, "", "", "架构检查",
                 Map.of(), output, 20L, null, metadata
+        );
+    }
+
+    private ChatStreamEvent peerMessageEvent(
+            ChatStreamEventType type,
+            String status
+    ) {
+        return new ChatStreamEvent(
+                type,
+                "复核接口契约",
+                "model",
+                null,
+                "",
+                "message-1",
+                "",
+                "",
+                "研究 → 实现",
+                Map.of(),
+                "",
+                0L,
+                null,
+                Map.of(
+                        "teamId", "task-1",
+                        "messageId", "message-1",
+                        "senderAgentId", "agent-1",
+                        "targetAgentId", "agent-2",
+                        "messageStatus", status,
+                        "messageKind", "peer",
+                        "deliveryMode", "quiet"
+                )
         );
     }
 }

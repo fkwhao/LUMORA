@@ -121,6 +121,10 @@ def test_agent_loop_preserves_native_protocol_history() -> None:
     asyncio.run(_assert_native_protocol_history_is_preserved())
 
 
+def test_agent_loop_carries_provider_state_across_tool_boundary() -> None:
+    asyncio.run(_assert_provider_state_crosses_tool_boundary())
+
+
 def test_agent_loop_claims_steer_at_the_next_model_boundary() -> None:
     asyncio.run(_assert_steer_is_claimed_at_model_boundary())
 
@@ -758,6 +762,94 @@ async def _assert_native_protocol_history_is_preserved() -> None:
         "tool_call_id": "call-1",
     }
     assert events[-1].type == "completed"
+
+
+async def _assert_provider_state_crosses_tool_boundary() -> None:
+    model_calls: list[list[dict[str, object]]] = []
+    native_content = [
+        {
+            "type": "thinking",
+            "thinking": "Inspect the file.",
+            "signature": "signed-thinking",
+        },
+        {
+            "type": "tool_use",
+            "id": "call-1",
+            "name": "read_file",
+            "input": {"path": "a"},
+        },
+    ]
+
+    async def complete_turn(_settings, messages, _tools, _effort):
+        model_calls.append([dict(message) for message in messages])
+        if len(model_calls) == 1:
+            return ProviderTurn(
+                content="",
+                reasoning="Inspect the file.",
+                model="test-model",
+                usage=TokenUsageResponse(
+                    promptTokens=5,
+                    completionTokens=2,
+                    totalTokens=7,
+                ),
+                tool_calls=(ProviderToolCall(
+                    "call-1", "read_file", '{"path":"a"}'
+                ),),
+                provider_state={
+                    "apiFormat": "anthropic",
+                    "contentBlocks": native_content,
+                },
+            )
+        return ProviderTurn(
+            content="done",
+            reasoning="",
+            model="test-model",
+            usage=TokenUsageResponse(
+                promptTokens=8,
+                completionTokens=1,
+                totalTokens=9,
+            ),
+            tool_calls=(),
+        )
+
+    async def execute(_context, _data):
+        return ToolResult("file contents")
+
+    registry = ToolRegistry((function_tool(
+        name="read_file",
+        description="read",
+        input_schema={
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+        execute=execute,
+        read_only=True,
+    ),))
+    events = [
+        event
+        async for event in AgentLoopRunner(complete_turn).stream(
+            _settings(),
+            PromptAssembly(()),
+            [ChatMessageRequest(role="user", content="inspect")],
+            None,
+            registry,
+            ToolContext(Path(".")),
+        )
+    ]
+
+    assert model_calls[1][1]["provider_state"] == {
+        "apiFormat": "anthropic",
+        "contentBlocks": native_content,
+    }
+    assistant_protocol = next(
+        event.metadata["message"]
+        for event in events
+        if event.type == "protocol_message"
+        and event.metadata["message"]["role"] == "assistant"
+        and event.metadata["message"].get("toolCalls")
+    )
+    assert assistant_protocol["providerState"]["contentBlocks"] == native_content
 
 
 async def _assert_undispatched_calls_are_balanced() -> None:

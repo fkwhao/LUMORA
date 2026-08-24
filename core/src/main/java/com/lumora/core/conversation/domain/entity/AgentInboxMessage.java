@@ -19,6 +19,8 @@ public class AgentInboxMessage {
     @TableField("session_id") private String sessionId;
     @TableField("sequence") private long sequence;
     @TableField("sender_agent_id") private String senderAgentId;
+    @TableField("sender_label") private String senderLabel;
+    @TableField("message_kind") private String messageKind;
     @TableField("content") private String content;
     @TableField("status") private String status;
     @TableField(value = "created_at", typeHandler = SqliteInstantTypeHandler.class)

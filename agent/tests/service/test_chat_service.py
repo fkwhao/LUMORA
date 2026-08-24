@@ -25,6 +25,8 @@ _SESSION_CONTROL_TOOLS = (
     "delegate_task",
     "send_agent_message",
     "list_agent_sessions",
+    "list_team_agents",
+    "send_peer_message",
     "interrupt_agent",
     "report_to_parent",
     "create_workflow",

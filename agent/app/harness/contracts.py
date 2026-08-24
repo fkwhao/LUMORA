@@ -30,6 +30,7 @@ class ProviderTurn:
     model: str
     usage: TokenUsageResponse
     tool_calls: tuple[ProviderToolCall, ...]
+    provider_state: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)

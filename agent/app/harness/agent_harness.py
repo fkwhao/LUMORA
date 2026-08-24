@@ -72,9 +72,18 @@ class AgentHarness:
         messages: list[ChatMessageRequest],
         existing_summary: str | None,
     ) -> ChatCompletionResponse:
+        compactable_messages = []
+        for message in messages:
+            portable = message.as_provider_message()
+            # Provider state can contain signed hidden-thinking blocks. It is
+            # required only while continuing a native tool exchange; feeding it
+            # to the summarizer would expose opaque reasoning and inflate the
+            # summary prompt.
+            portable.pop("provider_state", None)
+            compactable_messages.append(portable)
         return await self._provider.compact_agent_history(
             settings,
-            [message.as_provider_message() for message in messages],
+            compactable_messages,
             existing_summary,
         )
 

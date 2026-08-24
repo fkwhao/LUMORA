@@ -203,7 +203,8 @@ public class AgentDtoMapper {
                         message.getToolCallId(),
                         message.getAttachments().stream()
                                 .map(AgentMessageAttachmentRequest::new)
-                                .toList()
+                                .toList(),
+                        message.getProviderState()
                 ))
                 .toList();
         return new AgentChatCompletionRequest(

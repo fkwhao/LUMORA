@@ -819,7 +819,7 @@ def _paused_event(model: str) -> RunEvent:
 
 
 def _assistant_protocol_message(turn: Any) -> dict[str, Any]:
-    return {
+    message = {
         "role": "assistant",
         "content": turn.content or None,
         "tool_calls": [
@@ -834,6 +834,10 @@ def _assistant_protocol_message(turn: Any) -> dict[str, Any]:
             for call in turn.tool_calls
         ],
     }
+    provider_state = getattr(turn, "provider_state", None)
+    if isinstance(provider_state, dict) and provider_state:
+        message["provider_state"] = dict(provider_state)
+    return message
 
 
 def _protocol_message_event(
@@ -856,6 +860,9 @@ def _protocol_message_event(
             }
             for call in tool_calls
         ]
+    provider_state = provider_message.get("provider_state")
+    if isinstance(provider_state, dict) and provider_state:
+        portable["providerState"] = dict(provider_state)
     tool_call_id = provider_message.get("tool_call_id")
     if tool_call_id:
         portable["toolCallId"] = str(tool_call_id)

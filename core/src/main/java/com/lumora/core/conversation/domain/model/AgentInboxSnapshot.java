@@ -4,7 +4,9 @@ public record AgentInboxSnapshot(
         String messageId,
         long sequence,
         String senderAgentId,
+        String senderLabel,
         String content,
-        String status
+        String status,
+        String messageKind
 ) {
 }

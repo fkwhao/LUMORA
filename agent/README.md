@@ -5,7 +5,7 @@ Python 3.12 Agent 推理与编排运行时。
 ## 职责
 
 - Agent Harness、动态计划、模型—工具循环和上下文压缩。
-- Supervisor 通过 `delegate_task` 启动 one-shot 或 continuable 的完整能力子 Agent Session；子 Agent 继承本次请求实际可见的文件、Shell、MCP、Skill 与委派工具，其生命周期、可见步骤、用量、Inbox、Checkpoint 和报告通过统一 RunEvent 实时上报。
+- Supervisor 通过 `delegate_task` 启动 one-shot 或 continuable 的完整能力子 Agent Session；子 Agent 继承本次请求实际可见的文件、Shell、MCP、Skill 与委派工具，其生命周期、Activation、可见步骤、用量、Inbox、Checkpoint 和报告通过统一 RunEvent 实时上报。同一 `teamId` 的 continuable Agent 可使用 `list_team_agents` / `send_peer_message` 进行不唤醒目标的耐久信息通信。
 - 复杂任务可选用 `create_workflow` / `run_workflow` 建立显式 DAG；调度器按依赖、优先级、deadline、累计配额与声明写入范围分 wave 公平执行，并优先从 Core 的耐久 DAG/节点/Effect 快照恢复，工具消息仅作为兼容恢复来源。
 - 根 Run 与全部子 Agent 共用请求级执行预算；模型流和只读工具使用带稳定 Effect ID 的有限安全重试，写工具不对未知执行状态自动重放。
 - Chat Completions、OpenAI Responses、Anthropic Messages 三种协议适配，
@@ -68,6 +68,9 @@ app/main.py            FastAPI 与 Uvicorn 生命周期
 历史。两者都继承父请求实际暴露的工具表，可以修改文件、执行 Shell、调用 MCP 或继续委派。
 子 Session 与主 Run 共用审批关联 ID，另用 `sessionId` 和 `agentId` 区分执行身份；委派深度最多
 3 层，活动子 Agent 数由共享执行预算约束。声明 `writeScopes` 的 Agent 在整个执行期持有写入意图；
+同一根任务下的 continuable Session 另共享稳定 `teamId`：Team 成员只能读取有限公开 roster，并以
+quiet 消息向平级或跨层级 Session 投递信息。消息进入目标 FIFO Inbox 和 Core 事件日志，但不会自行
+启动或恢复 Activation，也不会放宽 Supervisor/直接父级的任务追加、中止、关闭或权限管理边界。
 动态文件工具仍会按真实目标获取短期写入意图和资源锁。租约跨 Python 进程协调，使用 TTL、FIFO
 等待票据与 fencing token 从崩溃和迟到写者中恢复。`write_file` 可用 `conflictPolicy=merge` 对最近读取
 基线、当前内容和拟写内容执行保守三方合并。`read_file` 返回可追踪的 `observationId`，完整写入可用

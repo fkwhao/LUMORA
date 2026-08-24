@@ -101,7 +101,14 @@ export interface ExecutionPlanStep {
 
 export interface WorkLogItem {
   itemId: string;
-  kind: "progress" | "tool" | "context" | "approval" | "search" | "agent";
+  kind:
+    | "progress"
+    | "tool"
+    | "context"
+    | "approval"
+    | "search"
+    | "agent"
+    | "message";
   status: WorkLogItemStatus;
   content?: string;
   toolCallId?: string;
@@ -195,6 +202,9 @@ export type ChatStreamEventType =
   | "agent_activation_interrupted"
   | "agent_reported"
   | "agent_checkpointed"
+  | "agent_peer_message_queued"
+  | "agent_peer_message_delivered"
+  | "agent_peer_message_consumed"
   | "tool_started"
   | "tool_completed"
   | "tool_failed"

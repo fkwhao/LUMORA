@@ -20,6 +20,7 @@ public class AgentSession {
     @TableField("task_id") private String taskId;
     @TableField("parent_session_id") private String parentSessionId;
     @TableField("parent_agent_id") private String parentAgentId;
+    @TableField("team_id") private String teamId;
     @TableField("label") private String label;
     @TableField("mode") private String mode;
     @TableField("status") private String status;
