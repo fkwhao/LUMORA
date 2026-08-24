@@ -1833,4 +1833,8 @@ async def _assert_agent_loop_compacts_mid_turn() -> None:
     assert "context_compaction_started" in [event.type for event in events]
     compacted = next(event for event in events if event.type == "context_compacted")
     assert compacted.metadata["phase"] == "mid_turn"
+    assert compacted.metadata["compactedMessageCount"] == len(
+        compacted_batches[0]
+    )
+    assert compacted.metadata["retainedMessageCount"] >= 5
     assert events[-1].type == "completed"

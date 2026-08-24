@@ -48,7 +48,9 @@ Worker，而是保存稳定 Session 身份、FIFO Inbox 与 Checkpoint，仅在�
 
 每次委派生成新的 `agentId` 和 `sessionId`。one-shot 子 Session 的消息历史只包含一条自包含任务；
 continuable 子 Session 首次也不继承父会话正文，但之后会从 Core Checkpoint 恢复自身 Transcript，
-并按 Inbox 顺序追加后续任务。父 Agent 必须在首次委派中写清目标、范围、必要背景和预期输出。
+并按 Inbox 顺序追加后续任务。其上下文达到阈值后会独立生成摘要、保留近期结构完整的 Transcript，
+并立即写入 Checkpoint；恢复前也会先检查容量，避免把未经整理的长期 Transcript 直接发送给模型。
+父 Agent 必须在首次委派中写清目标、范围、必要背景和预期输出。
 
 身份字段和审批关联分离：
 
@@ -203,14 +205,16 @@ Desktop 对 continuable Session 只提供只读状态和报告展示，不提供
 - 已增加 `send`、`list`、`interrupt`、`report`，允许 Supervisor 追问、追加上下文、中止或接收
   子 Agent 主动报告；同一 Session 的消息进入 FIFO Inbox。
 - Core 已增加 AgentSession、AgentCheckpoint、父子关系和未读状态查询，不再只依赖父 Run 嵌套
-  投影；子 Session 的完整 Transcript 是详情输出的事实来源。
+  投影；子 Session 的可恢复上下文由最新摘要和近期 Transcript 共同组成，原始 Run 事件日志继续
+  作为审计来源。
 - 每个 continuable Session 同时最多一个 Activation。Activation 可空闲卸载和冷恢复，不能成为
   状态唯一来源；父 Session 结束前应先处理仍存活的后代 Activation。
 - Desktop 增加 Session 树、未读/Inbox、Activation、Checkpoint 和跨 Turn 恢复状态；不增加人工
   继续/中止入口，控制权保留给 Supervisor。
 - Core 已作为 Session Inbox、Checkpoint 和 Activation 状态的单一事实来源；不预创建通用
-  Worker Pool，容量按需分配给活跃 Session。空闲 TTL、长期 Transcript 压缩和更细预算进入
-  后续增量。
+  Worker Pool，容量按需分配给活跃 Session。continuable Session 已在 Activation 前和工具循环中
+  自动压缩长期 Transcript，并把摘要、近期 Transcript 和压缩用量耐久化；空闲 TTL 和更细预算
+  进入后续增量。
 
 ### Phase 3A：显式 DAG、预算与多写者冲突规划（已完成）
 

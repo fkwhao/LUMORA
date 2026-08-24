@@ -4,8 +4,18 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+from app.dto.request.chat_completion_request import (
+    AgentCheckpointRequest,
+    AgentSessionSnapshotRequest,
+    ChatMessageRequest,
+)
+from app.dto.response.chat_completion_response import (
+    ChatCompletionResponse,
+    TokenUsageResponse,
+)
 from app.execution.tool_call_executor import ToolCallExecutor
 from app.execution.tool_result_processor import ToolResultProcessor
+from app.harness.agent_harness import HistoryCompactionPlan
 from app.harness.contracts import ProviderToolCall
 from app.harness.run_control import RunControl
 from app.harness.run_event import RunEvent, RunUsage
@@ -31,6 +41,8 @@ class ChildHarness:
         self.messages: Any = None
         self.registry: Any = None
         self.prompt: Any = None
+        self.prompt_supplier: Any = None
+        self.conversation_summary: Any = None
         self.context: Any = None
         self.permission_policy: Any = None
 
@@ -48,6 +60,8 @@ class ChildHarness:
         self.prompt = prompt
         self.context = _args[0]
         self.permission_policy = _args[1]
+        self.prompt_supplier = _args[5]
+        self.conversation_summary = _args[6]
         yield RunEvent(
             type="progress_message",
             item_id="progress-1",
@@ -147,6 +161,11 @@ def test_subagent_uses_isolated_messages_and_emits_observable_lifecycle(
     assert "实际暴露的工具表" in harness.prompt.system_prompt
     assert "mode=one_shot" in harness.prompt.system_prompt
     assert "mode=continuable" in harness.prompt.system_prompt
+    compacted_prompt = harness.prompt_supplier("子 Agent 历史摘要")
+    assert any(
+        "子 Agent 历史摘要" in message["content"]
+        for message in compacted_prompt.context_messages
+    )
     assert harness.context.correlation_id == "run-1"
     assert harness.context.session_id.startswith("run-1:agent:")
     assert harness.context.agent_id == emitted[0].metadata["agentId"]
@@ -606,6 +625,209 @@ def test_continuable_session_uses_fifo_inbox_and_serial_activations(
         for event in events
         if event.type == "agent_activation_started"
     ] == [1, 2]
+
+
+def test_continuable_session_compacts_and_recovers_its_own_context(
+    tmp_path: Path,
+) -> None:
+    class CompactingHarness(ChildHarness):
+        def __init__(self) -> None:
+            super().__init__()
+            self.compaction_messages: list[ChatMessageRequest] = []
+            self.existing_summary: str | None = None
+            self.stream_messages: list[ChatMessageRequest] = []
+            self.stream_summary: str | None = None
+            self.inline_prompt: Any = None
+            self._planned = False
+
+        def plan_history_compaction(
+            self,
+            _settings: Any,
+            _prompt: Any,
+            messages: list[ChatMessageRequest],
+        ) -> HistoryCompactionPlan | None:
+            if self._planned:
+                return None
+            self._planned = True
+            return HistoryCompactionPlan(
+                compactable=list(messages[:-5]),
+                retained=list(messages[-5:]),
+                before_tokens=18_000,
+            )
+
+        async def compact_history(
+            self,
+            _settings: Any,
+            messages: list[ChatMessageRequest],
+            existing_summary: str | None,
+        ) -> ChatCompletionResponse:
+            self.compaction_messages = list(messages)
+            self.existing_summary = existing_summary
+            return ChatCompletionResponse(
+                message="新的子 Session 摘要",
+                model="model",
+                usage=TokenUsageResponse(
+                    promptTokens=40,
+                    completionTokens=20,
+                    totalTokens=60,
+                ),
+            )
+
+        def estimate_context_tokens(self, *_args: Any) -> int:
+            return 3_500
+
+        async def stream(
+            self,
+            _settings: Any,
+            prompt: Any,
+            messages: Any,
+            _reasoning_effort: Any,
+            _registry: Any,
+            *_args: Any,
+        ) -> AsyncIterator[RunEvent]:
+            self.prompt = prompt
+            self.stream_messages = list(messages)
+            self.stream_summary = _args[6]
+            self.inline_prompt = _args[5]("中途更新后的摘要")
+            yield RunEvent(
+                type="context_compacted",
+                item_id="context-inline-test",
+                title="已压缩上下文",
+                metadata={
+                    "summary": "中途更新后的摘要",
+                    "beforeTokens": 8_000,
+                    "afterTokens": 2_500,
+                    "phase": "mid_turn",
+                    "compactedMessageCount": 1,
+                    "retainedMessageCount": 4,
+                },
+                model="model",
+                usage=RunUsage(
+                    prompt_tokens=25,
+                    completion_tokens=10,
+                    total_tokens=35,
+                ),
+            )
+            yield RunEvent(type="text_delta", delta="压缩后继续完成。")
+            yield RunEvent(
+                type="usage",
+                model="model",
+                usage=RunUsage(
+                    prompt_tokens=30,
+                    completion_tokens=15,
+                    total_tokens=45,
+                ),
+            )
+            yield RunEvent(type="completed", model="model")
+
+    history = [
+        ChatMessageRequest(
+            role="user" if index % 2 else "assistant",
+            content=f"历史消息 {index}",
+        )
+        for index in range(1, 8)
+    ]
+    snapshot = AgentSessionSnapshotRequest(
+        agentId="agent-context",
+        sessionId="run-context:agent:agent-context",
+        parentAgentId="supervisor",
+        parentSessionId="run-context",
+        label="长期研究",
+        delegationDepth=1,
+        model="model",
+        checkpoint=AgentCheckpointRequest(
+            sequence=4,
+            consumedInboxSequence=0,
+            transcript=history,
+            summary="旧的子 Session 摘要",
+        ),
+    )
+    harness = CompactingHarness()
+    runtime = SubagentRuntime(
+        harness=harness,  # type: ignore[arg-type]
+        settings=ModelConnectionSettings(
+            provider_name="test",
+            base_url="https://example.com/v1",
+            api_key="secret",
+            model="model",
+        ),
+        reasoning_effort=None,
+        source_registry=create_default_tool_registry(),
+        prompt_builder=PromptBuilder(),
+        project_instructions=(),
+        permission_engine=PermissionEngine(),
+        approval_broker=ApprovalBroker(),
+        permission_config_store=PermissionConfigStore(tmp_path / "home"),
+        permission_policy=PermissionPolicy(mode=PermissionMode.FULL_ACCESS),
+        run_control=None,
+    )
+    manager = ContinuableSessionManager(runtime, (snapshot,))
+    events: list[RunEvent] = []
+
+    async def scenario() -> None:
+        async def emit(event: RunEvent) -> None:
+            events.append(event)
+
+        context = ToolContext(
+            workspace_path=tmp_path,
+            correlation_id="run-context",
+            session_id="run-context",
+            agent_id="supervisor",
+            background_event=emit,
+        )
+        result = await manager.send(
+            context,
+            "agent-context",
+            "继续长期研究",
+        )
+        assert result.is_error is False
+        await manager.wait_for_activations()
+
+    asyncio.run(scenario())
+
+    assert harness.existing_summary == "旧的子 Session 摘要"
+    assert len(harness.compaction_messages) == 3
+    assert len(harness.stream_messages) == 5
+    assert harness.stream_summary == "新的子 Session 摘要"
+    assert any(
+        "新的子 Session 摘要" in message["content"]
+        for message in harness.prompt.context_messages
+    )
+    assert any(
+        "中途更新后的摘要" in message["content"]
+        for message in harness.inline_prompt.context_messages
+    )
+    compacted_steps = [
+        event for event in events
+        if event.type == "agent_event"
+        and event.metadata.get("childEventType") == "context_compacted"
+    ]
+    assert [event.metadata["phase"] for event in compacted_steps] == [
+        "pre_activation",
+        "mid_turn",
+    ]
+    compacted_checkpoint = next(
+        event for event in events
+        if event.type == "agent_checkpointed"
+        and event.metadata.get("summary") == "新的子 Session 摘要"
+        and len(event.metadata.get("transcript", [])) == 5
+    )
+    assert compacted_checkpoint.metadata["agentStatus"] == "running"
+    mid_turn_checkpoint = next(
+        event for event in events
+        if event.type == "agent_checkpointed"
+        and event.metadata.get("summary") == "中途更新后的摘要"
+        and len(event.metadata.get("transcript", [])) == 4
+    )
+    assert mid_turn_checkpoint.metadata["agentStatus"] == "running"
+    usage = next(event for event in events if event.type == "usage")
+    assert usage.usage is not None
+    assert usage.usage.total_tokens == 105
+    final_checkpoint = [
+        event for event in events if event.type == "agent_checkpointed"
+    ][-1]
+    assert final_checkpoint.metadata["summary"] == "中途更新后的摘要"
+    assert len(final_checkpoint.metadata["transcript"]) == 5
 
 
 def test_continuable_interrupt_and_report_preserve_session(

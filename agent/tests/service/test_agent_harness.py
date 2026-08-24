@@ -2,7 +2,10 @@ import asyncio
 from pathlib import Path
 
 from app.dto.request.chat_completion_request import ChatMessageRequest
-from app.dto.response.chat_completion_response import TokenUsageResponse
+from app.dto.response.chat_completion_response import (
+    ChatCompletionResponse,
+    TokenUsageResponse,
+)
 from app.execution.budget import ExecutionBudgetLedger
 from app.harness.agent_harness import AgentHarness
 from app.harness.contracts import ProviderTurn, ProviderTurnEvent
@@ -177,6 +180,68 @@ def test_harness_uses_agent_loop_strategy_with_tools(tmp_path: Path) -> None:
     assert provider.stream_calls == 0
     assert provider.turn_calls == 0
     assert provider.turn_stream_calls == 1
+
+
+def test_harness_plans_and_compacts_persistable_agent_history() -> None:
+    class CompactionProvider(StrategyRecordingProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.compacted_messages = []
+            self.existing_summary = None
+
+        async def compact_agent_history(
+            self,
+            _settings,
+            messages,
+            existing_summary,
+        ):
+            self.compacted_messages = messages
+            self.existing_summary = existing_summary
+            return ChatCompletionResponse(
+                message="更新摘要",
+                model="test-model",
+                usage=TokenUsageResponse(
+                    promptTokens=20,
+                    completionTokens=5,
+                    totalTokens=25,
+                ),
+            )
+
+    provider = CompactionProvider()
+    harness = AgentHarness(provider)  # type: ignore[arg-type]
+    settings = ModelConnectionSettings(
+        provider_name="test",
+        base_url="https://example.com/v1",
+        api_key="secret",
+        model="test-model",
+        context_window=20_000,
+        max_output_tokens=2_000,
+    )
+    messages = [
+        ChatMessageRequest(
+            role="user" if index % 2 else "assistant",
+            content=f"history-{index}-" + "x" * 10_000,
+        )
+        for index in range(1, 8)
+    ]
+
+    plan = harness.plan_history_compaction(
+        settings,
+        PromptAssembly(()),
+        messages,
+    )
+
+    assert plan is not None
+    assert plan.compactable
+    assert len(plan.retained) >= 5
+    compacted = asyncio.run(harness.compact_history(
+        settings,
+        plan.compactable,
+        "旧摘要",
+    ))
+    assert compacted.message == "更新摘要"
+    assert provider.existing_summary == "旧摘要"
+    assert len(provider.compacted_messages) == len(plan.compactable)
 
 
 def test_harness_never_treats_cumulative_token_usage_as_an_execution_limit(

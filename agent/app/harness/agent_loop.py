@@ -709,6 +709,8 @@ class AgentLoopRunner:
                             "afterTokens": after_tokens,
                             "trigger": "auto",
                             "phase": "mid_turn",
+                            "compactedMessageCount": len(compactable),
+                            "retainedMessageCount": len(retained),
                             "usage": compacted.usage.model_dump(by_alias=True),
                         },
                         model=compacted.model,

@@ -86,6 +86,13 @@ context_compaction_started
 每次 Compact 完成后都重新调用 PromptBuilder 注入当前运行上下文、项目指令、可用工具和最新
 摘要，再替换模型可见历史。中途压缩不改变公开 SSE 字段，也不删除 Java 保存的原始消息。
 
+子 Agent 使用相同的 `ContextPlanner` 与摘要 Provider。one-shot Session 在本次工具循环中把最新
+摘要重新注入自己的 Prompt；continuable Session 在每次 Activation 发起首个模型请求前检查自身
+容量，并在工具循环中继续检查。每次成功压缩都立即把“最新摘要 + 近期结构完整的 Transcript”写入
+`agent_checkpoint`，下一次 Activation 或进程恢复只重放这组可恢复上下文。子 Agent 压缩调用的
+TokenUsage 继续汇入父 Run 的累计用量，但子 Transcript 和摘要不进入 Supervisor 的活动上下文；
+Supervisor 只接收 `delegate_task` 返回的最终报告或显式 `report`。
+
 ## 5. 模型可见工具输出保护
 
 Artifact 判断前仍保留单结果 50,000 字符和单回合累计 200,000 字符规则。对不满足 Artifact
@@ -95,9 +102,11 @@ Artifact 判断前仍保留单结果 50,000 字符和单回合累计 200,000 字
 
 ## 6. 数据归属与恢复
 
-- Python：`ChatService` 管理回合前压缩，`AgentHarness` 管理工具循环中的中途压缩，
-  `ContextPlanner` 负责统一预算决策，`ToolResultProcessor` 负责 Artifact 外置与模型可见截断，
-  Provider 只生成摘要和模型回合。将两个自动压缩入口统一到 Harness 属于后续运行路径重构。
+- Python：`ChatService` 管理主会话回合前压缩，`AgentHarness` 管理工具循环中的中途压缩并提供
+  通用历史压缩规划，`ContinuableSessionManager` 管理子 Session 的 Activation 前压缩和
+  Checkpoint 摘要边界；`ContextPlanner` 负责统一预算决策，`ToolResultProcessor` 负责 Artifact
+  外置与模型可见截断，Provider 只生成摘要和模型回合。将主会话的两个自动压缩入口统一到
+  Harness 属于后续运行路径重构。
 - Java：消息、摘要版本、Artifact 索引、任务归属、REST/SSE 契约。
 - Desktop：`/compact` 识别、处理步骤、Token 占比与 Artifact 分块查看。
 
@@ -109,7 +118,8 @@ Desktop 的个人资料页展示这些持久化统计；任务页右侧上下文
 只作为快速观察构成的参考。
 
 进程重启后 Java 从最新有效摘要恢复 `conversationSummary`，仅查询并发送其边界之后的原始消息。
-Artifact 由稳定 ID 重新定位，不依赖 Renderer 状态。
+continuable 子 Session 则从最新 AgentCheckpoint 恢复自己的 summary、近期 Transcript 与 Inbox
+游标；Artifact 由稳定 ID 重新定位，不依赖 Renderer 状态。
 
 ## 7. 当前限制与后续工作
 

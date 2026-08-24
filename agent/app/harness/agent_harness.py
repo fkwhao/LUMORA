@@ -1,9 +1,10 @@
 from collections.abc import AsyncIterator
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from app.context.planner import ContextPlanner
 from app.dto.request.chat_completion_request import ChatMessageRequest
+from app.dto.response.chat_completion_response import ChatCompletionResponse
 from app.execution.budget import BudgetExceeded
 from app.execution.tool_result_processor import ToolResultProcessor
 from app.harness.agent_loop import AgentLoopRunner
@@ -21,6 +22,13 @@ from app.tool.base import ToolContext
 from app.tool.registry import ToolRegistry
 
 
+@dataclass(frozen=True, slots=True)
+class HistoryCompactionPlan:
+    compactable: list[ChatMessageRequest]
+    retained: list[ChatMessageRequest]
+    before_tokens: int
+
+
 class AgentHarness:
     """连接模型、上下文与工具执行的一次 Agent 运行边界。"""
 
@@ -32,9 +40,54 @@ class AgentHarness:
         max_parallel_tool_calls: int = 10,
     ) -> None:
         self._provider = provider
-        self._context_planner = context_planner
+        self._context_planner = context_planner or ContextPlanner()
         self._result_processor = result_processor
         self._max_parallel_tool_calls = max_parallel_tool_calls
+
+    def plan_history_compaction(
+        self,
+        settings: ModelConnectionSettings,
+        prompt: PromptAssembly,
+        messages: list[ChatMessageRequest],
+    ) -> HistoryCompactionPlan | None:
+        should_compact, before_tokens, _threshold = (
+            self._context_planner.should_compact(settings, prompt, messages)
+        )
+        if not should_compact:
+            return None
+        compactable, retained = self._context_planner.split_for_compaction(
+            messages
+        )
+        if not compactable:
+            return None
+        return HistoryCompactionPlan(
+            compactable=compactable,
+            retained=retained,
+            before_tokens=before_tokens,
+        )
+
+    async def compact_history(
+        self,
+        settings: ModelConnectionSettings,
+        messages: list[ChatMessageRequest],
+        existing_summary: str | None,
+    ) -> ChatCompletionResponse:
+        return await self._provider.compact_agent_history(
+            settings,
+            [message.as_provider_message() for message in messages],
+            existing_summary,
+        )
+
+    def estimate_context_tokens(
+        self,
+        settings: ModelConnectionSettings,
+        prompt: PromptAssembly,
+        messages: list[ChatMessageRequest],
+    ) -> int:
+        _should_compact, tokens, _threshold = (
+            self._context_planner.should_compact(settings, prompt, messages)
+        )
+        return tokens
 
     async def stream(
         self,

@@ -8,12 +8,14 @@ from app.dto.request.chat_completion_request import (
     AgentSessionSnapshotRequest,
     ChatMessageRequest,
 )
+from app.dto.response.chat_completion_response import TokenUsageResponse
 from app.execution.budget import BudgetExceeded
 from app.execution.write_intents import (
     WriterConflict,
     WriteScope,
     declared_write_scopes,
 )
+from app.harness.run_control import await_or_pause
 from app.harness.run_event import RunEvent, RunUsage
 from app.subagent.runtime import (
     _AGENT_LIFECYCLE_EVENT_TYPES,
@@ -52,6 +54,7 @@ class _Session:
     model: str
     status: str = "idle"
     transcript: list[ChatMessageRequest] = field(default_factory=list)
+    summary: str = ""
     inbox: list[_InboxMessage] = field(default_factory=list)
     consumed_inbox_sequence: int = 0
     checkpoint_sequence: int = 0
@@ -98,6 +101,11 @@ class ContinuableSessionManager:
                 ),
                 transcript=(
                     list(checkpoint.transcript) if checkpoint is not None else []
+                ),
+                summary=(
+                    (checkpoint.summary or "")
+                    if checkpoint is not None
+                    else ""
                 ),
                 inbox=[
                     _InboxMessage(
@@ -465,6 +473,7 @@ class ContinuableSessionManager:
         started_at = time.perf_counter()
         answer_parts: list[str] = []
         latest_usage: RunUsage | None = None
+        prelude_usage = RunUsage()
         usage_emitted = False
         forwarded_events = 0
         child_sequence = 0
@@ -539,9 +548,14 @@ class ContinuableSessionManager:
             child_registry = self._runtime._registry_for_context(
                 registry_context
             )
-            child_prompt = self._runtime._build_prompt(
-                registry_context, child_registry
-            )
+            def prompt_supplier(summary: str | None):
+                return self._runtime._build_prompt(
+                    registry_context,
+                    child_registry,
+                    conversation_summary=summary,
+                )
+
+            child_prompt = prompt_supplier(session.summary or None)
             child_context = replace(
                 registry_context,
                 session_id=session.session_id,
@@ -549,6 +563,141 @@ class ContinuableSessionManager:
                 delegation_depth=session.delegation_depth,
                 emit_event=None,
             )
+
+            plan_history_compaction = getattr(
+                self._runtime._harness,
+                "plan_history_compaction",
+                None,
+            )
+            compaction_plan = (
+                plan_history_compaction(
+                    self._runtime._settings,
+                    child_prompt,
+                    list(session.transcript),
+                )
+                if callable(plan_history_compaction)
+                else None
+            )
+            if compaction_plan is not None:
+                compaction_item_id = (
+                    f"context-activation-{session.activation_id}"
+                )
+                child_sequence += 1
+                if forwarded_events < _MAX_VISIBLE_CHILD_EVENTS:
+                    forwarded_events += 1
+                    await self._emit_background(
+                        parent_context,
+                        self._runtime._wrap_child_event(
+                            RunEvent(
+                                type="context_compaction_started",
+                                item_id=compaction_item_id,
+                                title="自动整理上下文",
+                                delta="恢复子 Session 前正在整理上下文…",
+                                model=session.model,
+                            ),
+                            self._identity(session),
+                            child_sequence,
+                        ),
+                    )
+                try:
+                    if child_context.execution_budget is not None:
+                        child_context.execution_budget.reserve_model_request()
+                    compact_history = self._runtime._harness.compact_history
+                    paused, compacted = await await_or_pause(
+                        compact_history(
+                            self._runtime._settings,
+                            compaction_plan.compactable,
+                            session.summary or None,
+                        ),
+                        self._runtime._run_control,
+                    )
+                    if paused:
+                        raise asyncio.CancelledError
+                    assert compacted is not None
+                    if child_context.execution_budget is not None:
+                        child_context.execution_budget.check_wall_time()
+                except BudgetExceeded:
+                    raise
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    child_sequence += 1
+                    if forwarded_events < _MAX_VISIBLE_CHILD_EVENTS:
+                        forwarded_events += 1
+                        await self._emit_background(
+                            parent_context,
+                            self._runtime._wrap_child_event(
+                                RunEvent(
+                                    type="context_compaction_failed",
+                                    item_id=compaction_item_id,
+                                    title="上下文压缩失败",
+                                    delta="保留当前子 Session 上下文",
+                                    error_message="上下文压缩失败",
+                                    model=session.model,
+                                ),
+                                self._identity(session),
+                                child_sequence,
+                            ),
+                        )
+                    raise
+
+                session.summary = compacted.message
+                session.transcript = list(compaction_plan.retained)
+                child_prompt = prompt_supplier(session.summary)
+                after_tokens = self._runtime._harness.estimate_context_tokens(
+                    self._runtime._settings,
+                    child_prompt,
+                    session.transcript,
+                )
+                compaction_usage = _to_run_usage(compacted.usage)
+                prelude_usage = _sum_run_usage(
+                    prelude_usage,
+                    compaction_usage,
+                )
+                latest_usage = prelude_usage
+                await self._checkpoint(session, parent_context, "running")
+                child_sequence += 1
+                if forwarded_events < _MAX_VISIBLE_CHILD_EVENTS:
+                    forwarded_events += 1
+                    await self._emit_background(
+                        parent_context,
+                        self._runtime._wrap_child_event(
+                            RunEvent(
+                                type="context_compacted",
+                                item_id=compaction_item_id,
+                                title="已压缩上下文",
+                                delta=(
+                                    "已压缩子 Session 上下文 · "
+                                    f"{compaction_plan.before_tokens} → "
+                                    f"{after_tokens} Token"
+                                ),
+                                metadata={
+                                    "summary": session.summary,
+                                    "beforeTokens": (
+                                        compaction_plan.before_tokens
+                                    ),
+                                    "afterTokens": after_tokens,
+                                    "trigger": "auto",
+                                    "phase": "pre_activation",
+                                    "compactedMessageCount": len(
+                                        compaction_plan.compactable
+                                    ),
+                                    "retainedMessageCount": len(
+                                        compaction_plan.retained
+                                    ),
+                                    "usage": compacted.usage.model_dump(
+                                        by_alias=True
+                                    ),
+                                },
+                                model=compacted.model,
+                                usage=compaction_usage,
+                                active_context_tokens=after_tokens,
+                            ),
+                            self._identity(session),
+                            child_sequence,
+                        ),
+                    )
+
             stream = self._runtime._harness.stream(
                 self._runtime._settings,
                 child_prompt,
@@ -560,8 +709,8 @@ class ContinuableSessionManager:
                 self._runtime._permission_engine,
                 self._runtime._approval_broker,
                 self._runtime._permission_config_store,
-                lambda _summary: child_prompt,
-                None,
+                prompt_supplier,
+                session.summary or None,
                 (
                     _SubagentRunControl(self._runtime._run_control)
                     if self._runtime._run_control is not None
@@ -581,7 +730,32 @@ class ContinuableSessionManager:
                 elif event.type == "text_delta":
                     answer_parts.append(event.delta)
                 elif event.type == "usage" and event.usage is not None:
-                    latest_usage = event.usage
+                    latest_usage = _sum_run_usage(
+                        prelude_usage,
+                        event.usage,
+                    )
+                elif event.type == "context_compacted":
+                    if event.usage is not None:
+                        latest_usage = _sum_run_usage(
+                            prelude_usage,
+                            event.usage,
+                        )
+                    self._apply_compaction_event(session, event)
+                    await self._checkpoint(
+                        session,
+                        parent_context,
+                        "running",
+                    )
+                    if forwarded_events < _MAX_VISIBLE_CHILD_EVENTS:
+                        forwarded_events += 1
+                        await self._emit_background(
+                            parent_context,
+                            self._runtime._wrap_child_event(
+                                event,
+                                self._identity(session),
+                                child_sequence,
+                            ),
+                        )
                 elif event.type == "paused":
                     raise asyncio.CancelledError
                 elif event.type in _AGENT_LIFECYCLE_EVENT_TYPES:
@@ -719,9 +893,28 @@ class ContinuableSessionManager:
                     message.model_dump(by_alias=True)
                     for message in session.transcript
                 ],
-                "summary": "",
+                "summary": session.summary,
             },
         ))
+
+    @staticmethod
+    def _apply_compaction_event(
+        session: _Session,
+        event: RunEvent,
+    ) -> None:
+        summary = event.metadata.get("summary")
+        compacted_count = event.metadata.get("compactedMessageCount")
+        if not isinstance(summary, str) or not summary.strip():
+            raise RuntimeError("子 Session 压缩事件缺少摘要")
+        if (
+            not isinstance(compacted_count, int)
+            or isinstance(compacted_count, bool)
+            or compacted_count < 1
+            or compacted_count > len(session.transcript)
+        ):
+            raise RuntimeError("子 Session 压缩事件的消息边界无效")
+        session.summary = summary
+        session.transcript = session.transcript[compacted_count:]
 
     def _interrupted_event(
         self,
@@ -798,6 +991,41 @@ class ContinuableSessionManager:
             "delegationDepth": session.delegation_depth,
             "writeScopes": [scope.metadata() for scope in session.write_scopes],
         }
+
+
+def _to_run_usage(usage: TokenUsageResponse) -> RunUsage:
+    return RunUsage(
+        prompt_tokens=usage.prompt_tokens,
+        completion_tokens=usage.completion_tokens,
+        total_tokens=usage.total_tokens,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        reasoning_tokens=usage.reasoning_tokens,
+        cache_read_tokens=usage.cache_read_tokens,
+        cache_write_tokens=usage.cache_write_tokens,
+        cache_metrics_available=usage.cache_metrics_available,
+    )
+
+
+def _sum_run_usage(left: RunUsage, right: RunUsage) -> RunUsage:
+    return RunUsage(
+        prompt_tokens=left.prompt_tokens + right.prompt_tokens,
+        completion_tokens=left.completion_tokens + right.completion_tokens,
+        total_tokens=left.total_tokens + right.total_tokens,
+        input_tokens=left.input_tokens + right.input_tokens,
+        output_tokens=left.output_tokens + right.output_tokens,
+        reasoning_tokens=left.reasoning_tokens + right.reasoning_tokens,
+        cache_read_tokens=(
+            left.cache_read_tokens + right.cache_read_tokens
+        ),
+        cache_write_tokens=(
+            left.cache_write_tokens + right.cache_write_tokens
+        ),
+        cache_metrics_available=(
+            left.cache_metrics_available
+            or right.cache_metrics_available
+        ),
+    )
 
 
 def create_send_agent_message_tool(manager: ContinuableSessionManager):

@@ -291,7 +291,11 @@ class SubagentRuntime:
                 self._permission_engine,
                 self._approval_broker,
                 self._permission_config_store,
-                lambda _summary: child_prompt,
+                lambda summary: self._build_prompt(
+                    context,
+                    child_registry,
+                    conversation_summary=summary,
+                ),
                 None,
                 (
                     _SubagentRunControl(self._run_control)
@@ -434,6 +438,8 @@ class SubagentRuntime:
         self,
         context: ToolContext,
         registry: ToolRegistry,
+        *,
+        conversation_summary: str | None = None,
     ):
         names = registry.names()
         boundary = (
@@ -455,6 +461,7 @@ class SubagentRuntime:
             ),
             tool_definitions=registry.model_definitions(names),
             available_skills=self._available_skills,
+            conversation_summary=conversation_summary,
         ))
 
     def _registry_for_context(self, context: ToolContext) -> ToolRegistry:

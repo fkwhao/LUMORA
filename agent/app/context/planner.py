@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 from app.context.estimator import TokenEstimator
 from app.dto.request.chat_completion_request import ChatMessageRequest
@@ -43,7 +44,7 @@ class ContextPlanner:
         prompt: PromptAssembly,
         messages: list[ChatMessageRequest],
     ) -> tuple[bool, int, int]:
-        rendered = [
+        rendered: list[dict[str, Any]] = [
             *prompt.system_messages,
             *prompt.context_messages,
             *[message.as_provider_message() for message in messages],
@@ -154,7 +155,7 @@ class ContextPlanner:
         summary: str,
         before_tokens: int,
     ) -> ContextPlan:
-        rendered = [
+        rendered: list[dict[str, Any]] = [
             *prompt.system_messages,
             {"role": "user", "content": summary},
             *[message.as_provider_message() for message in retained],
