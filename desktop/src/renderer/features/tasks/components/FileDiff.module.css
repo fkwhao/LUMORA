@@ -90,7 +90,6 @@
 .diffBody {
   position: relative;
   overflow: auto;
-  padding: 4px 0;
   background: var(--diff-code-surface);
   font-family: var(--code-font, "Cascadia Code", "SFMono-Regular", Consolas, monospace);
   font-size: 12px;
@@ -100,6 +99,14 @@
     color-mix(in srgb, var(--muted) 38%, transparent) transparent;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
+}
+
+.diffCanvas {
+  position: relative;
+  display: grid;
+  width: max-content;
+  min-width: 100%;
+  padding: 4px 0;
 }
 
 .diffBody::-webkit-scrollbar {
@@ -140,7 +147,7 @@
   background: transparent;
 }
 
-.diffBody::before {
+.diffCanvas::before {
   position: absolute;
   z-index: 1;
   top: 0;
@@ -329,6 +336,10 @@
 }
 
 .headerless .diffBody {
+  padding: 0;
+}
+
+.headerless .diffCanvas {
   padding: 5px 0 8px;
 }
 
@@ -339,6 +350,11 @@
 .parentScroll .diffBody {
   overflow: visible;
   overscroll-behavior: auto;
+}
+
+.parentScroll .diffCanvas {
+  width: 100%;
+  min-width: 0;
 }
 
 .parentScroll .diffRow:not(.gap) {
@@ -363,9 +379,12 @@
 }
 
 .preview .diffBody {
-  padding: 6px 0;
   font-size: 12px;
   line-height: 21px;
+}
+
+.preview .diffCanvas {
+  padding: 6px 0;
 }
 
 .preview .diffStat {

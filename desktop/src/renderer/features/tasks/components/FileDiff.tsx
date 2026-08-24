@@ -88,39 +88,41 @@ export function FileDiff({
           data-diff-scroll-owner={parentScroll ? "parent" : "self"}
           style={maxBodyHeight === undefined ? undefined : { maxHeight: maxBodyHeight }}
         >
-          {rows.map((row, index) => row.type === "gap" ? (
-            <div
-              key={`gap-${index}`}
-              className={`${styles.diffRow} ${styles.gap}`}
-            >
-              {row.text}
-            </div>
-          ) : (
-            <div
-              key={`${row.old ?? "n"}-${row.cur ?? "n"}-${index}`}
-              className={`${styles.diffRow} ${styles[row.type]}`}
-            >
-              <span
-                className={styles.ln}
-                title={row.type === "del" ? `原第 ${row.old} 行` : `新第 ${row.cur ?? row.old} 行`}
+          <div className={styles.diffCanvas} data-diff-canvas>
+            {rows.map((row, index) => row.type === "gap" ? (
+              <div
+                key={`gap-${index}`}
+                className={`${styles.diffRow} ${styles.gap}`}
               >
-                {displayLineNumber(row)}
-              </span>
-              <span className={styles.sign}>
-                {row.type === "add" ? "+" : row.type === "del" ? "−" : ""}
-              </span>
-              {highlightedRows[index] === undefined ? (
-                <code>{row.text || " "}</code>
-              ) : (
-                <code
-                  className={styles.syntaxCode}
-                  data-language={syntaxLanguage}
-                  // highlight.js 会转义源代码，仅返回用于着色的 span。
-                  dangerouslySetInnerHTML={{ __html: highlightedRows[index] }}
-                />
-              )}
-            </div>
-          ))}
+                {row.text}
+              </div>
+            ) : (
+              <div
+                key={`${row.old ?? "n"}-${row.cur ?? "n"}-${index}`}
+                className={`${styles.diffRow} ${styles[row.type]}`}
+              >
+                <span
+                  className={styles.ln}
+                  title={row.type === "del" ? `原第 ${row.old} 行` : `新第 ${row.cur ?? row.old} 行`}
+                >
+                  {displayLineNumber(row)}
+                </span>
+                <span className={styles.sign}>
+                  {row.type === "add" ? "+" : row.type === "del" ? "−" : ""}
+                </span>
+                {highlightedRows[index] === undefined ? (
+                  <code>{row.text || " "}</code>
+                ) : (
+                  <code
+                    className={styles.syntaxCode}
+                    data-language={syntaxLanguage}
+                    // highlight.js 会转义源代码，仅返回用于着色的 span。
+                    dangerouslySetInnerHTML={{ __html: highlightedRows[index] }}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       ) : (
         <div className={styles.empty}>{emptyMessage}</div>

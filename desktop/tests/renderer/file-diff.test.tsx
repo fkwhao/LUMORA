@@ -65,6 +65,26 @@ describe("FileDiff", () => {
     expect(additionNumber?.parentElement?.children).toHaveLength(3);
   });
 
+  it("uses one shared canvas for code rows and omitted-line markers", () => {
+    const { container } = render(
+      <FileDiff
+        file="src/wide.ts"
+        additions={1}
+        deletions={0}
+        rows={[
+          { old: 1, cur: 1, type: "ctx", text: "const wide = someVeryLongExpression;" },
+          { old: null, cur: null, type: "gap", text: "18 行未修改" },
+          { old: null, cur: 20, type: "add", text: "return wide;" },
+        ]}
+      />,
+    );
+
+    const scrollOwner = container.querySelector('[data-diff-scroll-owner="self"]');
+    const canvas = container.querySelector("[data-diff-canvas]");
+    expect(canvas?.parentElement).toBe(scrollOwner);
+    expect(canvas?.children).toHaveLength(3);
+  });
+
   it("highlights code from the file language in every shared diff surface", () => {
     const { container } = render(
       <FileDiff
