@@ -201,6 +201,9 @@ describe("visible task flow", () => {
     expect(
       screen.queryByText("应如何批准 LUMORA 操作？"),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "添加附件" }),
+    ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "添加上下文" }));
     await waitFor(() =>
       expect(screen.getByText("设置要持续追求的目标")).toBeVisible(),

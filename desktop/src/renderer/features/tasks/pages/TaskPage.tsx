@@ -2037,7 +2037,7 @@ export const TaskPage = memo(function TaskPage({
               ) : null
             }
             contentRef={conversationContentRef}
-            showAttachmentButton
+            showAttachmentButton={false}
             viewportProps={{
               ref: conversationScrollRef,
               onScroll: updateActiveQuestion,
