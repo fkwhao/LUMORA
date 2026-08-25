@@ -732,23 +732,50 @@ desktop + core + agent + contracts
 
 ## 10. 云端套餐与微服务演进
 
-本地 Electron、Java Local Core 和 Python Agent Runtime 不进行微服务化。云端套餐
-后台首版采用 Spring Boot、MyBatis-Plus 和 MySQL 的模块化单体，出现真实并发与独立
-扩缩容需求后，按照以下顺序演进：
+本地 Electron、Java Local Core 和 Python Agent Runtime 不进行微服务化。云端平台作为
+独立部署单元，目标采用 Spring Cloud Alibaba、Nacos、Spring Cloud Gateway、OpenFeign、
+WebClient、Redis、MySQL 和按领域拆分的 Spring Boot 微服务：
 
 ```text
-Cloud API Gateway
-  ├── Identity Service
-  ├── Account Service
-  ├── Model Gateway
-  └── Usage Service
-       → MySQL + Redis + Message Queue
+Desktop 内置原生套餐页面 ─────────────────────────┐
+Python Agent（CLOUD_MANAGED） ─────────────────────┼──→ Spring Cloud Gateway
+浏览器 → Nginx（静态网页与 /api 代理）─────────────┘       ├── User Service
+                                                          ├── Billing Service
+                                                          ├── Model Catalog Service
+                                                          └── Model Gateway Service
+                                                                 → 第三方模型供应商 API
 ```
 
-优先拆分的 `Model Gateway` 使用 Spring WebFlux 转发高并发模型请求和 SSE；Redis
-负责限流、短期额度快照与幂等键，MySQL 继续作为余额和账本的事实来源。用量结算出现
-削峰和可靠重试需求后再引入 Redis Streams 或 RabbitMQ，不因“存在并发”就直接增加
-Kafka 或 Kubernetes。
+Admin 不作为独立业务微服务。Desktop 套餐页面随客户端打包并直连 Cloud Gateway；Nginx 只托管
+网页端的用户 API 开放平台和管理员页面，并将其 `/api` 请求代理至同一个 Cloud Gateway。两类前端
+复用各数据所有者提供的 `/api/app/**` 和 `/api/admin/**` 接口；`/api/internal/**` 只供服务间调用。
+跨服务 Dashboard 确有复杂聚合需求时，才增加不拥有业务数据的 `admin-bff`。
+
+当前个人开发与联调阶段统一使用 HTTP，不配置 HTTPS、TLS 证书或双向 TLS；应用层登录、Access Token
+和权限校验仍然正常实现。HTTPS/TLS 终止仅作为后续公网部署项，由 Nginx 或云负载均衡承担。
+
+OpenFeign 用于 Model Gateway 到 Billing Service 等内部短时控制调用；WebClient 用于连接
+模型供应商并消费 SSE/流式 HTTP 响应。Redis 负责 Session、限流、并发计数、短期幂等和热点
+额度快照，MySQL 继续作为套餐、钱包、用量与不可变账本的最终事实来源。
+
+云端首版不增加 `agent-service`：Agent 循环、工具调用、上下文压缩和本地 Token 聚合仍在 Python
+Agent 内执行。Model Gateway 作为兼容现有 Provider 协议的流式代理，解析供应商 SSE 后将文本、推理、
+Tool Call、结束原因、错误和最终 TokenUsage 透传或标准化返回。Python Agent 只新增轻量的
+`LUMORA_MANAGED` 模型来源，负责云端 Base URL、登录 Access Token 和模型目录接入，并复用已有协议
+解析逻辑，不维护第二套 Agent 执行链路或自定义 SSE 协议。
+
+TokenUsage 保留两条用途不同的路径：返回 Python Agent 的 Usage 用于本地统计、上下文管理和界面展示；
+Model Gateway 生成的幂等 Usage 事件才可提交 Billing Service 结算。客户端统计不能作为扣费事实来源。
+
+首版售卖机制包括包月套餐和用量付费。包月权益按周创建独立额度桶；用量付费由管理员手动
+充值钱包，不接入第三方支付。钱包、套餐额度、预占、结算和用量账本首版归属同一 Billing
+Service，避免把一次金额事务拆成跨服务分布式事务。
 
 套餐扣费采用额度预占、真实 TokenUsage 结算和多余预占释放。请求与用量事件分别使用
-唯一 `request_id` 和 `usage_id`，余额流水使用唯一约束与 Outbox 保证幂等和最终一致性。
+唯一 `request_id` 和 `usage_id`，余额流水使用唯一约束、状态机、补偿任务和定时对账保证
+幂等与最终一致性。云端不采用客户端上报用量作为扣费依据；只有 Model Gateway 解析的供应商
+Usage 可以进入结算。
+
+Desktop 同时保留 `LOCAL_BYOK` 和 `CLOUD_MANAGED`。项目任务、工具日志、文件变更、审批和
+Git Changes 始终保存在本地；选择云端模型时只有模型流量和最小计费元数据经过云端。云端聊天
+同步是可选的后续能力，不是登录、套餐或模型计费的前置条件。
