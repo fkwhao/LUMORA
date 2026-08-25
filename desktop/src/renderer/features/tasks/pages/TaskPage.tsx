@@ -66,6 +66,7 @@ import type {
   ArtifactChunk,
 } from "../../../../shared/model-contract";
 import type { TaskEvent } from "../../../../shared/task-contract";
+import type { CitationReference } from "../../../../shared/citation-contract";
 import type { LumoraSkillApi, SkillSummary } from "../../../../shared/skill-contract";
 import type {
   GitCommitSummary,
@@ -105,6 +106,12 @@ import {
   type TaskRightSidebarTab,
 } from "../components/TaskRightSidebar";
 import { ConversationInputQueue } from "../components/ConversationInputQueue";
+import { CitationPreviewPane } from "../components/CitationPreviewPane";
+import {
+  CitationNavigationContext,
+  useCitationNavigation,
+} from "../components/CitationNavigationContext";
+import { InlineCitations } from "../components/InlineCitations";
 import { PlanTodoList } from "../components/PlanTodoList";
 import { WorkspaceControls } from "../components/WorkspaceControls";
 import {
@@ -117,6 +124,11 @@ import {
   saveContextPaneWidth,
 } from "../../layout/context-pane-preferences";
 import { resolveContextUsage } from "../state/context-usage";
+import {
+  citationsFromMessage,
+  citationTabId,
+  stripCitationDefinitions,
+} from "../state/citations";
 import { subagentSessionsFromMessages } from "../state/subagent-sessions";
 import {
   INITIAL_RIGHT_SIDEBAR_STATE,
@@ -169,7 +181,7 @@ const TaskMessageRenderContext = createContext<
 
 const TASK_THREAD_COMPONENTS = {
   AssistantMessageBefore: TaskAssistantMessageRunSummary,
-  AssistantMessageAfter: TaskAssistantMessageChanges,
+  AssistantMessageAfter: TaskAssistantMessageAfter,
   AssistantIndicator: TaskAssistantProcessingIndicator,
 };
 
@@ -221,6 +233,11 @@ export const TaskPage = memo(function TaskPage({
     rightSidebarTabReducer,
     INITIAL_RIGHT_SIDEBAR_STATE,
   );
+  const [citationTabs, setCitationTabs] = useState(
+    () => new Map<`citation:${string}`, CitationReference>(),
+  );
+  const citationTabsRef = useRef(citationTabs);
+  citationTabsRef.current = citationTabs;
   const [contextPaneWidth, setContextPaneWidth] = useState(
     loadContextPaneWidth,
   );
@@ -556,6 +573,29 @@ export const TaskPage = memo(function TaskPage({
   const openAgentSession = useCallback((agentId: string) => {
     dispatchRightSidebar({ type: "open", tabId: `agent:${agentId}` });
   }, []);
+  const openCitation = useCallback((reference: CitationReference) => {
+    const tabId = citationTabId(reference);
+    setCitationTabs((current) => {
+      const next = new Map(current);
+      next.set(tabId, reference);
+      return next;
+    });
+    dispatchRightSidebar({ type: "open", tabId });
+  }, []);
+  const closeRightSidebarTab = useCallback((tabId: TaskRightSidebarTab["id"]) => {
+    dispatchRightSidebar({ type: "close", tabId });
+    if (!tabId.startsWith("citation:")) return;
+    const citationId = tabId as `citation:${string}`;
+    const reference = citationTabsRef.current.get(citationId);
+    if (reference?.kind === "web") {
+      void window.lumora?.citations.closeWeb(citationId).catch(() => undefined);
+    }
+    setCitationTabs((current) => {
+      const next = new Map(current);
+      next.delete(citationId);
+      return next;
+    });
+  }, []);
 
   const revertRun = useCallback(async (runId: string) => {
     const taskId = task?.taskId;
@@ -681,6 +721,12 @@ export const TaskPage = memo(function TaskPage({
   }, [runWorktreeAction]);
 
   useEffect(() => {
+    for (const [tabId, reference] of citationTabsRef.current) {
+      if (reference.kind === "web") {
+        void window.lumora?.citations.closeWeb(tabId).catch(() => undefined);
+      }
+    }
+    setCitationTabs(new Map());
     dispatchRightSidebar({ type: "reset" });
     setReviewRunId(undefined);
     setRunChanges(undefined);
@@ -950,6 +996,17 @@ export const TaskPage = memo(function TaskPage({
           ]
         : messages,
     [messages, task],
+  );
+  const messageCitations = useMemo(
+    () => displayMessages.map((message) => citationsFromMessage(message)),
+    [displayMessages],
+  );
+  const citationNavigation = useMemo(
+    () => ({
+      citationsForMessage: (index: number) => messageCitations[index] ?? [],
+      openCitation,
+    }),
+    [messageCitations, openCitation],
   );
   const executionPlan = useMemo(() => {
     const latestAssistant = [...displayMessages]
@@ -1321,7 +1378,7 @@ export const TaskPage = memo(function TaskPage({
     const result =
       response?.role === "assistant" &&
       !(isChatting && responseIndex === displayMessages.length - 1)
-        ? response.content.trim()
+        ? stripCitationDefinitions(response.content).trim()
         : "";
     return [{ message, messageIndex, result }];
   });
@@ -1681,6 +1738,15 @@ export const TaskPage = memo(function TaskPage({
       if (tabId === "review") {
         return { id: tabId, label: "审阅", kind: "review" };
       }
+      if (tabId.startsWith("citation:")) {
+        const reference = citationTabs.get(tabId as `citation:${string}`);
+        return {
+          id: tabId,
+          label: reference?.label || "引用来源",
+          kind: "citation",
+          citationKind: reference?.kind,
+        };
+      }
       const session = subagentSessions.get(tabId.slice("agent:".length));
       return {
         id: tabId,
@@ -1690,8 +1756,14 @@ export const TaskPage = memo(function TaskPage({
         agentId: session?.agentId || tabId.slice("agent:".length),
       };
     }),
-    [contextPercent, rightSidebar.tabs, subagentSessions],
+    [citationTabs, contextPercent, rightSidebar.tabs, subagentSessions],
   );
+  const activeCitationTabId = rightSidebar.activeTabId?.startsWith("citation:")
+    ? rightSidebar.activeTabId as `citation:${string}`
+    : undefined;
+  const selectedCitation = activeCitationTabId
+    ? citationTabs.get(activeCitationTabId)
+    : undefined;
   const rightSidebarOpen = rightSidebar.visible && rightSidebar.tabs.length > 0;
 
   const messageRenderContext = useMemo<TaskMessageRenderContextValue>(
@@ -1739,6 +1811,7 @@ export const TaskPage = memo(function TaskPage({
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
+      <CitationNavigationContext.Provider value={citationNavigation}>
       <TaskMessageRenderContext.Provider value={messageRenderContext}>
       <main
         className={`task-layout${rightSidebarOpen ? " has-right-sidebar" : ""}${composerMotion ? ` composer-enter-${composerMotion}` : ""}`}
@@ -2377,9 +2450,7 @@ export const TaskPage = memo(function TaskPage({
           onSelectTab={(tabId) => {
             dispatchRightSidebar({ type: "select", tabId });
           }}
-          onCloseTab={(tabId) => {
-            dispatchRightSidebar({ type: "close", tabId });
-          }}
+          onCloseTab={closeRightSidebarTab}
           onOpenChange={(open) => {
             dispatchRightSidebar({ type: open ? "show" : "hide" });
           }}
@@ -2432,6 +2503,14 @@ export const TaskPage = memo(function TaskPage({
               onOpenAgent={openAgentSession}
             />
           )}
+          {rightSidebarOpen && activeCitationTabId && selectedCitation && (
+            <CitationPreviewPane
+              taskId={task.taskId}
+              previewId={activeCitationTabId}
+              reference={selectedCitation}
+              modelApi={modelApi}
+            />
+          )}
         </TaskRightSidebar>
         <button
           className="task-sidebar-visibility-toggle"
@@ -2447,6 +2526,7 @@ export const TaskPage = memo(function TaskPage({
         </button>
       </main>
       </TaskMessageRenderContext.Provider>
+      </CitationNavigationContext.Provider>
     </AssistantRuntimeProvider>
   );
 });
@@ -2489,6 +2569,28 @@ function TaskAssistantMessageRunSummary() {
       onReviewChange={(item) => context.onReviewChange(item, runId)}
       onOpenArtifact={context.onOpenArtifact}
       onOpenAgent={context.onOpenAgent}
+    />
+  );
+}
+
+function TaskAssistantMessageAfter() {
+  return (
+    <>
+      <TaskAssistantMessageCitations />
+      <TaskAssistantMessageChanges />
+    </>
+  );
+}
+
+function TaskAssistantMessageCitations() {
+  const navigation = useCitationNavigation();
+  const index = useAuiState((state) => state.message.index);
+  const references = navigation?.citationsForMessage(index) ?? [];
+  if (!navigation || references.length === 0) return null;
+  return (
+    <InlineCitations
+      references={references}
+      onOpen={navigation.openCitation}
     />
   );
 }

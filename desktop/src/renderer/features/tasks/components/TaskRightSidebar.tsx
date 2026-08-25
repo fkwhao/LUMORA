@@ -1,4 +1,4 @@
-import { FileDiff, X } from "lucide-react";
+import { FileDiff, FileText, Globe2, Image as ImageIcon, X } from "lucide-react";
 import {
   useEffect,
   useRef,
@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import type { WorkLogItemStatus } from "../../../../shared/model-contract";
+import type { CitationSourceKind } from "../../../../shared/citation-contract";
 import {
   MAX_CONTEXT_PANE_WIDTH,
   MIN_CONTEXT_PANE_WIDTH,
@@ -25,7 +26,8 @@ import { AgentIdentityAvatar } from "./AgentIdentityAvatar";
 export interface TaskRightSidebarTab {
   id: RightSidebarTabId;
   label: string;
-  kind: "context" | "review" | "agent";
+  kind: "context" | "review" | "agent" | "citation";
+  citationKind?: CitationSourceKind;
   status?: WorkLogItemStatus;
   agentId?: string;
   usagePercent?: number;
@@ -286,6 +288,13 @@ function TabIcon({ tab }: { tab: TaskRightSidebarTab }) {
     );
   }
   if (tab.kind === "review") return <FileDiff size={13} aria-hidden="true" />;
+  if (tab.kind === "citation") {
+    if (tab.citationKind === "web") return <Globe2 size={13} aria-hidden="true" />;
+    if (tab.citationKind === "attachment") {
+      return <ImageIcon size={13} aria-hidden="true" />;
+    }
+    return <FileText size={13} aria-hidden="true" />;
+  }
   return (
     <AgentIdentityAvatar
       agentId={tab.agentId || tab.id}

@@ -5,6 +5,7 @@ import "./shell.css";
 import "./home.css";
 import "./conversation-hub.css";
 import "./task.css";
+import "./citations.css";
 import "./web-search.css";
 import "./settings.css";
 import "./prototype.css";

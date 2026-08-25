@@ -116,6 +116,7 @@ export interface LumoraApi {
   skill: LumoraSkillApi;
   window: LumoraWindowApi;
   workspace: LumoraWorkspaceApi;
+  citations: LumoraCitationApi;
 }
 
 declare global {
@@ -129,6 +130,7 @@ import type { LumoraMemoryApi } from "./memory-contract";
 import type { LumoraMcpApi } from "./mcp-contract";
 import type { LumoraSkillApi } from "./skill-contract";
 import type { LumoraWindowApi } from "./window-contract";
+import type { LumoraCitationApi } from "./citation-contract";
 import type {
   LumoraWorkspaceApi,
   WorkspaceEnvironmentSelection,

@@ -33,6 +33,8 @@ class PromptBuilderTest(unittest.TestCase):
         self.assertIn("完整写入工具只用于新建文件", prompt)
         self.assertIn("普通多步骤任务通常保持 2–4 个阶段", prompt)
         self.assertIn("同一目标下的读取、搜索、编辑和验证应沿用当前阶段", prompt)
+        self.assertIn("lumora-file:src/path/file.ts", prompt)
+        self.assertIn("同一来源始终复用同一编号", prompt)
         self.assertNotIn("每轮调用工具前", prompt)
         self.assertNotIn("API Key", prompt.split("# 当前运行上下文")[1])
         self.assertTrue(all(

@@ -1,4 +1,8 @@
-export type RightSidebarTabId = "context" | "review" | `agent:${string}`;
+export type RightSidebarTabId =
+  | "context"
+  | "review"
+  | `agent:${string}`
+  | `citation:${string}`;
 
 export interface RightSidebarTabState {
   tabs: RightSidebarTabId[];

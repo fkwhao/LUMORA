@@ -4,6 +4,7 @@ import { app, BrowserWindow, screen, shell } from "electron";
 import { registerTaskIpc } from "./ipc";
 import { registerAppearanceIpc } from "./appearance-ipc";
 import { registerAttachmentIpc } from "./attachment-ipc";
+import { registerCitationIpc } from "./citation-ipc";
 import { registerModelIpc } from "./model-ipc";
 import { registerMemoryIpc } from "./memory-ipc";
 import { registerMcpIpc } from "./mcp-ipc";
@@ -64,6 +65,7 @@ let unregisterMcpIpc: (() => void) | undefined;
 let unregisterSkillIpc: (() => void) | undefined;
 let unregisterAppearanceIpc: (() => void) | undefined;
 let unregisterAttachmentIpc: (() => void) | undefined;
+let unregisterCitationIpc: (() => void) | undefined;
 let unregisterWorkspaceIpc: (() => void) | undefined;
 let unregisterWorkspaceGitIpc: (() => void) | undefined;
 
@@ -121,6 +123,7 @@ app.whenReady().then(async () => {
   unregisterSkillIpc = registerSkillIpc();
   unregisterAppearanceIpc = registerAppearanceIpc();
   unregisterAttachmentIpc = registerAttachmentIpc();
+  unregisterCitationIpc = registerCitationIpc(gateway, modelGateway);
   unregisterWorkspaceIpc = registerWorkspaceIpc();
   unregisterWorkspaceGitIpc = registerWorkspaceGitIpc(workspaceGateway);
   await createWindow();
@@ -146,6 +149,7 @@ app.on("before-quit", () => {
   unregisterSkillIpc?.();
   unregisterAppearanceIpc?.();
   unregisterAttachmentIpc?.();
+  unregisterCitationIpc?.();
   unregisterWorkspaceIpc?.();
   unregisterWorkspaceGitIpc?.();
   gateway.dispose();

@@ -66,4 +66,19 @@ describe("rightSidebarTabReducer", () => {
     expect(rightSidebarTabReducer(INITIAL_RIGHT_SIDEBAR_STATE, { type: "show" }))
       .toEqual({ tabs: ["context"], activeTabId: "context", visible: true });
   });
+
+  it("opens citation previews as ordinary closable tabs", () => {
+    const tabId = "citation:web%3Ahttps%3A%2F%2Fexample.com" as const;
+    const opened = rightSidebarTabReducer(INITIAL_RIGHT_SIDEBAR_STATE, {
+      type: "open",
+      tabId,
+    });
+    expect(opened).toMatchObject({
+      visible: true,
+      activeTabId: tabId,
+      tabs: [tabId],
+    });
+    expect(rightSidebarTabReducer(opened, { type: "close", tabId }))
+      .toEqual(INITIAL_RIGHT_SIDEBAR_STATE);
+  });
 });

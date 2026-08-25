@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import type { WorkLogItem } from "../../../../shared/model-contract";
+import { useCitationNavigation } from "./CitationNavigationContext";
 
 interface WebSearchSource {
   title: string;
@@ -8,6 +9,7 @@ interface WebSearchSource {
 }
 
 export function WebSearch({ item }: { item: WorkLogItem }) {
+  const citationNavigation = useCitationNavigation();
   const [open, setOpen] = useState(true);
   const query = stringArgument(item, "query");
   const sources = webSearchSources(item);
@@ -53,7 +55,22 @@ export function WebSearch({ item }: { item: WorkLogItem }) {
                 <ul className="web-search-list">
                   {sources.map((source) => (
                     <li className="web-search-site" data-state="done" key={source.url}>
-                      <a href={source.url} rel="noreferrer" target="_blank">
+                      <a
+                        href={source.url}
+                        rel="noreferrer"
+                        target={citationNavigation ? undefined : "_blank"}
+                        onClick={(event) => {
+                          if (!citationNavigation) return;
+                          event.preventDefault();
+                          citationNavigation.openCitation({
+                            number: 0,
+                            kind: "web",
+                            label: source.title,
+                            host: sourceHost(source.url),
+                            url: source.url,
+                          });
+                        }}
+                      >
                         <span className="web-search-bullet"><CheckIcon /></span>
                         <span className="web-search-title">{source.title}</span>
                         <span className="web-search-separator">·</span>
@@ -96,6 +113,14 @@ function displayUrl(value: string): string {
   try {
     const parsed = new URL(value);
     return `${parsed.hostname}${parsed.pathname === "/" ? "" : parsed.pathname}`;
+  } catch {
+    return value;
+  }
+}
+
+function sourceHost(value: string): string {
+  try {
+    return new URL(value).hostname;
   } catch {
     return value;
   }

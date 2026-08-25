@@ -40,6 +40,12 @@ import type {
   MessageAttachment,
 } from "../shared/attachment-contract";
 import type {
+  CitationPreviewBounds,
+  CitationWebNavigationAction,
+  CitationWebPreviewInput,
+  CitationWebPreviewState,
+} from "../shared/citation-contract";
+import type {
   CreateGitBranchInput,
   GetGitChangesInput,
   GitCheckoutInput,
@@ -94,6 +100,53 @@ const api: LumoraApi = {
     select: () => ipcRenderer.invoke("attachments:select"),
     readImagePreview: (attachment: MessageAttachment) =>
       ipcRenderer.invoke("attachments:read-image-preview", attachment),
+  },
+  citations: {
+    readLocal: (taskId: string, path: string) =>
+      ipcRenderer.invoke(
+        "citations:read-local",
+        validateTaskId(taskId),
+        validateCitationPath(path),
+      ),
+    readAttachment: (taskId: string, attachmentId: string) =>
+      ipcRenderer.invoke(
+        "citations:read-attachment",
+        validateTaskId(taskId),
+        validatePreviewId(attachmentId),
+      ),
+    showWeb: (input: CitationWebPreviewInput) =>
+      ipcRenderer.invoke("citations:web-show", validateWebPreviewInput(input)),
+    setWebBounds: (previewId: string, bounds: CitationPreviewBounds) =>
+      ipcRenderer.invoke(
+        "citations:web-set-bounds",
+        validatePreviewId(previewId),
+        validatePreviewBounds(bounds),
+      ),
+    hideWeb: (previewId: string) =>
+      ipcRenderer.invoke("citations:web-hide", validatePreviewId(previewId)),
+    closeWeb: (previewId: string) =>
+      ipcRenderer.invoke("citations:web-close", validatePreviewId(previewId)),
+    navigateWeb: (
+      previewId: string,
+      action: CitationWebNavigationAction,
+    ) => ipcRenderer.invoke(
+      "citations:web-navigate",
+      validatePreviewId(previewId),
+      validateWebNavigationAction(action),
+    ),
+    subscribeWebState: (
+      listener: (state: CitationWebPreviewState) => void,
+    ) => {
+      if (typeof listener !== "function") {
+        throw new TypeError("网页预览状态处理器必须是函数");
+      }
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        state: CitationWebPreviewState,
+      ) => listener(state);
+      ipcRenderer.on("citations:web-state", handler);
+      return () => ipcRenderer.removeListener("citations:web-state", handler);
+    },
   },
   tasks: {
     create: (goal, workspacePath, environmentSelection) => ipcRenderer.invoke(
@@ -499,4 +552,70 @@ function validateBranchName(value: unknown): string {
     throw new TypeError("分支名称不能超过 255 个字符");
   }
   return branchName;
+}
+
+function validateCitationPath(value: unknown): string {
+  if (typeof value !== "string" || !value.trim() || value.length > 4_000) {
+    throw new TypeError("引用文件路径无效");
+  }
+  return value.trim();
+}
+
+function validatePreviewId(value: unknown): string {
+  if (typeof value !== "string" || !value.trim() || value.length > 500) {
+    throw new TypeError("网页预览 ID 无效");
+  }
+  return value.trim();
+}
+
+function validatePreviewBounds(value: unknown): CitationPreviewBounds {
+  if (!value || typeof value !== "object") {
+    throw new TypeError("网页预览区域无效");
+  }
+  const bounds = value as CitationPreviewBounds;
+  for (const coordinate of [bounds.x, bounds.y, bounds.width, bounds.height]) {
+    if (typeof coordinate !== "number" || !Number.isFinite(coordinate)) {
+      throw new TypeError("网页预览坐标无效");
+    }
+  }
+  if (bounds.width < 1 || bounds.height < 1) {
+    throw new TypeError("网页预览区域不能为空");
+  }
+  return {
+    x: Math.round(bounds.x),
+    y: Math.round(bounds.y),
+    width: Math.round(bounds.width),
+    height: Math.round(bounds.height),
+  };
+}
+
+function validateWebPreviewInput(
+  value: CitationWebPreviewInput,
+): CitationWebPreviewInput {
+  if (!value || typeof value !== "object") {
+    throw new TypeError("网页预览参数无效");
+  }
+  let url: URL;
+  try {
+    url = new URL(value.url);
+  } catch {
+    throw new TypeError("网页预览地址无效");
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new TypeError("仅支持 HTTP 或 HTTPS 网页预览");
+  }
+  return {
+    previewId: validatePreviewId(value.previewId),
+    url: url.toString(),
+    bounds: validatePreviewBounds(value.bounds),
+  };
+}
+
+function validateWebNavigationAction(
+  value: unknown,
+): CitationWebNavigationAction {
+  if (!new Set(["back", "forward", "reload", "stop"]).has(String(value))) {
+    throw new TypeError("网页预览操作无效");
+  }
+  return value as CitationWebNavigationAction;
 }
