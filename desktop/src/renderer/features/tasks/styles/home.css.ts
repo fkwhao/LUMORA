@@ -3,9 +3,9 @@ import { globalStyle, keyframes } from "@vanilla-extract/css";
 const composerFromBottom = keyframes({
   from: {
     opacity: "0.82",
-    transform: "translateY(32vh) scaleX(0.94) scaleY(0.82)",
+    transform: "translateY(28px)",
   },
-  to: { opacity: "1", transform: "translateY(0) scale(1)" },
+  to: { opacity: "1", transform: "none" },
 });
 
 globalStyle(".home-layout", {
@@ -100,18 +100,32 @@ globalStyle(".home-composer-stack", {
   marginTop: "clamp(34px, 6vh, 54px)",
 });
 
-globalStyle(".goal-composer", {
+globalStyle(".home-native-composer", {
   position: "relative",
   zIndex: "2",
-  padding: "0 14px 11px",
-  border: "1px solid var(--line-strong)",
-  borderRadius: "20px",
-  background: "color-mix(in srgb, var(--surface-soft) 88%, transparent)",
-  backdropFilter: "blur(12px)",
-  boxShadow: "0 18px 50px rgb(20 25 32 / 8%)",
+  display: "flex",
+  minHeight: "154px",
+  flexDirection: "column",
+  gap: "8px",
+  padding: "8px",
+  color: "var(--aui-foreground)",
+  border:
+    "1px solid color-mix(in oklab, var(--aui-border) 60%, transparent)",
+  borderRadius: "24px",
+  background:
+    "color-mix(in oklab, var(--aui-muted) 30%, var(--aui-background))",
+  boxShadow:
+    "0 4px 16px -8px rgb(0 0 0 / 8%), 0 1px 2px rgb(0 0 0 / 4%)",
+  transition: "border-color 150ms ease, box-shadow 150ms ease",
 });
 
-globalStyle(".goal-composer.is-dragging-attachment", {
+globalStyle(".home-native-composer:focus-within", {
+  borderColor: "var(--aui-border)",
+  boxShadow:
+    "0 6px 24px -8px rgb(0 0 0 / 12%), 0 1px 2px rgb(0 0 0 / 5%)",
+});
+
+globalStyle(".home-native-composer.is-dragging-attachment", {
   borderColor: "color-mix(in srgb, var(--ink) 42%, var(--line-strong))",
   background: "color-mix(in srgb, var(--surface) 92%, var(--ink) 8%)",
   boxShadow: "0 0 0 3px color-mix(in srgb, var(--ink) 8%, transparent)",
@@ -194,10 +208,9 @@ globalStyle(".home-attachment-chip > button:hover", {
   background: "var(--hover)",
 });
 
-globalStyle(".home-layout.composer-enter-from-bottom .goal-composer", {
-  animation: `${composerFromBottom} 520ms cubic-bezier(0.22, 1, 0.36, 1) both`,
+globalStyle(".home-layout.composer-enter-from-bottom .home-native-composer", {
+  animation: `${composerFromBottom} 360ms cubic-bezier(0.22, 1, 0.36, 1) both`,
   transformOrigin: "bottom center",
-  willChange: "transform, opacity",
 });
 
 globalStyle(".visually-hidden", {
@@ -316,7 +329,7 @@ globalStyle(".clear-project:hover", {
   background: "var(--surface)",
 });
 
-globalStyle(".goal-composer textarea,\n.follow-up-composer textarea", {
+globalStyle(".home-native-composer textarea,\n.follow-up-composer textarea", {
   width: "100%",
   resize: "none",
   color: "var(--ink)",
@@ -326,33 +339,189 @@ globalStyle(".goal-composer textarea,\n.follow-up-composer textarea", {
   lineHeight: "1.65",
 });
 
-globalStyle(".goal-composer textarea", {
-  minHeight: "80px",
+globalStyle(".home-native-composer-input", {
+  minHeight: "88px",
   maxHeight: "220px",
-  padding: "15px 2px 8px",
-  fontSize: "13px",
+  flex: "1 1 auto",
+  padding: "4px 10px",
+  color: "var(--aui-foreground)",
+  fontSize: "14px",
+  fontWeight: "400",
+  lineHeight: "1.5",
   overflowY: "hidden",
+});
+
+globalStyle(".home-native-composer-input::placeholder", {
+  color: "color-mix(in srgb, var(--aui-muted-foreground) 80%, transparent)",
 });
 
 globalStyle("textarea::placeholder", {
   color: "var(--subtle)",
 });
 
-globalStyle(".composer-footer", {
+globalStyle(".home-native-composer-toolbar", {
   display: "flex",
+  minWidth: "0",
+  minHeight: "28px",
   alignItems: "center",
   justifyContent: "space-between",
-  gap: "12px",
+  gap: "10px",
 });
 
-globalStyle(".context-actions", {
+globalStyle(".home-native-composer-tools", {
   display: "flex",
-  flexWrap: "wrap",
+  minWidth: "0",
   alignItems: "center",
   gap: "6px",
 });
 
-globalStyle(".context-actions button,\n.follow-up-composer button", {
+globalStyle(
+  ".home-native-composer-icon-button, .home-native-composer-control",
+  {
+    display: "inline-flex",
+    height: "28px",
+    minHeight: "28px",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "6px",
+    flex: "0 0 auto",
+    padding: "0 6px",
+    color: "var(--aui-muted-foreground)",
+    border: "0",
+    borderRadius: "6px",
+    outline: "none",
+    background: "transparent",
+    cursor: "pointer",
+    fontSize: "12px",
+    fontWeight: "500",
+    whiteSpace: "nowrap",
+    transition: "color 120ms ease, background 120ms ease",
+  },
+);
+
+globalStyle(".home-native-composer-icon-button", {
+  width: "24px",
+  minWidth: "24px",
+  height: "24px",
+  minHeight: "24px",
+  padding: "0",
+});
+
+globalStyle(".home-native-composer-icon-button > svg", {
+  width: "14px",
+  height: "14px",
+});
+
+globalStyle(
+  ".home-native-composer-control:not(.home-native-model-trigger)",
+  {
+    height: "24px",
+    minHeight: "24px",
+  },
+);
+
+globalStyle(".home-native-composer-control > svg", {
+  flex: "0 0 auto",
+});
+
+globalStyle(".home-native-model-trigger", {
+  minWidth: "0",
+  maxWidth: "220px",
+  color: "var(--aui-foreground)",
+});
+
+globalStyle(".home-native-model-trigger > span", {
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+
+globalStyle(
+  ".home-native-composer-icon-button:hover, .home-native-composer-icon-button[aria-expanded='true'], .home-native-composer-control:hover:not(:disabled), .home-native-composer-control[aria-expanded='true']",
+  {
+    color: "var(--aui-foreground)",
+    background: "var(--aui-accent)",
+  },
+);
+
+globalStyle(".home-native-composer-control.is-dangerous", {
+  color: "#ff7a2f",
+});
+
+globalStyle(
+  ".home-native-composer-control.is-dangerous:hover, .home-native-composer-control.is-dangerous[aria-expanded='true']",
+  {
+    color: "#ff8a42",
+    background: "rgb(255 122 47 / 10%)",
+  },
+);
+
+globalStyle(".home-native-composer-control:disabled", {
+  cursor: "default",
+  opacity: "0.48",
+});
+
+globalStyle(
+  ".home-native-composer-icon-button:focus-visible, .home-native-composer-control:focus-visible",
+  {
+    boxShadow: "0 0 0 2px color-mix(in srgb, var(--blue) 24%, transparent)",
+  },
+);
+
+globalStyle(".home-composer-popover", {
+  border: "1px solid color-mix(in srgb, var(--line) 82%, transparent)",
+  background: "color-mix(in srgb, var(--surface) 96%, transparent)",
+  backdropFilter: "blur(24px) saturate(120%)",
+  boxShadow: "0 18px 48px rgb(20 25 32 / 18%)",
+});
+
+globalStyle(".home-add-popover > button", {
+  display: "inline-flex",
+  width: "100%",
+  minHeight: "36px",
+  alignItems: "center",
+  justifyContent: "flex-start",
+  gap: "9px",
+  padding: "0 9px",
+  borderRadius: "8px",
+});
+
+globalStyle(".home-add-popover > button > svg", {
+  width: "16px",
+  height: "16px",
+  color: "var(--muted)",
+});
+
+globalStyle(".home-composer-popover.permission-popover > button", {
+  minHeight: "56px",
+  gridTemplateColumns: "24px minmax(0, 1fr) 18px",
+  gap: "8px",
+  padding: "8px 9px",
+});
+
+globalStyle(".home-model-popover [role='menu']", {
+  display: "grid",
+  gap: "2px",
+});
+
+globalStyle(".home-model-option", {
+  display: "flex",
+  width: "100%",
+  minHeight: "34px",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "10px",
+  padding: "0 9px",
+  borderRadius: "8px",
+});
+
+globalStyle(".home-model-option > svg", {
+  width: "15px",
+  height: "15px",
+});
+
+/* Keep the legacy task composer styling isolated from the home composer. */
+globalStyle(".follow-up-composer button", {
   display: "inline-flex",
   minHeight: "30px",
   alignItems: "center",
@@ -367,18 +536,10 @@ globalStyle(".context-actions button,\n.follow-up-composer button", {
   fontSize: "9px",
 });
 
-globalStyle(
-  ".context-actions button:hover,\n.follow-up-composer button:hover:not(:disabled)",
-  {
-    color: "var(--ink)",
-    borderColor: "var(--line-strong)",
-    background: "var(--surface)",
-  },
-);
-
-globalStyle(".context-actions button:first-child", {
-  width: "30px",
-  padding: "0",
+globalStyle(".follow-up-composer button:hover:not(:disabled)", {
+  color: "var(--ink)",
+  borderColor: "var(--line-strong)",
+  background: "var(--surface)",
 });
 
 globalStyle(".submit-task,\n.send-follow-up", {
@@ -396,49 +557,24 @@ globalStyle(".submit-task,\n.send-follow-up", {
   cursor: "pointer",
 });
 
+globalStyle(".submit-task", {
+  width: "28px",
+  height: "28px",
+  color: "var(--aui-primary-foreground)",
+  background: "var(--aui-primary)",
+  transition: "transform 120ms ease",
+});
+
 globalStyle(".submit-task:hover:not(:disabled)", {
-  color: "var(--surface)",
-  background: "var(--ink)",
-  transform: "translateY(-1px)",
+  color: "var(--aui-primary-foreground)",
+  background: "var(--aui-primary)",
+  transform: "scale(1.04)",
 });
 
 globalStyle(".form-error", {
   margin: "10px 4px 0",
   color: "var(--danger)",
   fontSize: "10px",
-});
-
-globalStyle(".selected-contexts", {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: "6px",
-  paddingTop: "10px",
-});
-
-globalStyle(".selected-contexts > span", {
-  display: "inline-flex",
-  minHeight: "26px",
-  alignItems: "center",
-  gap: "5px",
-  padding: "0 5px 0 8px",
-  color: "var(--muted)",
-  border: "1px solid var(--line)",
-  borderRadius: "7px",
-  background: "var(--surface)",
-  fontSize: "9px",
-});
-
-globalStyle(".selected-contexts button", {
-  display: "grid",
-  width: "19px",
-  height: "19px",
-  padding: "0",
-  placeItems: "center",
-  color: "var(--muted)",
-  border: "0",
-  borderRadius: "5px",
-  background: "transparent",
-  cursor: "pointer",
 });
 
 globalStyle(".home-privacy-note", {

@@ -551,6 +551,7 @@ function ConnectedApp({
         <HomePage
           key={homeRevision}
           store={store}
+          modelApi={modelApi}
           notify={notify}
           workspaceApi={workspaceApi}
           composerMotion={

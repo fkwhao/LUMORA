@@ -85,6 +85,22 @@ describe("visible task flow", () => {
     expect(
       screen.getByRole("button", { name: "选择项目文件夹" }),
     ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "添加附件" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "选择权限模式" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "选择模型" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "上下文已用" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "网页" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "应用" }))
+      .not.toBeInTheDocument();
     const goalInput = screen.getByRole("textbox", {
       name: "告诉 LUMORA 你的目标",
     });
@@ -117,14 +133,17 @@ describe("visible task flow", () => {
     const taskSidebarToggle = screen.getByRole("button", {
       name: "显示侧边栏",
     });
+    expect(taskSidebarToggle).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(taskSidebarToggle);
     expect(
       screen.getByRole("button", { name: "隐藏侧边栏" }),
     ).toBe(taskSidebarToggle);
+    expect(taskSidebarToggle).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(taskSidebarToggle);
     expect(
       screen.getByRole("button", { name: "显示侧边栏" }),
     ).toBe(taskSidebarToggle);
+    expect(taskSidebarToggle).toHaveAttribute("aria-expanded", "false");
     const contextUsageButton = screen.getByRole("button", { name: "上下文已用" });
     expect(contextUsageButton).toHaveAttribute(
       "aria-describedby",

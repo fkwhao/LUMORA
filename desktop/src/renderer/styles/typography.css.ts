@@ -63,18 +63,18 @@ globalStyle(".project-picker,\n.project-mode,\n.project-branch", {
   fontWeight: "500",
 });
 
-globalStyle(".goal-composer textarea", {
+globalStyle(".home-native-composer-input", {
   fontSize: "14px",
   fontWeight: "400",
-  lineHeight: "1.7",
+  lineHeight: "1.5",
 });
 
-globalStyle(".context-actions button,\n.follow-up-composer button", {
+globalStyle(".follow-up-composer button", {
   fontSize: "10.5px",
   fontWeight: "500",
 });
 
-globalStyle(".selected-contexts > span,\n.home-privacy-note", {
+globalStyle(".home-privacy-note", {
   fontSize: "10px",
   fontWeight: "400",
 });

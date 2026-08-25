@@ -3510,6 +3510,15 @@ globalStyle(".task-sidebar-visibility-toggle svg", {
   transition: "opacity 120ms ease, filter 120ms ease",
 });
 
+globalStyle('.task-sidebar-visibility-toggle[aria-expanded="true"]', {
+  color: "var(--ink)",
+});
+
+globalStyle('.task-sidebar-visibility-toggle[aria-expanded="true"] svg', {
+  opacity: "1",
+  filter: "brightness(1.18)",
+});
+
 globalStyle(".task-sidebar-visibility-toggle:hover", {
   color: "var(--ink)",
   background: "transparent",

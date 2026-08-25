@@ -207,7 +207,7 @@ globalStyle('[data-theme="dark"] .desktop-bridge-error', {
 });
 
 globalStyle(
-  '[data-theme="dark"] .goal-composer label,\n[data-theme="dark"] .assistant-message > span,\n[data-theme="dark"] .assistant-message > p,\n[data-theme="dark"] .markdown-body',
+  '[data-theme="dark"] .assistant-message > span,\n[data-theme="dark"] .assistant-message > p,\n[data-theme="dark"] .markdown-body',
   {
     color: "var(--ink)",
   },
@@ -218,14 +218,14 @@ globalStyle('[data-theme="dark"] textarea::placeholder', {
 });
 
 globalStyle(
-  '[data-theme="dark"] .composer-footer,\n[data-theme="dark"] .recent-item,\n[data-theme="dark"] .automation-list article',
+  '[data-theme="dark"] .recent-item,\n[data-theme="dark"] .automation-list article',
   {
     borderColor: "var(--appearance-line, var(--line))",
   },
 );
 
 globalStyle(
-  '[data-theme="dark"] .context-actions button,\n[data-theme="dark"] .follow-up-composer button,\n[data-theme="dark"] .hint-tags button,\n[data-theme="dark"] .task-actions > button:not(.icon-button),\n[data-theme="dark"] .icon-button',
+  '[data-theme="dark"] .follow-up-composer button,\n[data-theme="dark"] .hint-tags button,\n[data-theme="dark"] .task-actions > button:not(.icon-button),\n[data-theme="dark"] .icon-button',
   {
     color: "#bdc3cc",
     borderColor: "var(--appearance-line, var(--line-strong))",
@@ -234,19 +234,13 @@ globalStyle(
 );
 
 globalStyle(
-  '[data-theme="dark"] .context-actions button:hover,\n[data-theme="dark"] .follow-up-composer button:hover:not(:disabled),\n[data-theme="dark"] .hint-tags button:hover',
+  '[data-theme="dark"] .follow-up-composer button:hover:not(:disabled),\n[data-theme="dark"] .hint-tags button:hover',
   {
     color: "#fff",
     borderColor: "#545a63",
     background: "#303134",
   },
 );
-
-globalStyle('[data-theme="dark"] .selected-contexts > span', {
-  color: "#c1c7d0",
-  borderColor: "#344158",
-  background: "#1c2738",
-});
 
 globalStyle('[data-theme="dark"] .recent-item:hover', {
   background: "#2d3138",
@@ -541,9 +535,16 @@ globalStyle('[data-theme="dark"] .follow-up-composer', {
   boxShadow: "0 1px 5px rgb(0 0 0 / 22%)",
 });
 
-globalStyle('[data-theme="dark"] .goal-composer', {
-  background: "rgb(39 40 43 / 88%)",
-  backdropFilter: "blur(12px)",
+globalStyle('[data-theme="dark"] .home-native-composer', {
+  borderColor:
+    "color-mix(in oklab, var(--aui-muted-foreground) 15%, transparent)",
+  boxShadow: "none",
+});
+
+globalStyle('[data-theme="dark"] .home-native-composer:focus-within', {
+  borderColor:
+    "color-mix(in oklab, var(--aui-muted-foreground) 30%, transparent)",
+  boxShadow: "none",
 });
 
 globalStyle(
@@ -553,14 +554,17 @@ globalStyle(
   },
 );
 
-globalStyle('[data-theme="dark"] .composer-popover', {
-  color: "#f1f1f1",
-  borderColor: "rgb(255 255 255 / 8%)",
-  background: "rgb(43 43 43 / 96%)",
-  backdropFilter: "blur(32px) saturate(125%)",
-  boxShadow:
-    "inset 0 1px 0 rgb(255 255 255 / 8%), 0 18px 48px rgb(0 0 0 / 34%)",
-});
+globalStyle(
+  '[data-theme="dark"] .composer-popover,\n[data-theme="dark"] .home-composer-popover',
+  {
+    color: "#f1f1f1",
+    borderColor: "rgb(255 255 255 / 8%)",
+    background: "rgb(43 43 43 / 96%)",
+    backdropFilter: "blur(32px) saturate(125%)",
+    boxShadow:
+      "inset 0 1px 0 rgb(255 255 255 / 8%), 0 18px 48px rgb(0 0 0 / 34%)",
+  },
+);
 
 globalStyle('[data-theme="dark"] .context-picker-popover', {
   borderColor: "rgb(255 255 255 / 8%)",
@@ -568,13 +572,15 @@ globalStyle('[data-theme="dark"] .context-picker-popover', {
   backdropFilter: "blur(32px) saturate(125%)",
 });
 
-globalStyle('[data-theme="dark"] .composer-popover > button.is-selected', {
-  background: "transparent !important",
-});
+globalStyle(
+  '[data-theme="dark"] .composer-popover > button.is-selected,\n[data-theme="dark"] .home-composer-popover button.is-selected',
+  { background: "transparent !important" },
+);
 
-globalStyle('[data-theme="dark"] .composer-popover > button:hover', {
-  background: "rgb(255 255 255 / 7%) !important",
-});
+globalStyle(
+  '[data-theme="dark"] .composer-popover > button:hover,\n[data-theme="dark"] .home-composer-popover button:hover',
+  { background: "rgb(255 255 255 / 7%) !important" },
+);
 
 globalStyle(
   '[data-theme="dark"] .submit-task,\n[data-theme="dark"] .follow-up-composer .send-follow-up',

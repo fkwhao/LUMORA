@@ -12,10 +12,18 @@ globalStyle(":root", {
   },
 });
 
-globalStyle(".context-actions button:not(:first-child):not(:last-child)", {
+globalStyle(".home-native-model-trigger", {
   "@media": {
-    "(max-width: 1260px)": {
-    padding: "0 8px",
+    "(max-width: 620px)": {
+      maxWidth: "128px",
+    },
+  },
+});
+
+globalStyle(".home-native-composer-control:not(.home-native-model-trigger) > span", {
+  "@media": {
+    "(max-width: 520px)": {
+      display: "none",
     },
   },
 });
