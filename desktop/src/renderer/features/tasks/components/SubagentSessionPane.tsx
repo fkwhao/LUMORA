@@ -244,6 +244,7 @@ function ActivationCard({
     <article
       className={`subagent-activation${open ? " is-open" : ""}`}
       data-status={activation.status}
+      data-terminal={isLatest ? "true" : undefined}
     >
       <button
         className="subagent-activation-toggle"

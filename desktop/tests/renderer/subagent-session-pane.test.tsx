@@ -91,6 +91,10 @@ describe("SubagentSessionPane", () => {
     const second = screen.getByRole("button", { name: /Activation 2/ });
     expect(first).toHaveAttribute("aria-expanded", "false");
     expect(second).toHaveAttribute("aria-expanded", "true");
+    expect(first.closest(".subagent-activation"))
+      .not.toHaveAttribute("data-terminal");
+    expect(second.closest(".subagent-activation"))
+      .toHaveAttribute("data-terminal", "true");
     expect(screen.getByText("继续验证 Agent 页面。")).toBeVisible();
     expect(screen.getByText("先检查项目结构。")
       .closest(".subagent-activation-region"))

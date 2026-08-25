@@ -3731,20 +3731,22 @@ globalStyle(".subagent-activation-list", {
   padding: "14px 0 4px",
 });
 
-globalStyle(".subagent-activation-list::before", {
-  position: "absolute",
-  top: "28px",
-  bottom: "24px",
-  left: "13px",
-  width: "1px",
-  background: "color-mix(in srgb, var(--line) 78%, transparent)",
-  content: '""',
-});
-
 globalStyle(".subagent-activation", {
   position: "relative",
   minWidth: "0",
   paddingBottom: "7px",
+});
+
+globalStyle('.subagent-activation:not([data-terminal="true"])::after', {
+  position: "absolute",
+  zIndex: "0",
+  top: "20px",
+  bottom: "-20px",
+  left: "13px",
+  width: "1px",
+  background: "color-mix(in srgb, var(--line) 78%, transparent)",
+  content: '""',
+  pointerEvents: "none",
 });
 
 globalStyle(".subagent-activation-toggle", {
