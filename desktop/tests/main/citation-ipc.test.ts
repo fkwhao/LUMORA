@@ -34,6 +34,9 @@ describe("citation local preview", () => {
     const pdf = path.join(parent, "paper.pdf");
     await fs.mkdir(path.join(workspace, "src"), { recursive: true });
     await fs.writeFile(path.join(workspace, "src", "main.ts"), "export const ready = true;\n");
+    await fs.writeFile(path.join(workspace, "README.md"), "# Workspace\n");
+    const completeSource = `${"export const value = 1;\n".repeat(36_000)}// complete\n`;
+    await fs.writeFile(path.join(workspace, "src", "large.ts"), completeSource);
     await fs.writeFile(outside, "secret\n");
     await fs.writeFile(pdf, "%PDF-1.7\n%%EOF\n");
 
@@ -64,8 +67,29 @@ describe("citation local preview", () => {
       "src/main.ts",
     )).resolves.toMatchObject({
       kind: "text",
-      displayPath: path.join("src", "main.ts"),
+      displayPath: path.join("workspace", "src", "main.ts"),
       content: "export const ready = true;\n",
+    });
+
+    await expect(readLocalCitation(
+      taskGateway,
+      modelGateway,
+      "task-citation",
+      "README.md",
+    )).resolves.toMatchObject({
+      kind: "text",
+      displayPath: path.join("workspace", "README.md"),
+    });
+
+    await expect(readLocalCitation(
+      taskGateway,
+      modelGateway,
+      "task-citation",
+      "src/large.ts",
+    )).resolves.toMatchObject({
+      kind: "text",
+      content: completeSource,
+      truncated: false,
     });
 
     await expect(readLocalCitation(

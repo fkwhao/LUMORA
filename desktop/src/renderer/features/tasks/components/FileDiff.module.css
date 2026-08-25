@@ -343,6 +343,59 @@
   padding: 5px 0 8px;
 }
 
+.source {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  border: 0;
+  border-radius: 0;
+  background: var(--diff-code-surface);
+  box-shadow: none;
+}
+
+.source .diffBody {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.source .diffCanvas {
+  display: block;
+  padding: 8px 0 24px;
+}
+
+.source .diffCanvas::before {
+  content: none;
+}
+
+.source .diffRow:not(.gap) {
+  width: 100%;
+  min-width: 100%;
+  grid-template-columns: var(--source-gutter-width, 36px) minmax(260px, 1fr);
+}
+
+.source .diffRow .ln {
+  padding: 0 4px 0 8px;
+  text-align: left;
+}
+
+.source .diffRow code {
+  padding-left: 6px;
+}
+
+.source .diffRow.highlighted {
+  background: transparent;
+  box-shadow: none;
+}
+
+.source .diffRow.highlighted code {
+  background: color-mix(in srgb, var(--blue) 16%, transparent);
+}
+
+.source .diffRow.highlighted .ln {
+  color: color-mix(in srgb, var(--blue) 76%, var(--ink));
+}
+
 .parentScroll {
   overflow: hidden;
 }

@@ -309,62 +309,145 @@ globalStyle(".citation-local-header small", {
 
 globalStyle(".citation-text-preview", {
   position: "relative",
+  display: "flex",
+  width: "100%",
+  height: "100%",
   minHeight: 0,
   flex: "1 1 auto",
-  overflow: "auto",
-  scrollbarGutter: "stable",
-  background: "color-mix(in srgb, var(--surface) 97%, var(--ink) 3%)",
+  flexDirection: "column",
+  overflow: "hidden",
+  background: "var(--surface)",
 });
 
-globalStyle(".citation-text-preview pre", {
-  minWidth: "max-content",
-  margin: 0,
-  padding: "12px 0 28px",
-  fontFamily: "'Cascadia Code', 'SFMono-Regular', Consolas, monospace",
-  fontSize: "10.5px",
-  lineHeight: "1.65",
-  tabSize: 2,
-});
-
-globalStyle(".citation-code-line", {
+globalStyle(".citation-file-toolbar", {
   display: "grid",
-  minHeight: "18px",
-  gridTemplateColumns: "50px minmax(max-content, 1fr)",
-  color: "color-mix(in srgb, var(--ink) 84%, transparent)",
+  width: "100%",
+  minHeight: "36px",
+  padding: "0 12px 0 16px",
+  flex: "0 0 auto",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
+  alignItems: "center",
+  gap: "12px",
+  borderBottom: "1px solid color-mix(in srgb, var(--line) 78%, transparent)",
+  background: "color-mix(in srgb, var(--surface) 98%, var(--ink) 2%)",
 });
 
-globalStyle(".citation-code-line i", {
-  paddingRight: "12px",
-  color: "var(--subtle)",
-  fontStyle: "normal",
-  textAlign: "right",
-  userSelect: "none",
+globalStyle(".citation-file-breadcrumb", {
+  display: "flex",
+  minWidth: 0,
+  alignItems: "center",
+  gap: "6px",
+  overflowX: "auto",
+  overflowY: "hidden",
+  color: "color-mix(in srgb, var(--ink) 90%, transparent)",
+  fontSize: "12.5px",
+  fontWeight: "560",
+  lineHeight: "1",
+  scrollbarWidth: "none",
+  whiteSpace: "nowrap",
 });
 
-globalStyle(".citation-code-line code", {
-  display: "block",
-  paddingRight: "20px",
-  whiteSpace: "pre",
+globalStyle(".citation-file-breadcrumb::-webkit-scrollbar", {
+  display: "none",
 });
 
-globalStyle(".citation-code-line.is-highlighted", {
+globalStyle(".citation-file-breadcrumb-entry", {
+  display: "inline-flex",
+  flex: "0 0 auto",
+  alignItems: "center",
+  gap: "6px",
+});
+
+globalStyle(".citation-file-breadcrumb-entry > span", {
+  whiteSpace: "nowrap",
+});
+
+globalStyle(".citation-file-breadcrumb-entry > span.is-current", {
+  color: "inherit",
+  fontWeight: "inherit",
+});
+
+globalStyle(".citation-file-breadcrumb-entry svg", {
+  flex: "0 0 auto",
+  color: "color-mix(in srgb, var(--muted) 72%, transparent)",
+  strokeWidth: "1.7",
+});
+
+globalStyle(".citation-markdown-mode", {
+  minHeight: "27px",
+  padding: "0 7px",
+  color: "color-mix(in srgb, var(--ink) 86%, transparent)",
+  border: 0,
+  borderRadius: "6px",
+  background: "transparent",
+  fontFamily: "inherit",
+  fontSize: "11px",
+  fontWeight: "560",
+  whiteSpace: "nowrap",
+  cursor: "pointer",
+  transition: "color 130ms ease, background-color 130ms ease",
+});
+
+globalStyle(".citation-markdown-mode:hover, .citation-markdown-mode:focus-visible", {
   color: "var(--ink)",
-  background: "color-mix(in srgb, var(--blue) 13%, transparent)",
-  boxShadow: "inset 2px 0 color-mix(in srgb, var(--blue) 68%, transparent)",
+  background: "color-mix(in srgb, var(--ink) 7%, transparent)",
+  outline: "none",
 });
 
-globalStyle(".citation-preview-notice", {
-  position: "sticky",
-  bottom: "8px",
-  width: "max-content",
-  margin: "0 auto",
-  padding: "5px 9px",
-  color: "var(--muted)",
-  border: "1px solid color-mix(in srgb, var(--line) 72%, transparent)",
+globalStyle(".citation-file-content", {
+  display: "flex",
+  width: "100%",
+  minHeight: 0,
+  flex: "1 1 auto",
+  overflow: "hidden",
+  background: "var(--surface)",
+});
+
+globalStyle(".citation-source-file-panel", {
+  display: "flex",
+  width: "100%",
+  minHeight: 0,
+  minWidth: 0,
+  overflow: "hidden",
+});
+
+globalStyle(".citation-source-file-panel > div", {
+  width: "100%",
+  minWidth: 0,
+});
+
+globalStyle(".citation-markdown-preview", {
+  width: "100%",
+  minHeight: 0,
+  padding: "18px 20px 42px",
+  overflow: "auto",
+  color: "var(--ink)",
+  fontSize: "13px",
+  scrollbarColor: "color-mix(in srgb, var(--muted) 38%, transparent) transparent",
+  scrollbarGutter: "stable",
+  scrollbarWidth: "thin",
+});
+
+globalStyle(".citation-markdown-preview > .aui-md", {
+  width: "100%",
+  maxWidth: "none",
+});
+
+globalStyle(".citation-markdown-preview::-webkit-scrollbar", {
+  width: "10px",
+  height: "10px",
+});
+
+globalStyle(".citation-markdown-preview::-webkit-scrollbar-track, .citation-markdown-preview::-webkit-scrollbar-corner", {
+  background: "transparent",
+});
+
+globalStyle(".citation-markdown-preview::-webkit-scrollbar-thumb", {
+  minWidth: "44px",
+  minHeight: "44px",
+  border: "3px solid transparent",
   borderRadius: "999px",
-  background: "color-mix(in srgb, var(--surface) 92%, transparent)",
-  backdropFilter: "blur(8px)",
-  fontSize: "9.5px",
+  background: "color-mix(in srgb, var(--muted) 38%, transparent) padding-box",
 });
 
 globalStyle(".citation-image-preview", {

@@ -5,6 +5,7 @@ import {
   FileDiff,
   languageForFile,
   rowsFromPatch,
+  SourceFilePreview,
   splitFilePath,
 } from "../../src/renderer/features/tasks/components/FileDiff";
 
@@ -109,5 +110,28 @@ describe("FileDiff", () => {
     expect(languageForFile("src/App.tsx")).toBe("typescript");
     expect(languageForFile("Dockerfile.dev")).toBe("dockerfile");
     expect(languageForFile("LICENSE")).toBeUndefined();
+  });
+
+  it("reuses the diff canvas for read-only source without change markers", () => {
+    const { container } = render(
+      <SourceFilePreview
+        file="src/theme.ts"
+        content={'const light = true;\nconst theme = "dark";\nexport default theme;'}
+        startLine={2}
+        endLine={2}
+      />,
+    );
+
+    const sourceRows = container.querySelectorAll("[data-source-line]");
+    const focusedRow = container.querySelector('[data-source-line="2"]');
+    const source = container.firstElementChild as HTMLElement;
+    expect(sourceRows).toHaveLength(3);
+    expect(source.style.getPropertyValue("--source-gutter-width"))
+      .toBe("calc(1ch + 14px)");
+    expect(focusedRow).toHaveAttribute("data-highlighted", "true");
+    expect(focusedRow?.children).toHaveLength(2);
+    expect(focusedRow?.querySelector(".hljs-keyword")).toHaveTextContent("const");
+    expect(container.querySelector('[data-source-line="1"]'))
+      .not.toHaveAttribute("data-highlighted");
   });
 });

@@ -280,8 +280,8 @@ function FileChangeRow({
           <span className={styles.fileName}>{filePath.name}</span>
         </span>
         <span className={styles.fileStats} aria-label={`${file.path} 新增 ${file.additions} 行，删除 ${file.deletions} 行`}>
-          {file.additions > 0 && <em className={styles.added}>+{file.additions}</em>}
-          {file.deletions > 0 && <em className={styles.deleted}>-{file.deletions}</em>}
+          <em className={styles.added}>+{file.additions}</em>
+          <em className={styles.deleted}>-{file.deletions}</em>
         </span>
       </button>
       {previewOpen && previewLayout && createPortal(

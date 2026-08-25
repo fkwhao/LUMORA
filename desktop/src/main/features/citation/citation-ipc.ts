@@ -22,7 +22,7 @@ import { validateTaskId } from "../../../shared/validation";
 import type { ModelGateway } from "../model/model-gateway";
 import type { TaskGateway } from "../task/task-gateway";
 
-const MAX_TEXT_PREVIEW_BYTES = 768 * 1024;
+const MAX_TEXT_PREVIEW_BYTES = 10 * 1024 * 1024;
 const MAX_IMAGE_PREVIEW_BYTES = 20 * 1024 * 1024;
 const MAX_PDF_PREVIEW_BYTES = 25 * 1024 * 1024;
 const hardenedPreviewSessions = new WeakSet<Session>();
@@ -218,7 +218,15 @@ async function readLocalCitation(
   ]);
   if (roots.length === 0) throw new Error("当前会话没有可用的项目目录");
   const target = await resolveCitationFile(roots, requestedPath);
-  return readPreviewFile(target.absolutePath, target.displayPath);
+  const displayRoot = uniquePaths([
+    worktree?.sourceWorkspacePath,
+    task.workspacePath,
+    worktree?.effectiveWorkspacePath,
+  ])[0];
+  const displayPath = displayRoot
+    ? path.join(path.basename(path.resolve(displayRoot)), target.displayPath)
+    : target.displayPath;
+  return readPreviewFile(target.absolutePath, displayPath);
 }
 
 async function readAttachmentCitation(
@@ -296,33 +304,29 @@ async function readPreviewFile(
     };
   }
 
-  const byteCount = Math.min(stat.size, MAX_TEXT_PREVIEW_BYTES);
-  const handle = await fs.open(realPath, "r");
-  try {
-    const bytes = Buffer.alloc(byteCount);
-    await handle.read(bytes, 0, byteCount, 0);
-    if (bytes.includes(0)) {
-      return {
-        kind: "unsupported",
-        name,
-        displayPath,
-        mimeType,
-        byteSize: stat.size,
-        truncated: false,
-      };
-    }
+  if (stat.size > MAX_TEXT_PREVIEW_BYTES) {
+    throw new Error("引用文本超过 10 MB，无法安全预览完整文件");
+  }
+  const bytes = await fs.readFile(realPath);
+  if (bytes.includes(0)) {
     return {
-      kind: "text",
+      kind: "unsupported",
       name,
       displayPath,
       mimeType,
-      content: bytes.toString("utf8"),
       byteSize: stat.size,
-      truncated: stat.size > byteCount,
+      truncated: false,
     };
-  } finally {
-    await handle.close();
   }
+  return {
+    kind: "text",
+    name,
+    displayPath,
+    mimeType,
+    content: bytes.toString("utf8"),
+    byteSize: stat.size,
+    truncated: false,
+  };
 }
 
 function findAttachment(

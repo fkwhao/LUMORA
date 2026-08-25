@@ -11,9 +11,9 @@ import {
 import {
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
+  type WheelEvent,
 } from "react";
 
 import type {
@@ -22,6 +22,8 @@ import type {
   CitationWebPreviewState,
 } from "../../../../shared/citation-contract";
 import type { LumoraModelApi } from "../../../../shared/model-contract";
+import { MarkdownMessage } from "../../../components/MarkdownMessage";
+import { SourceFilePreview } from "./FileDiff";
 
 interface CitationPreviewPaneProps {
   taskId: string;
@@ -234,7 +236,6 @@ function LocalCitationPreview({
 }) {
   const [preview, setPreview] = useState<CitationLocalPreview>();
   const [error, setError] = useState<string>();
-  const highlightedRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -288,25 +289,22 @@ function LocalCitationPreview({
     };
   }, [modelApi, reference, taskId]);
 
-  useEffect(() => {
-    highlightedRef.current?.scrollIntoView({ block: "center" });
-  }, [preview]);
-
-  const lines = useMemo(() => preview?.content?.split("\n") ?? [], [preview?.content]);
   const location = localLocation(reference);
 
   return (
     <section className="citation-preview citation-local-preview">
-      <header className="citation-local-header">
-        <span className="citation-local-icon">
-          {preview?.kind === "image" ? <ImageIcon /> : <FileText />}
-        </span>
-        <div>
-          <strong>{preview?.name || reference.label}</strong>
-          <span>{preview?.displayPath || location}</span>
-        </div>
-        {location && <small>{location}</small>}
-      </header>
+      {preview && preview.kind !== "text" && (
+        <header className="citation-local-header">
+          <span className="citation-local-icon">
+            {preview?.kind === "image" ? <ImageIcon /> : <FileText />}
+          </span>
+          <div>
+            <strong>{preview?.name || reference.label}</strong>
+            <span>{preview?.displayPath || location}</span>
+          </div>
+          {location && <small>{location}</small>}
+        </header>
+      )}
       {!preview && !error && (
         <div className="citation-preview-placeholder">
           <LoaderCircle className="spin" />
@@ -334,32 +332,7 @@ function LocalCitationPreview({
         </div>
       )}
       {preview?.kind === "text" && (
-        <div className="citation-text-preview">
-          <pre>
-            {lines.map((line, index) => {
-              const lineNumber = index + 1;
-              const highlighted = isHighlightedLine(reference, lineNumber);
-              return (
-                <span
-                  className={`citation-code-line${highlighted ? " is-highlighted" : ""}`}
-                  key={lineNumber}
-                  ref={
-                    reference.kind === "file"
-                    && reference.startLine === lineNumber
-                      ? highlightedRef
-                      : undefined
-                  }
-                >
-                  <i>{lineNumber}</i>
-                  <code>{line || " "}</code>
-                </span>
-              );
-            })}
-          </pre>
-          {preview.truncated && (
-            <p className="citation-preview-notice">文件较大，当前仅显示开头部分。</p>
-          )}
-        </div>
+        <CitationTextPreview reference={reference} preview={preview} />
       )}
       {preview?.kind === "unsupported" && (
         <div className="citation-preview-placeholder">
@@ -371,9 +344,95 @@ function LocalCitationPreview({
   );
 }
 
-function isHighlightedLine(reference: CitationReference, line: number): boolean {
-  if (reference.kind !== "file" || !reference.startLine) return false;
-  return line >= reference.startLine && line <= (reference.endLine ?? reference.startLine);
+function CitationTextPreview({
+  reference,
+  preview,
+}: {
+  reference: CitationReference;
+  preview: CitationLocalPreview;
+}) {
+  const file = reference.kind === "file"
+    ? (reference.path ?? preview.displayPath) || preview.name
+    : preview.displayPath || preview.name;
+  const markdown = isMarkdownFile(file, preview.mimeType);
+  const [showSource, setShowSource] = useState(!markdown);
+  const breadcrumb = citationBreadcrumbParts(preview.displayPath || file);
+
+  useEffect(() => {
+    setShowSource(!markdown);
+  }, [file, markdown]);
+
+  return (
+    <div className="citation-text-preview">
+      <header className="citation-file-toolbar">
+        <div
+          aria-label={`文件路径：${breadcrumb.join(" / ")}`}
+          className="citation-file-breadcrumb"
+          onWheel={scrollBreadcrumb}
+          role="navigation"
+          title={preview.displayPath || file}
+        >
+          {breadcrumb.map((segment, index) => (
+            <span className="citation-file-breadcrumb-entry" key={`${segment}-${index}`}>
+              <span className={index === breadcrumb.length - 1 ? "is-current" : undefined}>
+                {segment}
+              </span>
+              {index < breadcrumb.length - 1 && (
+                <ChevronRight aria-hidden="true" size={11} />
+              )}
+            </span>
+          ))}
+        </div>
+        {markdown && (
+          <button
+            className="citation-markdown-mode"
+            type="button"
+            onClick={() => setShowSource((current) => !current)}
+          >
+            {showSource ? "预览" : "查看源代码"}
+          </button>
+        )}
+      </header>
+      <div className="citation-file-content">
+        {markdown && !showSource ? (
+          <div className="citation-markdown-preview">
+            <MarkdownMessage content={preview.content ?? ""} />
+          </div>
+        ) : (
+          <div className="citation-source-file-panel">
+            <SourceFilePreview
+              file={file}
+              content={preview.content ?? ""}
+              startLine={reference.kind === "file" ? reference.startLine : undefined}
+              endLine={reference.kind === "file" ? reference.endLine : undefined}
+              truncated={preview.truncated}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function citationBreadcrumbParts(value: string): string[] {
+  const normalized = value.replace(/\\/g, "/").replace(/\/+$/, "");
+  const parts = normalized.split("/").filter(Boolean);
+  return parts.length > 0 ? parts : [value || "未命名文件"];
+}
+
+export function isMarkdownFile(file: string, mimeType?: string): boolean {
+  return mimeType?.toLowerCase() === "text/markdown"
+    || /\.(?:md|markdown)$/i.test(file);
+}
+
+function scrollBreadcrumb(event: WheelEvent<HTMLDivElement>) {
+  const element = event.currentTarget;
+  if (
+    element.scrollWidth <= element.clientWidth
+    || Math.abs(event.deltaX) >= Math.abs(event.deltaY)
+  ) return;
+  element.scrollLeft += event.deltaY;
+  event.preventDefault();
 }
 
 function localLocation(reference: CitationReference): string {

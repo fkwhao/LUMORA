@@ -1,5 +1,5 @@
 import hljs from "highlight.js";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, type CSSProperties } from "react";
 
 import styles from "./FileDiff.module.css";
 
@@ -22,6 +22,11 @@ interface FileDiffProps {
   truncated?: boolean;
   truncatedMessage?: string;
   emptyMessage?: string;
+  source?: boolean;
+  highlightedLineRange?: {
+    start: number;
+    end?: number;
+  };
 }
 
 export function FileDiff({
@@ -36,21 +41,46 @@ export function FileDiff({
   truncated = false,
   truncatedMessage = "补丁过大，仅展示前 500,000 个字符",
   emptyMessage = "该文件没有可展示的文本补丁",
+  source = false,
+  highlightedLineRange,
 }: FileDiffProps) {
   const filePath = splitFilePath(file);
   const syntaxLanguage = useMemo(() => languageForFile(file), [file]);
+  const focusedLineRef = useRef<HTMLDivElement>(null);
   const highlightedRows = useMemo(
     () => rows.map((row) => row.type === "gap"
       ? undefined
       : highlightDiffLine(row.text || " ", syntaxLanguage)),
     [rows, syntaxLanguage],
   );
+  const focusedLine = source ? highlightedLineRange?.start : undefined;
+  const sourceLineDigits = useMemo(() => {
+    if (!source) return 0;
+    return rows.reduce((digits, row) => {
+      const line = displayLineNumber(row);
+      return typeof line === "number"
+        ? Math.max(digits, String(line).length)
+        : digits;
+    }, 1);
+  }, [rows, source]);
+  const sourceStyle = source
+    ? ({
+        "--source-gutter-width": `calc(${sourceLineDigits}ch + 14px)`,
+      } as CSSProperties)
+    : undefined;
+
+  useEffect(() => {
+    focusedLineRef.current?.scrollIntoView?.({ block: "center" });
+  }, [file, focusedLine, rows]);
 
   return (
     <div
       className={`${styles.diff}${preview ? ` ${styles.preview}` : ""}${
         headerless ? ` ${styles.headerless}` : ""
-      }${parentScroll ? ` ${styles.parentScroll}` : ""}`}
+      }${parentScroll ? ` ${styles.parentScroll}` : ""}${
+        source ? ` ${styles.source}` : ""
+      }`}
+      style={sourceStyle}
     >
       {!headerless && <div className={styles.diffHead}>
         <span className={styles.diffFileWrap}>
@@ -89,39 +119,63 @@ export function FileDiff({
           style={maxBodyHeight === undefined ? undefined : { maxHeight: maxBodyHeight }}
         >
           <div className={styles.diffCanvas} data-diff-canvas>
-            {rows.map((row, index) => row.type === "gap" ? (
-              <div
-                key={`gap-${index}`}
-                className={`${styles.diffRow} ${styles.gap}`}
-              >
-                {row.text}
-              </div>
-            ) : (
-              <div
-                key={`${row.old ?? "n"}-${row.cur ?? "n"}-${index}`}
-                className={`${styles.diffRow} ${styles[row.type]}`}
-              >
-                <span
-                  className={styles.ln}
-                  title={row.type === "del" ? `原第 ${row.old} 行` : `新第 ${row.cur ?? row.old} 行`}
+            {rows.map((row, index) => {
+              if (row.type === "gap") {
+                return (
+                  <div
+                    key={`gap-${index}`}
+                    className={`${styles.diffRow} ${styles.gap}`}
+                  >
+                    {row.text}
+                  </div>
+                );
+              }
+              const lineNumber = displayLineNumber(row);
+              const highlighted = source
+                && typeof lineNumber === "number"
+                && highlightedLineRange !== undefined
+                && lineNumber >= highlightedLineRange.start
+                && lineNumber <= (
+                  highlightedLineRange.end ?? highlightedLineRange.start
+                );
+              return (
+                <div
+                  key={`${row.old ?? "n"}-${row.cur ?? "n"}-${index}`}
+                  className={`${styles.diffRow} ${styles[row.type]}${
+                    highlighted ? ` ${styles.highlighted}` : ""
+                  }`}
+                  data-highlighted={highlighted || undefined}
+                  data-source-line={source ? lineNumber : undefined}
+                  ref={source && lineNumber === focusedLine ? focusedLineRef : undefined}
                 >
-                  {displayLineNumber(row)}
-                </span>
-                <span className={styles.sign}>
-                  {row.type === "add" ? "+" : row.type === "del" ? "−" : ""}
-                </span>
-                {highlightedRows[index] === undefined ? (
-                  <code>{row.text || " "}</code>
-                ) : (
-                  <code
-                    className={styles.syntaxCode}
-                    data-language={syntaxLanguage}
-                    // highlight.js 会转义源代码，仅返回用于着色的 span。
-                    dangerouslySetInnerHTML={{ __html: highlightedRows[index] }}
-                  />
-                )}
-              </div>
-            ))}
+                  <span
+                    className={styles.ln}
+                    title={source
+                      ? `第 ${lineNumber} 行`
+                      : row.type === "del"
+                        ? `原第 ${row.old} 行`
+                        : `新第 ${row.cur ?? row.old} 行`}
+                  >
+                    {lineNumber}
+                  </span>
+                  {!source && (
+                    <span className={styles.sign}>
+                      {row.type === "add" ? "+" : row.type === "del" ? "−" : ""}
+                    </span>
+                  )}
+                  {highlightedRows[index] === undefined ? (
+                    <code>{row.text || " "}</code>
+                  ) : (
+                    <code
+                      className={styles.syntaxCode}
+                      data-language={syntaxLanguage}
+                      // highlight.js 会转义源代码，仅返回用于着色的 span。
+                      dangerouslySetInnerHTML={{ __html: highlightedRows[index] }}
+                    />
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       ) : (
@@ -131,6 +185,47 @@ export function FileDiff({
         <div className={styles.truncated}>{truncatedMessage}</div>
       )}
     </div>
+  );
+}
+
+export function SourceFilePreview({
+  file,
+  content,
+  startLine,
+  endLine,
+  truncated = false,
+}: {
+  file: string;
+  content: string;
+  startLine?: number;
+  endLine?: number;
+  truncated?: boolean;
+}) {
+  const rows = useMemo<FileDiffRow[]>(
+    () => content.split(/\r?\n/).map((text, index) => ({
+      old: index + 1,
+      cur: index + 1,
+      type: "ctx",
+      text,
+    })),
+    [content],
+  );
+
+  return (
+    <FileDiff
+      file={file}
+      rows={rows}
+      additions={0}
+      deletions={0}
+      headerless
+      source
+      highlightedLineRange={startLine === undefined
+        ? undefined
+        : { start: startLine, end: endLine }}
+      truncated={truncated}
+      truncatedMessage="文件较大，当前仅显示开头部分。"
+      emptyMessage="该文件没有可展示的文本内容"
+    />
   );
 }
 

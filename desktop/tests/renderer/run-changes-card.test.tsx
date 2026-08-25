@@ -152,6 +152,29 @@ describe("RunChangesCard", () => {
       "工作区已发生冲突",
     );
   });
+
+  it("keeps zero additions and deletions visible for every file", () => {
+    render(
+      <RunChangesCard
+        changes={{
+          ...CHANGES,
+          additions: 3,
+          deletions: 2,
+          files: [file("src/added.ts", 3, 0), file("src/removed.ts", 0, 2)],
+        }}
+        onReview={vi.fn()}
+        onRevert={vi.fn()}
+      />,
+    );
+
+    const addedFile = screen.getByRole("button", { name: "审核 src/added.ts" });
+    expect(within(addedFile).getByText("+3")).toBeInTheDocument();
+    expect(within(addedFile).getByText("-0")).toBeInTheDocument();
+
+    const removedFile = screen.getByRole("button", { name: "审核 src/removed.ts" });
+    expect(within(removedFile).getByText("+0")).toBeInTheDocument();
+    expect(within(removedFile).getByText("-2")).toBeInTheDocument();
+  });
 });
 
 function hasCodeLine(root: ParentNode, source: string): boolean {
