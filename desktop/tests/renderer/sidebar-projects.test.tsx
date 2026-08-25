@@ -182,4 +182,76 @@ describe("project conversation sidebar", () => {
       screen.getByText("已完成的会话").closest(".history-row"),
     ).not.toHaveClass("processing");
   });
+
+  it("reveals project conversations in batches and resets after collapsing", () => {
+    const projectTasks = Array.from({ length: 12 }, (_, index) => ({
+      taskId: `project-chat-${index + 1}`,
+      goal: `项目会话 ${index + 1}`,
+      status: "COMPLETED" as const,
+    }));
+    const projectPath = "F:\\project\\LUMORA";
+
+    const { container } = render(
+      <AppSidebar
+        activeView="home"
+        recentTasks={projectTasks}
+        taskProjectPaths={Object.fromEntries(
+          projectTasks.map((task) => [task.taskId, projectPath]),
+        )}
+        projectNames={{ [projectPath]: "LUMORA" }}
+        archivedTaskIds={[]}
+        isLoadingHistory={false}
+        onNewTask={vi.fn()}
+        onNewProject={vi.fn()}
+        onNewProjectConversation={vi.fn()}
+        onNavigate={vi.fn()}
+        onOpenTask={vi.fn()}
+        onArchiveTask={vi.fn()}
+        onSettings={vi.fn()}
+        notify={vi.fn()}
+      />,
+    );
+
+    const projectGroup = within(container)
+      .getByTitle(projectPath)
+      .closest("section");
+    expect(projectGroup).not.toBeNull();
+    const group = within(projectGroup as HTMLElement);
+
+    expect(group.getByText("项目会话 5")).toBeVisible();
+    expect(group.queryByText("项目会话 6")).not.toBeInTheDocument();
+
+    fireEvent.click(
+      group.getByRole("button", { name: "显示项目 LUMORA 的更多会话" }),
+    );
+    expect(group.getByText("项目会话 10")).toBeVisible();
+    expect(group.queryByText("项目会话 11")).not.toBeInTheDocument();
+
+    fireEvent.click(
+      group.getByRole("button", { name: "显示项目 LUMORA 的更多会话" }),
+    );
+    expect(group.getByText("项目会话 12")).toBeVisible();
+    expect(
+      group.queryByRole("button", { name: "显示项目 LUMORA 的更多会话" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      group.getByRole("button", {
+        name: "收起项目 LUMORA 的会话",
+        expanded: true,
+      }),
+    );
+    fireEvent.click(
+      group.getByRole("button", {
+        name: "展开项目 LUMORA 的会话",
+        expanded: false,
+      }),
+    );
+
+    expect(group.getByText("项目会话 5")).toBeVisible();
+    expect(group.queryByText("项目会话 6")).not.toBeInTheDocument();
+    expect(
+      group.getByRole("button", { name: "显示项目 LUMORA 的更多会话" }),
+    ).toBeVisible();
+  });
 });

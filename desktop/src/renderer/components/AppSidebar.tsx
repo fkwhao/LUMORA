@@ -23,6 +23,7 @@ import lumoraLogo from "../assets/lumora-logo.png";
 import type { PrototypeView } from "../features/prototype/PrototypePage";
 
 const COLLAPSED_PROJECTS_STORAGE_KEY = "lumora.sidebar.collapsed-projects";
+const PROJECT_CONVERSATION_BATCH_SIZE = 5;
 const HISTORY_PIXEL_COLUMNS = 40;
 const HISTORY_PIXEL_ROWS = 6;
 const HISTORY_PROCESSING_PIXELS = Array.from(
@@ -107,6 +108,9 @@ export function AppSidebar({
   const [collapsedProjectPaths, setCollapsedProjectPaths] = useState<Set<string>>(
     loadCollapsedProjectPaths,
   );
+  const [visibleProjectTaskCounts, setVisibleProjectTaskCounts] = useState<
+    Record<string, number>
+  >({});
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const archivedTaskIdSet = new Set(archivedTaskIds);
   const activeTasks = recentTasks.filter(
@@ -227,6 +231,12 @@ export function AppSidebar({
             <div className="sidebar-section-list-inner">
             {projectGroups.map((group) => {
               const projectExpanded = !collapsedProjectPaths.has(group.path);
+              const visibleTaskCount = Math.min(
+                visibleProjectTaskCounts[group.path] ??
+                  PROJECT_CONVERSATION_BATCH_SIZE,
+                group.tasks.length,
+              );
+              const hasMoreTasks = visibleTaskCount < group.tasks.length;
               return (
               <section
                 className={`project-task-group${projectExpanded ? " is-expanded" : " is-collapsed"}`}
@@ -239,11 +249,16 @@ export function AppSidebar({
                     title={group.path}
                     aria-label={`${projectExpanded ? "收起" : "展开"}项目 ${group.name} 的会话`}
                     aria-expanded={projectExpanded}
-                    onClick={() =>
+                    onClick={() => {
+                      if (projectExpanded) {
+                        setVisibleProjectTaskCounts((current) =>
+                          resetVisibleProjectTaskCount(current, group.path),
+                        );
+                      }
                       setCollapsedProjectPaths((current) =>
                         toggleCollapsedProject(current, group.path),
-                      )
-                    }
+                      );
+                    }}
                   >
                     {projectExpanded ? (
                       <FolderOpen
@@ -280,7 +295,7 @@ export function AppSidebar({
                   aria-hidden={!projectExpanded}
                 >
                   <div className="project-task-list-inner">
-                    {group.tasks.map((task) => (
+                    {group.tasks.slice(0, visibleTaskCount).map((task) => (
                       <HistoryRow
                         key={task.taskId}
                         task={task}
@@ -291,6 +306,22 @@ export function AppSidebar({
                         notify={notify}
                       />
                     ))}
+                    {hasMoreTasks && (
+                      <button
+                        className="project-task-show-more"
+                        type="button"
+                        aria-label={`显示项目 ${group.name} 的更多会话`}
+                        onClick={() =>
+                          setVisibleProjectTaskCounts((current) => ({
+                            ...current,
+                            [group.path]:
+                              visibleTaskCount + PROJECT_CONVERSATION_BATCH_SIZE,
+                          }))
+                        }
+                      >
+                        展开显示
+                      </button>
+                    )}
                   </div>
                 </div>
               </section>
@@ -621,6 +652,18 @@ function toggleCollapsedProject(
   } catch {
     // Sidebar state can remain session-local when storage is unavailable.
   }
+  return next;
+}
+
+function resetVisibleProjectTaskCount(
+  current: Record<string, number>,
+  projectPath: string,
+): Record<string, number> {
+  if (!(projectPath in current)) {
+    return current;
+  }
+  const next = { ...current };
+  delete next[projectPath];
   return next;
 }
 

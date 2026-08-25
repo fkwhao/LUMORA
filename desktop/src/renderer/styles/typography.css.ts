@@ -40,7 +40,7 @@ globalStyle(".history-empty", {
   fontWeight: "500",
 });
 
-globalStyle(".history-item", {
+globalStyle(".history-item,\n.project-task-show-more", {
   fontSize: "14px",
   fontWeight: "400",
 });

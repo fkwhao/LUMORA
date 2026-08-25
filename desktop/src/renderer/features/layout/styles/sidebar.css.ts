@@ -599,6 +599,32 @@ globalStyle(".project-task-group .history-row .history-item", {
   paddingLeft: "29px",
 });
 
+globalStyle(".project-task-show-more", {
+  display: "flex",
+  width: "100%",
+  minHeight: "30px",
+  padding: "0 29px",
+  alignItems: "center",
+  color: "var(--subtle)",
+  border: "0",
+  borderRadius: "8px",
+  background: "transparent",
+  cursor: "pointer",
+  textAlign: "left",
+  transition: "color 120ms ease",
+});
+
+globalStyle(".project-task-show-more:hover", {
+  color: "var(--muted)",
+  background: "transparent",
+});
+
+globalStyle(".project-task-show-more:focus-visible", {
+  color: "var(--ink)",
+  outline: "1px solid color-mix(in srgb, var(--ink) 28%, transparent)",
+  outlineOffset: "-1px",
+});
+
 globalStyle(".recent-task-group", {
   marginTop: "16px",
 });
