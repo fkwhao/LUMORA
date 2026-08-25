@@ -286,12 +286,19 @@ function PeerMessageItem({ item }: { item: WorkLogItem }) {
 
   return (
     <article className="peer-message-item" data-status={status}>
-      <MessagesSquare size={14} aria-hidden="true" />
-      <span>
-        <strong>{sender} → {target}</strong>
-        <small>{statusText}</small>
+      <span className="peer-message-icon" aria-hidden="true">
+        <MessagesSquare size={14} />
       </span>
-      {item.content && <p>{item.content}</p>}
+      <span className="peer-message-body">
+        <span className="peer-message-heading">
+          <strong>{sender} → {target}</strong>
+          <small className="peer-message-status">
+            <span className="peer-message-status-dot" aria-hidden="true" />
+            {statusText}
+          </small>
+        </span>
+        {item.content && <p>{item.content}</p>}
+      </span>
     </article>
   );
 }

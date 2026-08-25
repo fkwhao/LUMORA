@@ -89,6 +89,56 @@ describe("AgentRunSummary", () => {
     expect(onOpenAgent).toHaveBeenCalledWith("agent-1");
   });
 
+  it("renders adjacent Team messages as lightweight communication rows", () => {
+    const { container } = render(
+      <AgentRunSummary
+        durationMs={2_000}
+        running={false}
+        workLog={[
+          {
+            itemId: "peer-message-1",
+            kind: "message",
+            status: "completed",
+            content: "PING2-ok",
+            metadata: {
+              senderAgentId: "ping-agent",
+              senderAgentLabel: "ping-agent",
+              targetAgentId: "pong-agent",
+              targetAgentLabel: "pong-agent",
+              messageStatus: "consumed",
+            },
+          },
+          {
+            itemId: "peer-message-2",
+            kind: "message",
+            status: "completed",
+            content: "PONG2-ok",
+            metadata: {
+              senderAgentId: "pong-agent",
+              senderAgentLabel: "pong-agent",
+              targetAgentId: "ping-agent",
+              targetAgentLabel: "ping-agent",
+              messageStatus: "delivered",
+            },
+          },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /已处理 2s/ }));
+    fireEvent.click(screen.getByRole("button", { name: "同步多条 Team 消息" }));
+
+    const messages = container.querySelectorAll(".peer-message-item");
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.querySelector(".peer-message-heading"))
+      .toHaveTextContent("ping-agent → pong-agent");
+    expect(messages[0]?.querySelector(".peer-message-status"))
+      .toHaveTextContent("已读入上下文");
+    expect(messages[1]?.querySelector(".peer-message-status"))
+      .toHaveTextContent("已送达 · 等待下轮");
+    expect(screen.getByText("PING2-ok")).toBeInTheDocument();
+    expect(screen.getByText("PONG2-ok")).toBeInTheDocument();
+  });
+
   it("collapses one continuable Activation into one settled Agent card", () => {
     const common = {
       agentId: "ping-agent",

@@ -2629,10 +2629,10 @@ globalStyle(".agent-call-item > button", {
   display: "grid",
   width: "100%",
   minWidth: "0",
-  gridTemplateColumns: "22px minmax(0, 1fr) auto",
+  gridTemplateColumns: "18px minmax(0, 1fr) auto",
   alignItems: "center",
-  gap: "9px",
-  padding: "4px 2px",
+  gap: "7px",
+  padding: "4px 0",
   color: "var(--muted)",
   border: "0",
   background: "transparent",
@@ -2663,8 +2663,9 @@ globalStyle(".agent-call-avatar, .subagent-pane-avatar", {
 });
 
 globalStyle(".agent-call-avatar", {
-  width: "22px",
-  height: "22px",
+  width: "16px",
+  height: "16px",
+  border: "1px solid var(--surface)",
 });
 
 globalStyle('.agent-call-item[data-status="running"] .agent-call-avatar', {
@@ -4140,43 +4141,91 @@ globalStyle(".peer-message-item", {
   display: "grid",
   minWidth: "0",
   gridTemplateColumns: "18px minmax(0, 1fr)",
+  alignItems: "start",
   gap: "7px",
-  padding: "7px 8px",
+  margin: "0",
+  padding: "3px 0",
   color: "var(--muted)",
-  border: "1px solid color-mix(in srgb, var(--blue) 15%, var(--line))",
-  borderRadius: "8px",
-  background: "color-mix(in srgb, var(--blue) 3%, transparent)",
+  border: "0",
+  borderRadius: "0",
+  background: "transparent",
 });
 
-globalStyle(".peer-message-item > svg", {
-  marginTop: "2px",
-  color: "var(--blue)",
+globalStyle(".peer-message-item + .peer-message-item", {
+  marginTop: "0",
 });
 
-globalStyle(".peer-message-item > span", {
+globalStyle(".peer-message-icon", {
+  display: "flex",
+  width: "18px",
+  height: "18px",
+  alignItems: "center",
+  justifyContent: "flex-start",
+  color: "color-mix(in srgb, var(--blue) 72%, var(--muted))",
+  borderRadius: "0",
+  background: "transparent",
+});
+
+globalStyle(".peer-message-body", {
+  display: "grid",
+  minWidth: "0",
+  gap: "0",
+});
+
+globalStyle(".peer-message-heading", {
   display: "flex",
   minWidth: "0",
-  flexDirection: "column",
-  gap: "1px",
+  minHeight: "18px",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "12px",
 });
 
 globalStyle(".peer-message-item strong", {
+  minWidth: "0",
+  overflow: "hidden",
   color: "var(--ink)",
-  fontSize: "10.5px",
-  fontWeight: "560",
+  fontSize: "11px",
+  fontWeight: "600",
+  lineHeight: "1.5",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
 });
 
-globalStyle(".peer-message-item small", {
+globalStyle(".peer-message-status", {
+  display: "inline-flex",
+  flex: "0 0 auto",
+  alignItems: "center",
+  gap: "5px",
   color: "var(--subtle)",
-  fontSize: "9px",
+  fontSize: "9.25px",
+  whiteSpace: "nowrap",
 });
 
-globalStyle(".peer-message-item > p", {
-  gridColumn: "2",
-  margin: "2px 0 0",
-  color: "var(--subtle)",
-  fontSize: "10px",
-  lineHeight: "1.55",
+globalStyle(".peer-message-status-dot", {
+  width: "4px",
+  height: "4px",
+  borderRadius: "50%",
+  background: "currentColor",
+  opacity: "0.72",
+});
+
+globalStyle('.peer-message-item[data-status="consumed"] .peer-message-status-dot', {
+  color: "#5fac87",
+  boxShadow: "0 0 0 2px color-mix(in srgb, #5fac87 13%, transparent)",
+  opacity: "1",
+});
+
+globalStyle('.peer-message-item[data-status="delivered"] .peer-message-status-dot', {
+  color: "color-mix(in srgb, var(--blue) 74%, var(--muted))",
+  opacity: "0.9",
+});
+
+globalStyle(".peer-message-body > p", {
+  margin: "0",
+  color: "color-mix(in srgb, var(--muted) 88%, var(--ink))",
+  fontSize: "10.25px",
+  lineHeight: "1.4",
   overflowWrap: "anywhere",
   whiteSpace: "pre-wrap",
 });
