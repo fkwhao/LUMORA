@@ -1,8 +1,12 @@
 import hljs from "highlight.js";
-import { Check, Copy } from "lucide-react";
+import { CheckIcon, CopyIcon } from "lucide-react";
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+
+import { markdownStyleClasses } from "./assistant-ui/markdown-style-classes";
+import { TooltipIconButton } from "./assistant-ui/tooltip-icon-button";
+import { cn } from "../lib/utils";
 
 interface MarkdownMessageProps {
   content: string;
@@ -13,29 +17,6 @@ interface MarkdownCodeBlockProps {
   language?: string;
   source: string;
 }
-
-const LANGUAGE_LABELS: Record<string, string> = {
-  bash: "Shell",
-  css: "CSS",
-  html: "HTML",
-  java: "Java",
-  javascript: "JavaScript",
-  js: "JavaScript",
-  json: "JSON",
-  jsx: "JSX",
-  markdown: "Markdown",
-  md: "Markdown",
-  powershell: "PowerShell",
-  python: "Python",
-  py: "Python",
-  shell: "Shell",
-  sql: "SQL",
-  ts: "TypeScript",
-  tsx: "TSX",
-  typescript: "TypeScript",
-  yaml: "YAML",
-  yml: "YAML",
-};
 
 function MarkdownCodeBlock({
   children,
@@ -69,30 +50,52 @@ function MarkdownCodeBlock({
   };
 
   return (
-    <div className="markdown-code-block">
-      <div className="markdown-code-toolbar">
-        <span>{language ? (LANGUAGE_LABELS[language] ?? language) : "Text"}</span>
-        <button
-          type="button"
-          className={copied ? "is-copied" : undefined}
+    <div className="aui-md-code-block">
+      <div className={markdownStyleClasses.codeHeader}>
+        <span className={markdownStyleClasses.codeHeaderLanguage}>
+          {language ?? "text"}
+        </span>
+        <TooltipIconButton
+          tooltip={copied ? "已复制" : "复制"}
           aria-label={copied ? "已复制代码" : "复制代码"}
           onClick={() => void copyCode()}
         >
-          {copied ? <Check size={13} /> : <Copy size={13} />}
-          <span>{copied ? "已复制" : "复制"}</span>
-        </button>
+          {copied ? <CheckIcon /> : <CopyIcon />}
+        </TooltipIconButton>
       </div>
-      <pre>{children}</pre>
+      <pre className={markdownStyleClasses.pre}>{children}</pre>
     </div>
   );
 }
 
 const MARKDOWN_COMPONENTS: Components = {
-  a({ node: _node, href, children, ...props }) {
+  h1({ node: _node, className, ...props }) {
+    return <h1 className={cn(markdownStyleClasses.h1, className)} {...props} />;
+  },
+  h2({ node: _node, className, ...props }) {
+    return <h2 className={cn(markdownStyleClasses.h2, className)} {...props} />;
+  },
+  h3({ node: _node, className, ...props }) {
+    return <h3 className={cn(markdownStyleClasses.h3, className)} {...props} />;
+  },
+  h4({ node: _node, className, ...props }) {
+    return <h4 className={cn(markdownStyleClasses.h4, className)} {...props} />;
+  },
+  h5({ node: _node, className, ...props }) {
+    return <h5 className={cn(markdownStyleClasses.h5, className)} {...props} />;
+  },
+  h6({ node: _node, className, ...props }) {
+    return <h6 className={cn(markdownStyleClasses.h6, className)} {...props} />;
+  },
+  p({ node: _node, className, ...props }) {
+    return <p className={cn(markdownStyleClasses.p, className)} {...props} />;
+  },
+  a({ node: _node, href, className, children, ...props }) {
     const external = href?.startsWith("https://");
     return (
       <a
         {...props}
+        className={cn(markdownStyleClasses.a, className)}
         href={href}
         rel={external ? "noreferrer" : undefined}
         target={external ? "_blank" : undefined}
@@ -101,26 +104,71 @@ const MARKDOWN_COMPONENTS: Components = {
       </a>
     );
   },
+  blockquote({ node: _node, className, ...props }) {
+    return (
+      <blockquote
+        className={cn(markdownStyleClasses.blockquote, className)}
+        {...props}
+      />
+    );
+  },
+  ul({ node: _node, className, ...props }) {
+    return <ul className={cn(markdownStyleClasses.ul, className)} {...props} />;
+  },
+  ol({ node: _node, className, ...props }) {
+    return <ol className={cn(markdownStyleClasses.ol, className)} {...props} />;
+  },
+  li({ node: _node, className, ...props }) {
+    return <li className={cn(markdownStyleClasses.li, className)} {...props} />;
+  },
+  hr({ node: _node, className, ...props }) {
+    return <hr className={cn(markdownStyleClasses.hr, className)} {...props} />;
+  },
+  strong({ node: _node, className, ...props }) {
+    return (
+      <strong
+        className={cn(markdownStyleClasses.strong, className)}
+        {...props}
+      />
+    );
+  },
+  sup({ node: _node, className, ...props }) {
+    return <sup className={cn(markdownStyleClasses.sup, className)} {...props} />;
+  },
   input({ node: _node, ...props }) {
     return <input {...props} disabled />;
   },
-  table({ node: _node, children, ...props }) {
+  table({ node: _node, className, ...props }) {
     return (
-      <div className="markdown-table-scroll">
-        <table {...props}>{children}</table>
-      </div>
+      <table
+        className={cn(markdownStyleClasses.table, className)}
+        {...props}
+      />
     );
+  },
+  th({ node: _node, className, ...props }) {
+    return <th className={cn(markdownStyleClasses.th, className)} {...props} />;
+  },
+  td({ node: _node, className, ...props }) {
+    return <td className={cn(markdownStyleClasses.td, className)} {...props} />;
+  },
+  tr({ node: _node, className, ...props }) {
+    return <tr className={cn(markdownStyleClasses.tr, className)} {...props} />;
   },
   pre({ node: _node, children }) {
     return <>{children}</>;
   },
   code({ node: _node, className, children, ...props }) {
-    const source = String(children).replace(/\n$/, "");
+    const rawSource = String(children);
+    const source = rawSource.replace(/\n$/, "");
     const language = /language-([\w-]+)/.exec(className ?? "")?.[1];
-    const fenced = Boolean(language) || source.includes("\n");
+    const fenced = Boolean(language) || rawSource.includes("\n");
     if (!fenced) {
       return (
-        <code {...props} className={className}>
+        <code
+          {...props}
+          className={cn(markdownStyleClasses.inlineCode, className)}
+        >
           {children}
         </code>
       );
@@ -150,7 +198,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
   content,
 }: MarkdownMessageProps) {
   return (
-    <div className="markdown-body">
+    <div className={markdownStyleClasses.root}>
       <ReactMarkdown
         remarkPlugins={REMARK_PLUGINS}
         skipHtml

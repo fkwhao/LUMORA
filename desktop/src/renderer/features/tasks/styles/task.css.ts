@@ -4115,11 +4115,9 @@ globalStyle(".subagent-answer", {
   borderBottom: "0",
 });
 
-globalStyle(".subagent-answer .markdown-body, .subagent-answer > p", {
+globalStyle(".subagent-answer > .aui-md, .subagent-answer > p", {
   margin: "0",
   color: "var(--ink)",
-  fontSize: "12.5px",
-  lineHeight: "1.78",
 });
 
 globalStyle(".subagent-answer-meta", {
@@ -4127,14 +4125,22 @@ globalStyle(".subagent-answer-meta", {
   minHeight: "26px",
   alignItems: "center",
   gap: "8px",
-  paddingTop: "6px",
+  paddingTop: "4px",
   color: "var(--subtle)",
+  lineHeight: "1",
 });
 
-globalStyle(".subagent-answer-meta > span", {
+globalStyle(".subagent-answer-meta > span, .subagent-answer-meta > time", {
+  display: "inline-flex",
+  minHeight: "22px",
+  flex: "0 0 auto",
+  alignItems: "center",
   color: "var(--subtle)",
-  fontSize: "9.5px",
+  fontSize: "11px",
+  fontWeight: "450",
   fontVariantNumeric: "tabular-nums",
+  lineHeight: "1.4",
+  whiteSpace: "nowrap",
 });
 
 globalStyle(".peer-message-item", {
@@ -4234,6 +4240,7 @@ globalStyle(".subagent-answer-meta button", {
   display: "grid",
   width: "22px",
   height: "22px",
+  marginLeft: "-4px",
   padding: "0",
   placeItems: "center",
   color: "var(--subtle)",
@@ -4256,15 +4263,6 @@ globalStyle(".subagent-answer-meta button.is-copied", {
 globalStyle(".subagent-answer-meta button:disabled", {
   cursor: "default",
   opacity: "0.35",
-});
-
-globalStyle(".subagent-answer-meta time", {
-  color: "var(--subtle)",
-  fontSize: "11px",
-  fontWeight: "450",
-  fontVariantNumeric: "tabular-nums",
-  lineHeight: "1.4",
-  whiteSpace: "nowrap",
 });
 
 globalStyle(".subagent-answer-meta time:empty", {

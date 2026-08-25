@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -121,6 +121,50 @@ describe("SubagentSessionPane", () => {
       expect(writeText).toHaveBeenCalledWith("已经完成子 Agent 功能检查。");
     });
     expect(screen.getByText("上下文 2,048")).toBeVisible();
+  });
+
+  it("renders rich Markdown structure inside the latest Agent answer", () => {
+    const latest = COMPLETED_SESSION.activations.at(-1)!;
+    const { container } = renderPane({
+      ...COMPLETED_SESSION,
+      activations: [
+        COMPLETED_SESSION.activations[0]!,
+        {
+          ...latest,
+          answer: [
+            "### 验证结果",
+            "",
+            "- 第一项",
+            "- 第二项包含 `inline code`",
+            "",
+            "1. 第一步",
+            "2. 第二步",
+            "",
+            "```ts",
+            "const ok = true;",
+            "```",
+          ].join("\n"),
+        },
+      ],
+    });
+
+    const heading = screen.getByRole("heading", { level: 3, name: "验证结果" });
+    expect(heading).toBeVisible();
+    expect(heading).toHaveClass("aui-md-h3");
+    const lists = screen.getAllByRole("list");
+    const unorderedList = lists[0]!;
+    const orderedList = lists[1]!;
+    expect(unorderedList).toHaveClass("aui-md-ul", "list-disc");
+    expect(within(unorderedList).getAllByRole("listitem")).toHaveLength(2);
+    expect(orderedList).toHaveClass("aui-md-ol", "list-decimal");
+    expect(within(orderedList).getAllByRole("listitem")).toHaveLength(2);
+    const inlineCode = screen.getByText("inline code");
+    expect(inlineCode.tagName).toBe("CODE");
+    expect(inlineCode).toHaveClass("aui-md-inline-code");
+    expect(inlineCode.closest("pre")).toBeNull();
+    expect(container.querySelector(".subagent-answer .aui-md-pre code"))
+      .toHaveTextContent("const ok = true;");
+    expect(container.querySelector(".subagent-answer > .aui-md")).toBeTruthy();
   });
 
   it("shows quiet Team messages without adding management controls", () => {

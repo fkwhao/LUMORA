@@ -31,8 +31,9 @@ describe("MarkdownMessage", () => {
     expect(
       screen.getByRole("heading", { name: "执行结果" }),
     ).toBeVisible();
-    expect(screen.getByRole("table")).toBeVisible();
-    expect(container.querySelector(".markdown-table-scroll")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "执行结果" }))
+      .toHaveClass("aui-md-h2");
+    expect(screen.getByRole("table")).toHaveClass("aui-md-table");
     const code = screen.getByText(
       (_content, element) =>
         element?.tagName === "CODE" &&
@@ -41,7 +42,7 @@ describe("MarkdownMessage", () => {
     expect(code).toBeVisible();
     expect(code).toHaveClass("hljs", "language-ts");
     expect(screen.getByRole("button", { name: "复制代码" })).toBeVisible();
-    expect(screen.getByText("TypeScript")).toBeVisible();
+    expect(screen.getByText("ts")).toHaveClass("aui-code-header-language");
     expect(screen.getByRole("link", { name: "查看文档" })).toHaveAttribute(
       "target",
       "_blank",
