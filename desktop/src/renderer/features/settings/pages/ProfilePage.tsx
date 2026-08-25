@@ -1,5 +1,6 @@
-import { Activity, CircleUserRound, RefreshCw } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { CircleUserRound, RefreshCw } from "lucide-react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 
 import type {
   LumoraModelApi,
@@ -10,10 +11,18 @@ import {
   normalizeTokenUsage,
 } from "../../tasks/state/token-usage";
 
+const ACTIVITY_DAY_COUNT = 52 * 7;
+
 export function ProfilePage({ api }: { api?: LumoraModelApi }) {
   const [statistics, setStatistics] = useState<TokenUsageStatistics>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
+  const [activityTooltip, setActivityTooltip] = useState<{
+    arrowOffset: number;
+    label: string;
+    left: number;
+    top: number;
+  }>();
 
   async function load() {
     if (!api) return;
@@ -35,25 +44,31 @@ export function ProfilePage({ api }: { api?: LumoraModelApi }) {
   const usage = normalizeTokenUsage(statistics?.usage);
   const hitRate = cacheHitRate(usage);
   const activity = useMemo(
-    () => buildActivityDays(statistics),
+    () => buildActivityCalendar(statistics),
     [statistics],
   );
 
   return (
     <main className="settings-layout profile-page">
       <div className="profile-content">
-        <header className="profile-identity">
-          <span className="profile-avatar"><CircleUserRound /></span>
-          <div>
-            <span className="eyebrow">个人资料</span>
-            <h1>LUMORA 本地用户</h1>
-            <p>统计仅根据本机已保存的会话生成，不会上传到云端。</p>
-          </div>
-          <button type="button" disabled={loading || !api} onClick={() => void load()}>
+        <header className="profile-toolbar">
+          <h1>个人资料</h1>
+          <button
+            type="button"
+            aria-label="刷新个人资料统计"
+            title="刷新"
+            disabled={loading || !api}
+            onClick={() => void load()}
+          >
             <RefreshCw className={loading ? "spin" : undefined} />
-            刷新
           </button>
         </header>
+
+        <section className="profile-identity" aria-label="本地个人资料">
+          <span className="profile-avatar"><CircleUserRound /></span>
+          <strong>LUMORA</strong>
+          <p>本地资料 · 统计仅保存在此设备</p>
+        </section>
 
         {error ? <p className="profile-error">{error}</p> : (
           <>
@@ -67,20 +82,70 @@ export function ProfilePage({ api }: { api?: LumoraModelApi }) {
 
             <section className="profile-activity-card">
               <header>
-                <div>
-                  <Activity />
-                  <strong>Token 活动</strong>
+                <strong>Token 活动</strong>
+                <div className="profile-activity-range">
+                  <span>每日</span>
+                  <small>最近一年</small>
                 </div>
-                <span>最近 365 天 · 每日</span>
               </header>
-              <div className="token-heatmap" aria-label="每日 Token 使用热力图">
-                {activity.map((day) => (
-                  <span
-                    className={`token-heatmap-day level-${day.level}`}
-                    key={day.date}
-                    title={`${day.date} · ${day.tokens.toLocaleString("zh-CN")} Token`}
-                  />
-                ))}
+              <div className="token-heatmap-scroll">
+                <div className="token-heatmap-calendar">
+                  <div
+                    className="token-heatmap-months"
+                    style={{
+                      gridTemplateColumns: `repeat(${activity.weeks.length}, minmax(0, 1fr))`,
+                    }}
+                    aria-hidden="true"
+                  >
+                    {activity.months.map((month) => (
+                      <span
+                        key={`${month.label}-${month.weekIndex}`}
+                        style={{ gridColumnStart: month.weekIndex + 1 }}
+                      >
+                        {month.label}
+                      </span>
+                    ))}
+                  </div>
+                  <div
+                    className="token-heatmap"
+                    aria-label="每日 Token 使用热力图"
+                    role="grid"
+                    style={{
+                      gridTemplateColumns: `repeat(${activity.weeks.length}, minmax(0, 1fr))`,
+                    }}
+                  >
+                    {activity.weeks.map((week, weekIndex) => (
+                      <div className="token-heatmap-week" role="row" key={weekIndex}>
+                        {week.map((day) => (
+                          <span
+                            className={`token-heatmap-day level-${day.level}`}
+                            key={day.date}
+                            role="gridcell"
+                            aria-label={`${day.date}，${day.tokens.toLocaleString("zh-CN")} Token`}
+                            onPointerEnter={(event) => {
+                              const bounds = event.currentTarget.getBoundingClientRect();
+                              const cellCenter = bounds.left + bounds.width / 2;
+                              const tooltipLeft = Math.min(
+                                window.innerWidth - 150,
+                                Math.max(150, cellCenter),
+                              );
+                              setActivityTooltip({
+                                arrowOffset: Math.max(
+                                  -130,
+                                  Math.min(130, cellCenter - tooltipLeft),
+                                ),
+                                label: activityTooltipLabel(day),
+                                left: tooltipLeft,
+                                top: bounds.top - 8,
+                              });
+                            }}
+                            onPointerLeave={() => setActivityTooltip(undefined)}
+                          />
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
               <footer>
                 <span>少</span>
@@ -91,37 +156,48 @@ export function ProfilePage({ api }: { api?: LumoraModelApi }) {
               </footer>
             </section>
 
-            <section className="profile-usage-grid">
-              <div>
-                <span>输入 Token</span>
-                <strong>{usage.inputTokens.toLocaleString("zh-CN")}</strong>
-              </div>
-              <div>
-                <span>输出 Token</span>
-                <strong>{usage.outputTokens.toLocaleString("zh-CN")}</strong>
-              </div>
-              <div>
-                <span>推理 Token</span>
-                <strong>{usage.reasoningTokens.toLocaleString("zh-CN")}</strong>
-              </div>
-              <div>
-                <span>缓存 Token（读 / 写）</span>
-                <strong>{usage.cacheMetricsAvailable
-                  ? `${usage.cacheReadTokens.toLocaleString("zh-CN")} / ${usage.cacheWriteTokens.toLocaleString("zh-CN")}`
-                  : "当前协议未返回"}</strong>
-              </div>
-              <div>
-                <span>缓存命中率</span>
-                <strong>{hitRate === undefined ? "暂无数据" : `${(hitRate * 100).toFixed(1)}%`}</strong>
-              </div>
-              <div>
-                <span>模型请求 / 会话</span>
-                <strong>{statistics?.requestCount ?? 0} / {statistics?.conversationCount ?? 0}</strong>
+            <section className="profile-usage-section">
+              <header>
+                <strong>Token 明细</strong>
+                <span>本机会话累计</span>
+              </header>
+              <div className="profile-usage-grid">
+                <ProfileUsageItem label="输入 Token" value={usage.inputTokens.toLocaleString("zh-CN")} />
+                <ProfileUsageItem label="输出 Token" value={usage.outputTokens.toLocaleString("zh-CN")} />
+                <ProfileUsageItem label="推理 Token" value={usage.reasoningTokens.toLocaleString("zh-CN")} />
+                <ProfileUsageItem
+                  label="缓存 Token（读 / 写）"
+                  value={usage.cacheMetricsAvailable
+                    ? `${usage.cacheReadTokens.toLocaleString("zh-CN")} / ${usage.cacheWriteTokens.toLocaleString("zh-CN")}`
+                    : "当前协议未返回"}
+                />
+                <ProfileUsageItem
+                  label="缓存命中率"
+                  value={hitRate === undefined ? "暂无数据" : `${(hitRate * 100).toFixed(1)}%`}
+                />
+                <ProfileUsageItem
+                  label="模型请求 / 会话"
+                  value={`${statistics?.requestCount ?? 0} / ${statistics?.conversationCount ?? 0}`}
+                />
               </div>
             </section>
           </>
         )}
       </div>
+      {activityTooltip && createPortal(
+        <div
+          className="profile-heatmap-tooltip"
+          role="tooltip"
+          style={{
+            "--profile-tooltip-arrow-offset": `${activityTooltip.arrowOffset}px`,
+            left: activityTooltip.left,
+            top: activityTooltip.top,
+          } as CSSProperties}
+        >
+          {activityTooltip.label}
+        </div>,
+        document.body,
+      )}
     </main>
   );
 }
@@ -130,7 +206,42 @@ function ProfileMetric({ label, value }: { label: string; value: string }) {
   return <div><strong>{value}</strong><span>{label}</span></div>;
 }
 
-function buildActivityDays(statistics?: TokenUsageStatistics) {
+function ProfileUsageItem({ label, value }: { label: string; value: string }) {
+  return <div><span>{label}</span><strong>{value}</strong></div>;
+}
+
+interface ActivityDay {
+  date: string;
+  tokens: number;
+  level: number;
+}
+
+function buildActivityCalendar(statistics?: TokenUsageStatistics) {
+  const days = buildActivityDays(statistics);
+  const weeks: ActivityDay[][] = [];
+  for (let index = 0; index < days.length; index += 7) {
+    weeks.push(days.slice(index, index + 7));
+  }
+
+  const months = weeks.flatMap((daysInWeek, weekIndex) => {
+    const firstOfMonth = daysInWeek.find((day) => day?.date.endsWith("-01"));
+    return firstOfMonth
+      ? [{
+          label: `${Number(firstOfMonth.date.slice(5, 7))}月`,
+          weekIndex,
+        }]
+      : [];
+  });
+
+  return { weeks, months };
+}
+
+function activityTooltipLabel(day: ActivityDay): string {
+  const [, month, date] = day.date.split("-");
+  return `${Number(month)}月${Number(date)}日 使用了 ${formatCompact(day.tokens)} 个 Token`;
+}
+
+function buildActivityDays(statistics?: TokenUsageStatistics): ActivityDay[] {
   const totals = new Map(
     (statistics?.daily ?? []).map((day) => [
       day.date,
@@ -138,9 +249,9 @@ function buildActivityDays(statistics?: TokenUsageStatistics) {
     ]),
   );
   const maximum = Math.max(0, ...totals.values());
-  const days: Array<{ date: string; tokens: number; level: number }> = [];
+  const days: ActivityDay[] = [];
   const today = new Date();
-  for (let offset = 364; offset >= 0; offset -= 1) {
+  for (let offset = ACTIVITY_DAY_COUNT - 1; offset >= 0; offset -= 1) {
     const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() - offset);
     const key = localDateKey(date);
     const tokens = totals.get(key) ?? 0;

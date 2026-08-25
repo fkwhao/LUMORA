@@ -5,6 +5,11 @@ const providerModelPulse = keyframes({
   "50%": { opacity: 1 },
 });
 
+const profileTooltipIn = keyframes({
+  from: { opacity: 0, transform: "translate(-50%, calc(-100% - 5px))" },
+  to: { opacity: 1, transform: "translate(-50%, calc(-100% - 9px))" },
+});
+
 globalStyle(".settings-shell", {
   display: "grid",
   gridTemplateColumns: "var(--sidebar-width) minmax(0, 1fr)",
@@ -1172,177 +1177,319 @@ globalStyle(".profile-page", {
 });
 
 globalStyle(".profile-content", {
-  width: "min(1040px, calc(100% - 96px))",
+  width: "min(820px, calc(100% - clamp(152px, 18vw, 240px)))",
   margin: "0 auto",
-  padding: "46px 0 72px",
+  padding: "24px 0 72px",
+});
+
+globalStyle(".profile-toolbar", {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+});
+
+globalStyle(".profile-toolbar h1", {
+  margin: 0,
+  color: "color-mix(in srgb, var(--ink) 90%, transparent)",
+  fontSize: "15px",
+  fontWeight: "600",
+  letterSpacing: "-0.01em",
+});
+
+globalStyle(".profile-toolbar button", {
+  display: "grid",
+  width: "30px",
+  height: "30px",
+  padding: 0,
+  placeItems: "center",
+  color: "var(--subtle)",
+  border: 0,
+  borderRadius: "8px",
+  background: "transparent",
+  cursor: "pointer",
+  transition: "color 130ms ease, background-color 130ms ease",
+});
+
+globalStyle(".profile-toolbar button:hover:not(:disabled)", {
+  color: "var(--muted)",
+  background: "color-mix(in srgb, var(--ink) 5%, transparent)",
+});
+
+globalStyle(".profile-toolbar button:disabled", {
+  cursor: "default",
+  opacity: "0.42",
+});
+
+globalStyle(".profile-toolbar button svg", {
+  width: "14px",
+  height: "14px",
 });
 
 globalStyle(".profile-identity", {
-  display: "grid",
-  gridTemplateColumns: "56px minmax(0, 1fr) auto",
+  display: "flex",
+  margin: "28px 0 34px",
   alignItems: "center",
-  gap: "17px",
-  marginBottom: "34px",
+  flexDirection: "column",
 });
 
 globalStyle(".profile-avatar", {
   display: "grid",
-  width: "56px",
-  height: "56px",
+  width: "48px",
+  height: "48px",
   placeItems: "center",
-  color: "#53606e",
-  border: "1px solid #dce1e7",
-  borderRadius: "18px",
-  background: "linear-gradient(145deg, #f8f9fa, #e9edf1)",
+  color: "color-mix(in srgb, var(--muted) 86%, #4f7a9d)",
+  border: "1px solid color-mix(in srgb, var(--line) 82%, transparent)",
+  borderRadius: "50%",
+  background: "color-mix(in srgb, var(--ink) 5%, var(--surface))",
 });
 
-globalStyle(".profile-avatar svg", { width: "27px", height: "27px" });
-globalStyle(".profile-identity h1", {
-  margin: "4px 0 3px",
-  fontSize: "23px",
-  fontWeight: "620",
-  letterSpacing: "-0.035em",
+globalStyle(".profile-avatar svg", { width: "23px", height: "23px" });
+globalStyle(".profile-identity > strong", {
+  marginTop: "10px",
+  color: "color-mix(in srgb, var(--ink) 90%, transparent)",
+  fontSize: "18px",
+  fontWeight: "500",
+  letterSpacing: "-0.02em",
 });
 globalStyle(".profile-identity p", {
-  margin: 0,
-  color: "var(--muted)",
-  fontSize: "11px",
+  margin: "3px 0 0",
+  color: "var(--subtle)",
+  fontSize: "10.5px",
 });
-globalStyle(".profile-identity > button", {
-  display: "inline-flex",
-  height: "32px",
-  alignItems: "center",
-  gap: "7px",
-  padding: "0 11px",
-  color: "#606873",
-  border: "1px solid var(--line)",
-  borderRadius: "9px",
-  background: "var(--surface)",
-  cursor: "pointer",
-  fontSize: "10px",
-});
-globalStyle(".profile-identity > button svg", { width: "14px" });
 
 globalStyle(".profile-metrics", {
   display: "grid",
   gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
-  marginBottom: "38px",
-  border: "1px solid var(--line)",
-  borderRadius: "16px",
-  background: "color-mix(in srgb, var(--surface) 98%, var(--ink) 2%)",
+  gap: "1px",
+  marginBottom: "34px",
+  overflow: "hidden",
+  border: "1px solid color-mix(in srgb, var(--line) 76%, transparent)",
+  borderRadius: "14px",
+  background: "color-mix(in srgb, var(--line) 68%, transparent)",
 });
 globalStyle(".profile-metrics > div", {
   display: "grid",
-  minHeight: "82px",
+  minHeight: "54px",
   alignContent: "center",
   justifyItems: "center",
-  gap: "6px",
-  borderRight: "1px solid var(--line)",
+  gap: "2px",
+  background: "color-mix(in srgb, var(--surface) 97%, var(--ink) 3%)",
 });
-globalStyle(".profile-metrics > div:last-child", { borderRight: 0 });
 globalStyle(".profile-metrics strong", {
-  color: "var(--ink)",
-  fontSize: "17px",
-  fontWeight: "580",
+  color: "color-mix(in srgb, var(--ink) 88%, transparent)",
+  fontSize: "12.5px",
+  fontWeight: "500",
   fontVariantNumeric: "tabular-nums",
 });
-globalStyle(".profile-metrics span", { color: "var(--muted)", fontSize: "10px" });
+globalStyle(".profile-metrics span", {
+  color: "var(--muted)",
+  fontSize: "9.5px",
+  fontWeight: "400",
+});
 
-globalStyle(".profile-activity-card", { marginBottom: "34px" });
+globalStyle(".profile-activity-card", { marginBottom: "38px" });
 globalStyle(".profile-activity-card > header", {
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
-  marginBottom: "12px",
+  marginBottom: "11px",
 });
-globalStyle(".profile-activity-card > header div", {
+globalStyle(".profile-activity-card > header > strong", {
+  color: "color-mix(in srgb, var(--ink) 90%, transparent)",
+  fontSize: "12.5px",
+  fontWeight: "600",
+});
+globalStyle(".profile-activity-range", {
   display: "inline-flex",
   alignItems: "center",
-  gap: "7px",
+  gap: "14px",
 });
-globalStyle(".profile-activity-card > header svg", { width: "15px", color: "var(--muted)" });
-globalStyle(".profile-activity-card > header strong", { fontSize: "13px", fontWeight: "640" });
-globalStyle(".profile-activity-card > header span", { color: "var(--muted)", fontSize: "10px" });
+globalStyle(".profile-activity-range span", {
+  color: "color-mix(in srgb, var(--ink) 84%, transparent)",
+  fontSize: "10.5px",
+  fontWeight: "500",
+});
+globalStyle(".profile-activity-range small", {
+  color: "var(--subtle)",
+  fontSize: "10px",
+  fontWeight: "400",
+});
+globalStyle(".token-heatmap-scroll", {
+  width: "100%",
+  paddingBottom: "2px",
+  overflowX: "auto",
+  scrollbarWidth: "thin",
+  scrollbarColor: "color-mix(in srgb, var(--muted) 24%, transparent) transparent",
+});
+globalStyle(".token-heatmap-calendar", {
+  minWidth: "760px",
+});
+globalStyle(".token-heatmap-months", {
+  display: "grid",
+  height: "15px",
+  alignItems: "start",
+  marginBottom: "7px",
+});
+globalStyle(".token-heatmap-months span", {
+  gridRow: "1",
+  color: "var(--subtle)",
+  fontSize: "9.5px",
+  fontVariantNumeric: "tabular-nums",
+  whiteSpace: "nowrap",
+});
 globalStyle(".token-heatmap", {
   display: "grid",
-  gridAutoFlow: "column",
-  gridTemplateRows: "repeat(7, 11px)",
-  gridAutoColumns: "11px",
-  gap: "4px",
   width: "100%",
-  overflow: "hidden",
+  alignItems: "start",
+});
+globalStyle(".token-heatmap-week", {
+  display: "grid",
+  gridTemplateRows: "repeat(7, 12px)",
+  gap: "4px",
+  justifyItems: "center",
 });
 globalStyle(".token-heatmap-day", {
   display: "block",
-  width: "11px",
-  height: "11px",
+  width: "12px",
+  height: "12px",
   borderRadius: "3px",
-  background: "#eef0f2",
+  background: "color-mix(in srgb, var(--ink) 7%, var(--surface))",
+  transition: "filter 120ms ease, transform 120ms ease",
 });
-globalStyle(".token-heatmap-day.level-1", { background: "#d8eafb" });
-globalStyle(".token-heatmap-day.level-2", { background: "#a9d4f8" });
-globalStyle(".token-heatmap-day.level-3", { background: "#68b5f2" });
-globalStyle(".token-heatmap-day.level-4", { background: "#2f95e5" });
+globalStyle(".token-heatmap-day.level-1", {
+  background: "color-mix(in srgb, #385a74 70%, var(--surface))",
+});
+globalStyle(".token-heatmap-day.level-2", {
+  background: "color-mix(in srgb, #477698 78%, var(--surface))",
+});
+globalStyle(".token-heatmap-day.level-3", {
+  background: "color-mix(in srgb, #5d95bf 88%, var(--surface))",
+});
+globalStyle(".token-heatmap-day.level-4", { background: "#77b0dc" });
+globalStyle(".token-heatmap-day[role='gridcell']:hover", {
+  filter: "brightness(1.12)",
+  transform: "translateY(-1px)",
+});
+globalStyle(".profile-heatmap-tooltip", {
+  position: "fixed",
+  zIndex: "300",
+  maxWidth: "min(320px, calc(100vw - 28px))",
+  padding: "9px 12px",
+  color: "#242629",
+  border: "1px solid rgb(0 0 0 / 7%)",
+  borderRadius: "11px",
+  background: "#f7f7f5",
+  boxShadow: "0 8px 28px rgb(0 0 0 / 22%), 0 1px 2px rgb(0 0 0 / 12%)",
+  fontSize: "12px",
+  fontWeight: "500",
+  fontVariantNumeric: "tabular-nums",
+  lineHeight: "1.45",
+  whiteSpace: "nowrap",
+  pointerEvents: "none",
+  animation: `${profileTooltipIn} 120ms cubic-bezier(0.22, 1, 0.36, 1) both`,
+  transform: "translate(-50%, calc(-100% - 9px))",
+});
+globalStyle(".profile-heatmap-tooltip::after", {
+  position: "absolute",
+  top: "100%",
+  left: "calc(50% + var(--profile-tooltip-arrow-offset, 0px))",
+  width: "8px",
+  height: "8px",
+  background: "#f7f7f5",
+  boxShadow: "1px 1px 1px rgb(0 0 0 / 8%)",
+  content: '""',
+  transform: "translate(-50%, -4px) rotate(45deg)",
+});
 globalStyle(".profile-activity-card > footer", {
   display: "flex",
   justifyContent: "flex-end",
   alignItems: "center",
   gap: "5px",
-  marginTop: "10px",
+  marginTop: "9px",
   color: "var(--subtle)",
   fontSize: "9px",
 });
 globalStyle(".profile-activity-card > footer i", { width: "9px", height: "9px" });
 
+globalStyle(".profile-usage-section > header", {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  marginBottom: "8px",
+});
+globalStyle(".profile-usage-section > header strong", {
+  color: "color-mix(in srgb, var(--ink) 90%, transparent)",
+  fontSize: "12.5px",
+  fontWeight: "600",
+});
+globalStyle(".profile-usage-section > header span", {
+  color: "var(--subtle)",
+  fontSize: "10px",
+});
 globalStyle(".profile-usage-grid", {
   display: "grid",
   gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-  gap: "1px",
-  overflow: "hidden",
-  border: "1px solid var(--line)",
-  borderRadius: "14px",
-  background: "var(--line)",
+  columnGap: "28px",
 });
 globalStyle(".profile-usage-grid > div", {
-  display: "grid",
-  gap: "7px",
-  minHeight: "76px",
-  alignContent: "center",
-  padding: "0 18px",
-  background: "var(--surface)",
+  display: "flex",
+  minWidth: 0,
+  minHeight: "48px",
+  padding: "11px 2px 9px",
+  alignItems: "baseline",
+  justifyContent: "space-between",
+  gap: "12px",
+  borderTop: "1px solid color-mix(in srgb, var(--line) 76%, transparent)",
 });
-globalStyle(".profile-usage-grid span", { color: "var(--muted)", fontSize: "10px" });
-globalStyle(".profile-usage-grid strong", { fontSize: "13px", fontWeight: "590", fontVariantNumeric: "tabular-nums" });
+globalStyle(".profile-usage-grid span", {
+  minWidth: 0,
+  color: "var(--muted)",
+  fontSize: "10.5px",
+});
+globalStyle(".profile-usage-grid strong", {
+  flex: "0 0 auto",
+  color: "color-mix(in srgb, var(--ink) 86%, transparent)",
+  fontSize: "11.5px",
+  fontWeight: "500",
+  fontVariantNumeric: "tabular-nums",
+});
 globalStyle(".profile-error", { color: "#c84640", fontSize: "11px" });
 
 globalStyle(".profile-content", {
   "@media": {
-    "(max-width: 1120px)": {
-      width: "calc(100% - 48px)",
+    "(max-width: 720px)": {
+      width: "calc(100% - 72px)",
+      paddingTop: "18px",
+    },
+    "(max-width: 560px)": {
+      width: "calc(100% - 40px)",
     },
   },
 });
 
 globalStyle(".profile-metrics", {
   "@media": {
-    "(max-width: 1120px)": {
-      gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    "(max-width: 720px)": {
+      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
     },
   },
 });
 
-globalStyle(".profile-metrics > div", {
+globalStyle(".profile-metrics > div:last-child", {
   "@media": {
-    "(max-width: 1120px)": {
-      borderBottom: "1px solid var(--line)",
+    "(max-width: 720px)": {
+      gridColumn: "1 / -1",
     },
   },
 });
 
 globalStyle(".profile-usage-grid", {
   "@media": {
-    "(max-width: 1120px)": {
+    "(max-width: 820px)": {
       gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    },
+    "(max-width: 560px)": {
+      gridTemplateColumns: "1fr",
     },
   },
 });

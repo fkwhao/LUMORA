@@ -146,6 +146,7 @@ interface TaskMessageRenderContextValue {
   isChatting: boolean;
   isCompacting: boolean;
   lastChatDurationMs?: number;
+  getCachedRunChanges(runId: string): ConversationRunChanges | undefined;
   loadRunChanges(runId: string): Promise<ConversationRunChanges>;
   onOpenArtifact(artifactId: string): void;
   onOpenAgent(agentId: string): void;
@@ -286,8 +287,6 @@ export const TaskPage = memo(function TaskPage({
   const runChangesRequestsRef = useRef(
     new Map<string, Promise<ConversationRunChanges>>(),
   );
-  const activeTaskIdRef = useRef(task?.taskId);
-  activeTaskIdRef.current = task?.taskId;
   const workspacePath = useStore(store, (state) =>
     task?.taskId ? state.taskProjectPaths[task.taskId] : undefined,
   );
@@ -301,11 +300,6 @@ export const TaskPage = memo(function TaskPage({
     setWorkspaceContext(context);
     setGitBranches(context.branches);
   }, []);
-
-  useEffect(() => {
-    runChangesCacheRef.current.clear();
-    runChangesRequestsRef.current.clear();
-  }, [task?.taskId]);
 
   useEffect(() => {
     if (!skillApi) return;
@@ -447,10 +441,7 @@ export const TaskPage = memo(function TaskPage({
     let request: Promise<ConversationRunChanges>;
     request = modelApi.getRunChanges(taskId, runId)
       .then((result) => {
-        if (
-          result.status !== "TRACKING"
-          && activeTaskIdRef.current === taskId
-        ) {
+        if (result.status !== "TRACKING") {
           runChangesCacheRef.current.set(cacheKey, result);
         }
         return result;
@@ -463,6 +454,12 @@ export const TaskPage = memo(function TaskPage({
     runChangesRequestsRef.current.set(cacheKey, request);
     return request;
   }, [modelApi, task?.taskId]);
+  const getCachedRunChanges = useCallback((runId: string) => {
+    const taskId = task?.taskId;
+    return taskId
+      ? runChangesCacheRef.current.get(`${taskId}:${runId}`)
+      : undefined;
+  }, [task?.taskId]);
   const reviewRun = useCallback((runId: string, filePath?: string) => {
     openChangeReview(undefined, runId, filePath);
   }, [openChangeReview]);
@@ -1706,6 +1703,7 @@ export const TaskPage = memo(function TaskPage({
       isChatting,
       isCompacting,
       lastChatDurationMs,
+      getCachedRunChanges,
       loadRunChanges,
       onOpenArtifact: openArtifact,
       onOpenAgent: openAgentSession,
@@ -1723,6 +1721,7 @@ export const TaskPage = memo(function TaskPage({
       isChatting,
       isCompacting,
       lastChatDurationMs,
+      getCachedRunChanges,
       loadRunChanges,
       openArtifact,
       openAgentSession,
@@ -2516,7 +2515,12 @@ function TaskAssistantMessageChanges() {
   const provisionalSignature = provisionalChanges?.files
     .map((file) => `${file.path}:${file.additions}:${file.deletions}`)
     .join("|") ?? "";
-  const loadedChanges = changes?.runId === runId ? changes : undefined;
+  const cachedChanges = runId ? context.getCachedRunChanges(runId) : undefined;
+  const loadedChanges = changes?.runId === runId
+    ? changes
+    : cachedChanges?.runId === runId
+      ? cachedChanges
+      : undefined;
   const visibleChanges = loadedChanges ?? (running ? undefined : provisionalChanges);
 
   useEffect(() => {
