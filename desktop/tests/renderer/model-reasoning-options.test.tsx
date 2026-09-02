@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TaskPage } from "../../src/renderer/features/tasks/TaskPage";
 import { createTaskStore } from "../../src/renderer/features/tasks/task-store";
+import type { LumoraCloudApi } from "../../src/shared/cloud-contract";
 import type { LumoraModelApi } from "../../src/shared/model-contract";
 import type { LumoraTaskApi, TaskSnapshot } from "../../src/shared/task-contract";
 
@@ -120,7 +121,68 @@ describe("model-specific reasoning options", () => {
     fireEvent.click(trigger);
     expect(screen.queryByText("推理强度")).not.toBeInTheDocument();
   });
+
+  it("replaces a conversation's local model list with the official catalog in package mode", async () => {
+    const { store, modelApi } = createHarness([]);
+    store.setState({
+      activeTask: { ...task, selectedModel: "deepseek-chat" },
+      messages: [],
+    });
+    const cloudApi = {
+      getModelCatalog: vi.fn(async () => ({
+        state: {
+          auth: { authenticated: true },
+          modelSource: "CLOUD_MANAGED" as const,
+          selectedCloudModelCode: "cloud-fast",
+        },
+        models: [
+          cloudModel("cloud-fast", "Cloud Fast"),
+          cloudModel("cloud-deep", "Cloud Deep"),
+        ],
+      })),
+    } as unknown as LumoraCloudApi;
+
+    render(
+      <TaskPage
+        store={store}
+        cloudApi={cloudApi}
+        modelApi={modelApi}
+        notify={vi.fn()}
+      />,
+    );
+
+    const trigger = await screen.findByRole("button", {
+      name: "选择模型和推理强度",
+    });
+    await waitFor(() => expect(trigger).toHaveTextContent("Cloud Fast"));
+    fireEvent.click(trigger);
+    fireEvent.pointerEnter(screen.getByRole("button", { name: /^模型/ }));
+    expect(await screen.findByRole("menuitemradio", { name: "Cloud Deep" }))
+      .toBeInTheDocument();
+    expect(screen.queryByRole("menuitemradio", { name: "deepseek-chat" }))
+      .not.toBeInTheDocument();
+  });
 });
+
+function cloudModel(code: string, displayName: string) {
+  return {
+    code,
+    displayName,
+    pricingVersion: "v1",
+    providerCode: "test-provider",
+    protocolType: "OPENAI_COMPATIBLE" as const,
+    capabilities: {
+      contextWindow: 128_000,
+      maxOutputTokens: 8_192,
+      reasoning: false,
+      tools: true,
+      vision: false,
+      json: true,
+      webSearch: false,
+    },
+    publishedAt: "2026-09-02T00:00:00Z",
+  };
+}
 
 function createHarness(reasoningEfforts: string[]) {
   const taskApi = {

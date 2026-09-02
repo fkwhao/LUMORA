@@ -31,9 +31,37 @@ lumora:
 
     expect(loadDevConfig(configPath)).toEqual({
       coreUrl: "http://127.0.0.1:45102",
+      cloudApiUrl: "http://127.0.0.1:46100",
+      cloudConsoleUrl: "http://127.0.0.1:5175/console",
       startupToken: TOKEN,
     });
     expect(Object.isFrozen(loadDevConfig(configPath))).toBe(true);
+  });
+
+  it("loads explicit secure Cloud endpoints and removes trailing slashes", () => {
+    const configPath = writeConfig(`
+lumora:
+  core-url: http://127.0.0.1:45102
+  cloud-api-url: https://api.lumora.example/
+  cloud-console-url: https://lumora.example/console/
+  startup-token: ${TOKEN}
+`);
+
+    expect(loadDevConfig(configPath)).toMatchObject({
+      cloudApiUrl: "https://api.lumora.example",
+      cloudConsoleUrl: "https://lumora.example/console",
+    });
+  });
+
+  it("rejects insecure remote Cloud endpoints", () => {
+    const configPath = writeConfig(`
+lumora:
+  core-url: http://127.0.0.1:45102
+  cloud-api-url: http://10.0.0.8:46100
+  startup-token: ${TOKEN}
+`);
+
+    expect(() => loadDevConfig(configPath)).toThrow("cloud-api-url");
   });
 
   it("rejects a missing config file with its path", () => {

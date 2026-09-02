@@ -25,7 +25,9 @@ class ModelConnectionSettings:
             raise ValueError("最大输出 Token 必须大于 0")
         if self.context_window is not None and self.context_window < 1:
             raise ValueError("上下文窗口必须大于 0")
-        if api_format not in {"anthropic", "chat-completions", "responses"}:
+        if api_format not in {
+            "anthropic", "chat-completions", "responses", "lumora-cloud"
+        }:
             raise ValueError("API 格式无效")
 
         parsed = urlparse(base_url)

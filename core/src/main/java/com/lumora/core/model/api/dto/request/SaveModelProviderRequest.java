@@ -19,7 +19,7 @@ public class SaveModelProviderRequest {
     @Min(1) @Max(10_000_000)
     private int contextWindow;
     @NotBlank
-    @Pattern(regexp = "anthropic|chat-completions|responses")
+    @Pattern(regexp = "anthropic|chat-completions|responses|lumora-cloud")
     private String apiFormat;
     @Size(max = ModelConfigurationConstants.MAX_API_KEY_LENGTH)
     private String apiKey;

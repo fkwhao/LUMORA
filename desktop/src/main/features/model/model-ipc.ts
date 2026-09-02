@@ -395,7 +395,12 @@ function validateStatisticsDays(value?: number): number {
 
 function validateProvider(input: SaveModelProviderInput): SaveModelProviderInput {
   const validated = validateSettings(input);
-  const formats = new Set(["anthropic", "chat-completions", "responses"]);
+  const formats = new Set([
+    "anthropic",
+    "chat-completions",
+    "responses",
+    "lumora-cloud",
+  ]);
   if (!formats.has(input.apiFormat)) {
     throw new TypeError("API 格式无效");
   }

@@ -9,6 +9,7 @@ import {
 import { useStore } from "zustand";
 
 import type { LumoraModelApi } from "../shared/model-contract";
+import type { LumoraCloudApi } from "../shared/cloud-contract";
 import type { LumoraMemoryApi } from "../shared/memory-contract";
 import type { LumoraMcpApi } from "../shared/mcp-contract";
 import type { LumoraSkillApi } from "../shared/skill-contract";
@@ -47,6 +48,7 @@ import {
 
 interface AppProps {
   api?: LumoraTaskApi;
+  cloudApi?: LumoraCloudApi;
   modelApi?: LumoraModelApi;
   memoryApi?: LumoraMemoryApi;
   mcpApi?: LumoraMcpApi;
@@ -69,6 +71,7 @@ interface NavigationState {
 
 export function App({
   api,
+  cloudApi,
   modelApi,
   memoryApi,
   mcpApi,
@@ -76,6 +79,7 @@ export function App({
   workspaceApi,
 }: AppProps) {
   const resolvedTaskApi = api ?? window.lumora?.tasks;
+  const resolvedCloudApi = cloudApi ?? window.lumora?.cloud;
   const resolvedModelApi = modelApi ?? window.lumora?.model;
   const resolvedMemoryApi = memoryApi ?? window.lumora?.memory;
   const resolvedMcpApi = mcpApi ?? window.lumora?.mcp;
@@ -87,6 +91,7 @@ export function App({
   return (
     <ConnectedApp
       api={resolvedTaskApi}
+      cloudApi={resolvedCloudApi}
       modelApi={resolvedModelApi}
       memoryApi={resolvedMemoryApi}
       mcpApi={resolvedMcpApi}
@@ -98,12 +103,14 @@ export function App({
 
 function ConnectedApp({
   api,
+  cloudApi,
   modelApi,
   memoryApi,
   mcpApi,
   skillApi,
   workspaceApi,
 }: Required<Pick<AppProps, "api">> & {
+  cloudApi?: LumoraCloudApi;
   modelApi?: LumoraModelApi;
   memoryApi?: LumoraMemoryApi;
   mcpApi?: LumoraMcpApi;
@@ -466,6 +473,7 @@ function ConnectedApp({
         {windowChrome}
         <SettingsPage
           api={modelApi}
+          cloudApi={cloudApi}
           memoryApi={memoryApi}
           mcpApi={mcpApi}
           skillApi={skillApi}
@@ -539,6 +547,7 @@ function ConnectedApp({
       ) : activeTask ? (
         <TaskPage
           store={store}
+          cloudApi={cloudApi}
           modelApi={modelApi}
           skillApi={skillApi}
           workspaceApi={workspaceApi}
@@ -551,6 +560,7 @@ function ConnectedApp({
         <HomePage
           key={homeRevision}
           store={store}
+          cloudApi={cloudApi}
           modelApi={modelApi}
           notify={notify}
           workspaceApi={workspaceApi}

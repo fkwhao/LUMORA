@@ -590,7 +590,7 @@ public class ModelConfigurationServiceImpl implements ModelConfigurationService,
 
     private String validateApiFormat(String apiFormat) {
         String normalized = requireText(apiFormat, "API 格式");
-        if (!List.of("anthropic", "chat-completions", "responses")
+        if (!List.of("anthropic", "chat-completions", "responses", "lumora-cloud")
             .contains(normalized)) {
             throw new IllegalArgumentException("API 格式无效");
         }

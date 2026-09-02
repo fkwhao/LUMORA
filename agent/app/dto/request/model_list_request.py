@@ -14,5 +14,5 @@ class ModelListRequest(BaseModel):
     base_url: str = Field(alias="baseUrl", min_length=1, max_length=500)
     api_key: str = Field(alias="apiKey", min_length=1, max_length=2048)
     api_format: Literal[
-        "anthropic", "chat-completions", "responses"
+        "anthropic", "chat-completions", "responses", "lumora-cloud"
     ] = Field(default="chat-completions", alias="apiFormat")

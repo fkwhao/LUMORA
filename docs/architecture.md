@@ -434,8 +434,10 @@ Branch。完整状态机、安全条件和交付顺序见
 
 ### 模型供应商配置
 
-桌面设置页把模型来源分成两类：“套餐”是未来 LUMORA Managed Provider 的展示入口；
-“自定义供应商”是当前可用的 BYOK 配置。Java SQLite 的
+桌面设置页把模型来源分成两类：“套餐”是 LUMORA Managed Provider 的登录、权益概览、模型选择
+和用量入口；“自定义供应商”是 BYOK 配置。Desktop 登录是可选能力：未登录用户可以跳过账户流程
+直接使用 BYOK；登录后既可以选择套餐模型，也可以继续使用自己的供应商。登录状态与模型来源相互
+独立，切换来源不删除另一侧配置，登录或退出也不得静默改变当前来源。Java SQLite 的
 `model_configuration` 可保存多行供应商记录，每行包含供应商 ID、名称、Base URL、
 默认模型指针、兼容旧接口的默认上下文缓存、API 格式、DPAPI Key 密文和启用状态。模型 ID 及其上下文窗口、最大
 输出 Token 位于 `model_configuration_model` 子表。V12 迁移为旧单配置行补充
@@ -469,6 +471,17 @@ POST   /api/v1/model/settings/providers/{providerId}/model-configurations/{model
 `/messages`、`/chat/completions` 或 `/responses`。模型级最大输出 Token 分别映射到协议对应的
 请求字段；会话上下文占比按当前选中模型的上下文窗口计算。Hosted Web Search 是模型级显式
 能力，仅 Responses 与 Anthropic 适配器当前提供，Chat Completions 暂不启用。
+
+套餐来源不会作为可编辑 BYOK 暴露。Electron Main 使用独立的 `cloud-preferences.json` 保存
+`LOCAL_BYOK/CLOUD_MANAGED` 来源与云端模型选择，并在 Java `model_configuration` 中维护一条隐藏的
+`LUMORA Cloud` 运行投影，使既有 Core → Agent 协议链可以复用。该投影只保存本次 Electron 进程的
+loopback 地址与临时代理凭据，不保存 Cloud Access Token、Refresh Token 或上游供应商 Key。
+该隐藏投影固定使用独立的 `api_format=lumora-cloud`，不会复用或改写用户已有的三个本地 Provider。
+套餐模式下，首页和会话模型选择器使用“当前订阅版本允许的模型编码 ∩ Cloud 当前已发布模型目录”，
+不混入本地 BYOK 模型；历史套餐缺少模型范围时按兼容模式显示全部已发布模型。Renderer 只展示模型，
+不要求用户选择或理解 Chat Completions、Responses、Messages 等上游协议。
+当前选择套餐但登录失效或权益不可用时，Desktop 阻止云端调用并提示重新登录、打开网页控制台或
+手动切换到自定义供应商；不得自动消耗用户 API Key。退出登录后已保存的 BYOK 配置继续可用。
 
 #### 推理强度协议映射（待完善）
 
@@ -737,32 +750,48 @@ desktop + core + agent + contracts
 WebClient、Redis、MySQL 和按领域拆分的 Spring Boot 微服务：
 
 ```text
-Desktop 内置原生套餐页面 ─────────────────────────┐
-Python Agent（CLOUD_MANAGED） ─────────────────────┼──→ Spring Cloud Gateway
-浏览器 → Nginx（静态网页与 /api 代理）─────────────┘       ├── User Service
-                                                          ├── Billing Service
-                                                          ├── Model Catalog Service
-                                                          └── Model Gateway Service
-                                                                 → 第三方模型供应商 API
+Desktop Renderer ──白名单 IPC──→ Electron Main ───────────┐
+Python Agent ──临时本机凭据──→ Electron Main loopback 代理 ┼──→ Spring Cloud Gateway
+默认浏览器 → Nginx（用户控制台/管理端、/api 代理）─────────┘       ├── User Service
+                                                                 ├── Billing Service
+                                                                 ├── Model Catalog Service
+                                                                 └── Model Gateway Service
+                                                                        → 第三方模型供应商 API
 ```
 
-Admin 不作为独立业务微服务。Desktop 套餐页面随客户端打包并直连 Cloud Gateway；Nginx 只托管
-网页端的用户 API 开放平台和管理员页面，并将其 `/api` 请求代理至同一个 Cloud Gateway。两类前端
-复用各数据所有者提供的 `/api/app/**` 和 `/api/admin/**` 接口；`/api/internal/**` 只供服务间调用。
-跨服务 Dashboard 确有复杂聚合需求时，才增加不拥有业务数据的 `admin-bff`。
+Admin 不作为独立业务微服务。Desktop 页面随客户端打包，通过白名单 IPC 交由 Electron Main 访问
+Cloud Gateway，只提供原生登录、
+登录状态恢复、套餐/额度/用量只读查询和云端模型选择，不实现钱包充值、套餐购买、续费、升级、取消
+或其他资金/订阅变更。Nginx 托管网页用户控制台和管理员页面，并将其 `/api` 请求代理至同一个
+Cloud Gateway；用户侧购买和套餐管理统一在网页控制台完成。各入口复用数据所有者提供的
+`/api/app/**` 和 `/api/admin/**` 接口；`/api/internal/**` 只供服务间调用。跨服务 Dashboard 确有
+复杂聚合需求时，才增加不拥有业务数据的 `admin-bff`。
 
-当前个人开发与联调阶段统一使用 HTTP，不配置 HTTPS、TLS 证书或双向 TLS；应用层登录、Access Token
-和权限校验仍然正常实现。HTTPS/TLS 终止仅作为后续公网部署项，由 Nginx 或云负载均衡承担。
+Desktop 中的购买、续费和管理套餐按钮只经白名单 Preload IPC 请求 Electron Main 使用
+`shell.openExternal()` 打开经过 HTTPS 域名/路径白名单校验的用户控制台 URL，不使用 Electron
+内置浏览器。网页控制台与 Desktop 使用独立登录会话，不复用 Desktop 凭据，用户需要在系统默认
+浏览器中独立登录；URL 不得携带 Desktop Access Token、Refresh Token 或 Session。
+
+当前个人开发与联调阶段的本机 Cloud Gateway 和网页控制台允许使用 loopback HTTP；非本机地址必须
+使用 HTTPS，避免 Access Token 在局域网明文传输。正式环境由 Nginx 或云负载均衡终止 TLS。
 
 OpenFeign 用于 Model Gateway 到 Billing Service 等内部短时控制调用；WebClient 用于连接
 模型供应商并消费 SSE/流式 HTTP 响应。Redis 负责 Session、限流、并发计数、短期幂等和热点
 额度快照，MySQL 继续作为套餐、钱包、用量与不可变账本的最终事实来源。
 
 云端首版不增加 `agent-service`：Agent 循环、工具调用、上下文压缩和本地 Token 聚合仍在 Python
-Agent 内执行。Model Gateway 作为兼容现有 Provider 协议的流式代理，解析供应商 SSE 后将文本、推理、
-Tool Call、结束原因、错误和最终 TokenUsage 透传或标准化返回。Python Agent 只新增轻量的
-`LUMORA_MANAGED` 模型来源，负责云端 Base URL、登录 Access Token 和模型目录接入，并复用已有协议
-解析逻辑，不维护第二套 Agent 执行链路或自定义 SSE 协议。
+Agent 内执行。官方套餐新增独立 `lumora-cloud` Provider，通过 LUMORA Internal Protocol v1 把消息块、
+工具定义、Tool Call/Result、推理策略、Hosted Web Search 开关和 Usage 发送到 Electron Main 的 loopback 代理，再由 Cloud
+Model Gateway 根据服务端已发布模型快照适配 Chat Completions、Responses 或 Anthropic Messages。
+内部协议不携带上游协议、上游模型 ID、Base URL 或 Key；流式事件统一为文本、推理、工具调用、
+搜索开始/进度/来源/失败、Usage 和完成事件。云端模型目录的 `webSearch` 能力会自动同步到隐藏的
+`LUMORA Cloud` 模型投影，复用现有工作日志与引用展示。Electron Main 持有内存中的 Access Token，并以系统安全存储加密持久化可旋转 Refresh
+Token。Python、Java Core 和 Renderer 均不接触 Cloud Token。
+
+该能力是 `CLOUD_MANAGED` 的附加路径，不是本地 Agent 协议迁移：`LOCAL_BYOK` 继续使用已有
+`chat-completions`、`responses`、`anthropic` Provider 直接访问用户供应商，原配置、能力、Hosted Web
+Search 和原生协议状态均不得因套餐接入被降级或重写。两条路径只复用 Agent Harness、工具循环、审批、
+上下文压缩和统一运行事件。
 
 TokenUsage 保留两条用途不同的路径：返回 Python Agent 的 Usage 用于本地统计、上下文管理和界面展示；
 Model Gateway 生成的幂等 Usage 事件才可提交 Billing Service 结算。客户端统计不能作为扣费事实来源。
@@ -776,6 +805,8 @@ Service，避免把一次金额事务拆成跨服务分布式事务。
 幂等与最终一致性。云端不采用客户端上报用量作为扣费依据；只有 Model Gateway 解析的供应商
 Usage 可以进入结算。
 
-Desktop 同时保留 `LOCAL_BYOK` 和 `CLOUD_MANAGED`。项目任务、工具日志、文件变更、审批和
-Git Changes 始终保存在本地；选择云端模型时只有模型流量和最小计费元数据经过云端。云端聊天
-同步是可选的后续能力，不是登录、套餐或模型计费的前置条件。
+Desktop 登录是可选能力，并同时保留 `LOCAL_BYOK` 和 `CLOUD_MANAGED`：未登录时可以使用 BYOK；
+登录后可以在设置中选择套餐模型或继续使用自定义供应商，登录本身不触发模型来源切换。只有
+`CLOUD_MANAGED` 要求有效登录和套餐权益。项目任务、工具日志、文件变更、审批和 Git Changes 始终
+保存在本地；选择云端模型时只有模型流量和最小计费元数据经过云端。云端聊天同步是可选的后续能力，
+不是登录、套餐或模型计费的前置条件。

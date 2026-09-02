@@ -20,6 +20,10 @@ import {
 
 import type { MessageAttachment } from "../../../../shared/attachment-contract";
 import type {
+  CloudModelCatalog,
+  LumoraCloudApi,
+} from "../../../../shared/cloud-contract";
+import type {
   LumoraModelApi,
   ModelSettings,
   PermissionMode,
@@ -68,6 +72,7 @@ export interface HomeComposerSubmission {
 
 interface HomeComposerProps {
   isCreating: boolean;
+  cloudApi?: LumoraCloudApi;
   modelApi?: LumoraModelApi;
   notify(message: string, tone?: "info" | "success"): void;
   onSubmit(submission: HomeComposerSubmission): Promise<void>;
@@ -123,6 +128,7 @@ function HomeAttachmentChip({
 
 export function HomeComposer({
   isCreating,
+  cloudApi,
   modelApi,
   notify,
   onSubmit,
@@ -132,6 +138,8 @@ export function HomeComposer({
   const [isDraggingAttachment, setIsDraggingAttachment] = useState(false);
   const [openMenu, setOpenMenu] = useState<"add" | "permission" | "model" | null>(null);
   const [modelSettings, setModelSettings] = useState<ModelSettings>();
+  const [cloudModelCatalog, setCloudModelCatalog] = useState<CloudModelCatalog>();
+  const [isSwitchingModel, setIsSwitchingModel] = useState(false);
   const [selectedModel, setSelectedModel] = useState("");
   const [permissionMode, setPermissionMode] = useState(loadPermissionMode);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -142,27 +150,56 @@ export function HomeComposer({
   useEffect(() => {
     if (!modelApi) return;
     let cancelled = false;
-    void modelApi.getSettings()
-      .then((settings) => {
+    void Promise.all([
+      modelApi.getSettings(),
+      cloudApi?.getModelCatalog().catch(() => undefined),
+    ])
+      .then(([settings, catalog]) => {
         if (cancelled) return;
         setModelSettings(settings);
-        setSelectedModel(settings.model);
+        setCloudModelCatalog(catalog);
+        setSelectedModel(selectedComposerModel(settings, catalog));
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [modelApi]);
+  }, [cloudApi, modelApi]);
+
+  const cloudManaged = cloudModelCatalog?.state.modelSource === "CLOUD_MANAGED";
 
   const modelOptions = useMemo(
-    () => [
-      ...new Set([
-        modelSettings?.model ?? "",
-        ...(modelSettings?.models.map((model) => model.modelId) ?? []),
-      ].filter(Boolean)),
-    ],
-    [modelSettings],
+    () => cloudManaged && (cloudModelCatalog?.models.length ?? 0) > 0
+      ? cloudModelCatalog!.models.map((model) => model.code)
+      : [
+          ...new Set([
+            modelSettings?.model ?? "",
+            ...(modelSettings?.models.map((model) => model.modelId) ?? []),
+          ].filter(Boolean)),
+        ],
+    [cloudManaged, cloudModelCatalog, modelSettings],
   );
+
+  async function selectComposerModel(model: string) {
+    if (!cloudManaged || !cloudApi || !modelApi) {
+      setSelectedModel(model);
+      setOpenMenu(null);
+      return;
+    }
+    setIsSwitchingModel(true);
+    try {
+      const state = await cloudApi.selectCloudModel(model);
+      const settings = await modelApi.getSettings();
+      setCloudModelCatalog((current) => current ? { ...current, state } : current);
+      setModelSettings(settings);
+      setSelectedModel(model);
+      setOpenMenu(null);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "切换官方模型失败");
+    } finally {
+      setIsSwitchingModel(false);
+    }
+  }
 
   async function submitGoal(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -390,7 +427,7 @@ export function HomeComposer({
               title={selectedModel || "选择模型"}
               disabled={!modelApi}
             >
-              <span>{selectedModel ? modelDisplayName(selectedModel) : "模型"}</span>
+              <span>{selectedModel ? composerModelDisplayName(selectedModel, cloudModelCatalog) : "模型"}</span>
               <ChevronDown size={14} />
             </PopoverTrigger>
             <PopoverContent
@@ -410,13 +447,13 @@ export function HomeComposer({
                     type="button"
                     role="menuitemradio"
                     aria-checked={model === selectedModel}
+                    disabled={isSwitchingModel}
                     key={model}
                     onClick={() => {
-                      setSelectedModel(model);
-                      setOpenMenu(null);
+                      void selectComposerModel(model);
                     }}
                   >
-                    <span>{modelDisplayName(model)}</span>
+                    <span>{composerModelDisplayName(model, cloudModelCatalog)}</span>
                     {model === selectedModel && <Check />}
                   </Button>
                 ))}
@@ -504,4 +541,23 @@ function modelDisplayName(model: string): string {
   if (model === "gpt-5.6-sol") return "5.6 Sol";
   if (model === "gpt-5.6-terra") return "5.6 Terra";
   return model;
+}
+
+function composerModelDisplayName(
+  model: string,
+  catalog?: CloudModelCatalog,
+): string {
+  return catalog?.models.find((candidate) => candidate.code === model)?.displayName
+    ?? modelDisplayName(model);
+}
+
+function selectedComposerModel(
+  settings: ModelSettings,
+  catalog?: CloudModelCatalog,
+): string {
+  if (catalog?.state.modelSource !== "CLOUD_MANAGED") return settings.model;
+  const selected = catalog.models.find(
+    (model) => model.code === catalog.state.selectedCloudModelCode,
+  );
+  return selected?.code ?? catalog.models[0]?.code ?? settings.model;
 }

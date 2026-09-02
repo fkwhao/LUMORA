@@ -4,6 +4,8 @@ import { parse } from "yaml";
 
 export type DevConfig = Readonly<{
   coreUrl: string;
+  cloudApiUrl: string;
+  cloudConsoleUrl: string;
   startupToken: string;
 }>;
 
@@ -30,14 +32,33 @@ export function loadDevConfig(configPath: string): DevConfig {
     "startup-token",
     configPath,
   );
+  const cloudApiUrl = optionalString(lumora["cloud-api-url"])
+    ?? "http://127.0.0.1:46100";
+  const cloudConsoleUrl = optionalString(lumora["cloud-console-url"])
+    ?? "http://127.0.0.1:5175/console";
 
   validateCoreUrl(coreUrl, configPath);
+  validateCloudUrl(cloudApiUrl, "cloud-api-url", configPath);
+  validateCloudUrl(cloudConsoleUrl, "cloud-console-url", configPath);
   if (startupToken.length < 32) {
     // 错误只指出配置键，不拼接令牌内容，避免密钥出现在终端或日志中。
     throw new Error(`配置项 startup-token 至少需要 32 个字符：${configPath}`);
   }
 
-  return Object.freeze({ coreUrl, startupToken });
+  return Object.freeze({
+    coreUrl,
+    cloudApiUrl: withoutTrailingSlash(cloudApiUrl),
+    cloudConsoleUrl: withoutTrailingSlash(cloudConsoleUrl),
+    startupToken,
+  });
+}
+
+function optionalString(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error("可选 URL 配置必须是非空字符串");
+  }
+  return value;
 }
 
 function requireMapping(
@@ -85,4 +106,35 @@ function validateCoreUrl(coreUrl: string, configPath: string): void {
       `配置项 core-url 必须是 http://127.0.0.1:<port>：${configPath}`,
     );
   }
+}
+
+function validateCloudUrl(
+  value: string,
+  key: string,
+  configPath: string,
+): void {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`配置项 ${key} 格式无效：${configPath}`);
+  }
+  const loopbackHttp =
+    url.protocol === "http:"
+    && (url.hostname === "127.0.0.1" || url.hostname === "localhost");
+  if (
+    (url.protocol !== "https:" && !loopbackHttp)
+    || url.username.length > 0
+    || url.password.length > 0
+    || url.search.length > 0
+    || url.hash.length > 0
+  ) {
+    throw new Error(
+      `配置项 ${key} 必须使用 HTTPS（本机开发可使用 loopback HTTP）：${configPath}`,
+    );
+  }
+}
+
+function withoutTrailingSlash(value: string): string {
+  return value.replace(/\/+$/, "");
 }

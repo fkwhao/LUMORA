@@ -3,6 +3,7 @@ import { FolderOpen, GitBranch, X } from "lucide-react";
 import { useStore } from "zustand";
 
 import type { ProjectDirectory } from "../../../../shared/window-contract";
+import type { LumoraCloudApi } from "../../../../shared/cloud-contract";
 import type { LumoraModelApi } from "../../../../shared/model-contract";
 import type {
   LumoraWorkspaceApi,
@@ -23,6 +24,7 @@ import {
 
 interface HomePageProps {
   store: TaskStore;
+  cloudApi?: LumoraCloudApi;
   modelApi?: LumoraModelApi;
   workspaceApi?: LumoraWorkspaceApi;
   composerMotion?: "from-bottom";
@@ -30,6 +32,7 @@ interface HomePageProps {
 }
 export function HomePage({
   store,
+  cloudApi,
   modelApi,
   workspaceApi,
   composerMotion,
@@ -129,6 +132,7 @@ export function HomePage({
 
           <HomeComposer
             isCreating={isCreating}
+            cloudApi={cloudApi}
             modelApi={modelApi}
             notify={notify}
             onSubmit={submitGoal}

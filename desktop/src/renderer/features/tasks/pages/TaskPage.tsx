@@ -65,6 +65,10 @@ import type {
   WorkLogItem,
   ArtifactChunk,
 } from "../../../../shared/model-contract";
+import type {
+  CloudModelCatalog,
+  LumoraCloudApi,
+} from "../../../../shared/cloud-contract";
 import type { TaskEvent } from "../../../../shared/task-contract";
 import type { CitationReference } from "../../../../shared/citation-contract";
 import type { LumoraSkillApi, SkillSummary } from "../../../../shared/skill-contract";
@@ -143,6 +147,7 @@ import type { TaskStore } from "../state/task-store";
 
 interface TaskPageProps {
   store: TaskStore;
+  cloudApi?: LumoraCloudApi;
   modelApi?: LumoraModelApi;
   skillApi?: LumoraSkillApi;
   workspaceApi?: LumoraWorkspaceApi;
@@ -190,6 +195,7 @@ const EMPTY_TASK_EVENTS: TaskEvent[] = [];
 
 export const TaskPage = memo(function TaskPage({
   store,
+  cloudApi,
   modelApi,
   skillApi,
   workspaceApi,
@@ -260,6 +266,8 @@ export const TaskPage = memo(function TaskPage({
   const [changesError, setChangesError] = useState<string>();
   const [revertingRunId, setRevertingRunId] = useState<string>();
   const [modelSettings, setModelSettings] = useState<ModelSettings>();
+  const [cloudModelCatalog, setCloudModelCatalog] = useState<CloudModelCatalog>();
+  const [isSwitchingModel, setIsSwitchingModel] = useState(false);
   const [selectedModel, setSelectedModel] = useState("");
   const [reasoningEffort, setReasoningEffort] =
     useState<ComposerReasoningEffort>("");
@@ -748,31 +756,40 @@ export const TaskPage = memo(function TaskPage({
       return;
     }
     let cancelled = false;
-    void modelApi
-      .getSettings()
-      .then((settings) => {
+    void Promise.all([
+      modelApi.getSettings(),
+      cloudApi?.getModelCatalog().catch(() => undefined),
+    ])
+      .then(([settings, catalog]) => {
         if (cancelled) return;
         const localPreference = task?.taskId
           ? loadTaskComposerPreference(task.taskId)
           : undefined;
-        const configuredModels = new Set([
-          settings.model,
-          ...settings.models.map((model) => model.modelId),
-        ]);
-        const nextModel =
-          task?.selectedModel && configuredModels.has(task.selectedModel)
-            ? task.selectedModel
-            : localPreference?.model && configuredModels.has(localPreference.model)
-              ? localPreference.model
-            : settings.model;
+        const cloudManaged = catalog?.state.modelSource === "CLOUD_MANAGED";
+        const cloudModels = cloudManaged ? (catalog?.models ?? []) : [];
+        const configuredModels = new Set(
+          cloudManaged
+            ? cloudModels.map((model) => model.code)
+            : [settings.model, ...settings.models.map((model) => model.modelId)],
+        );
+        const nextModel = cloudManaged
+          ? selectedCloudModel(catalog!, settings.model)
+          : task?.selectedModel && configuredModels.has(task.selectedModel)
+              ? task.selectedModel
+              : localPreference?.model && configuredModels.has(localPreference.model)
+                ? localPreference.model
+                : settings.model;
         setModelSettings(settings);
+        setCloudModelCatalog(catalog);
         setSelectedModel(nextModel);
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [modelApi, task?.taskId]);
+  }, [cloudApi, modelApi, task?.taskId]);
+
+  const cloudManaged = cloudModelCatalog?.state.modelSource === "CLOUD_MANAGED";
 
   const selectedModelConfiguration = modelSettings?.models.find(
     (model) => model.modelId === selectedModel,
@@ -816,9 +833,25 @@ export const TaskPage = memo(function TaskPage({
   }, [reasoningEffort, reasoningEffortOptions, selectedModel, task?.taskId]);
 
   const selectModel = useCallback(
-    (model: string) => {
+    async (model: string) => {
+      let activeSettings = modelSettings;
+      if (cloudManaged && cloudApi && modelApi) {
+        setIsSwitchingModel(true);
+        try {
+          const state = await cloudApi.selectCloudModel(model);
+          const settings = await modelApi.getSettings();
+          activeSettings = settings;
+          setCloudModelCatalog((current) => current ? { ...current, state } : current);
+          setModelSettings(settings);
+        } catch (error) {
+          notify(error instanceof Error ? error.message : "切换官方模型失败", "info");
+          return;
+        } finally {
+          setIsSwitchingModel(false);
+        }
+      }
       const efforts =
-        modelSettings?.models.find((item) => item.modelId === model)
+        activeSettings?.models.find((item) => item.modelId === model)
           ?.reasoningEfforts ?? [];
       const rememberedEffort = task?.taskId
         ? loadTaskComposerPreference(task.taskId)?.reasoningByModel?.[model]
@@ -840,7 +873,7 @@ export const TaskPage = memo(function TaskPage({
         .updateComposerPreferences(model, nextEffort)
         .catch(() => notify("会话模型偏好保存失败", "info"));
     },
-    [modelSettings?.models, notify, store, task?.taskId],
+    [cloudApi, cloudManaged, modelApi, modelSettings, notify, store, task?.taskId],
   );
 
   const selectReasoningEffort = useCallback(
@@ -1697,15 +1730,17 @@ export const TaskPage = memo(function TaskPage({
   }
 
   const configuredModel = modelSettings?.model || selectedModel;
-  const modelOptions = [
-    ...new Set(
-      [
-        configuredModel,
-        ...(modelSettings?.models.map((model) => model.modelId) ?? []),
-        ...messages.map((message) => message.model ?? ""),
-      ].filter(Boolean),
-    ),
-  ];
+  const modelOptions = cloudManaged && (cloudModelCatalog?.models.length ?? 0) > 0
+    ? cloudModelCatalog!.models.map((model) => model.code)
+    : [
+        ...new Set(
+          [
+            configuredModel,
+            ...(modelSettings?.models.map((model) => model.modelId) ?? []),
+            ...messages.map((message) => message.model ?? ""),
+          ].filter(Boolean),
+        ),
+      ];
   const contextLimit = modelSettings?.models.find(
     (model) => model.modelId === selectedModel,
   )?.contextWindow ?? modelSettings?.contextWindow ?? 128_000;
@@ -2301,13 +2336,13 @@ export const TaskPage = memo(function TaskPage({
                     aria-label="选择模型和推理强度"
                     title={
                       selectedModel
-                        ? `${modelDisplayName(selectedModel)}${reasoningEffort ? ` · ${reasoningEffortLabel(reasoningEffort)}` : ""}`
+                        ? `${composerModelDisplayName(selectedModel, cloudModelCatalog)}${reasoningEffort ? ` · ${reasoningEffortLabel(reasoningEffort)}` : ""}`
                         : "选择模型"
                     }
                   >
                     <span className="min-w-0 truncate">
                       {selectedModel
-                        ? modelDisplayName(selectedModel)
+                        ? composerModelDisplayName(selectedModel, cloudModelCatalog)
                         : "模型"}
                     </span>
                     {reasoningEffortOptions.length > 0 && reasoningEffort && (
@@ -2331,7 +2366,7 @@ export const TaskPage = memo(function TaskPage({
                       onClick={() => setModelPickerSection("model")}
                     >
                       <span>模型</span>
-                      <strong>{modelDisplayName(selectedModel)}</strong>
+                      <strong>{composerModelDisplayName(selectedModel, cloudModelCatalog)}</strong>
                       <ChevronRight />
                     </button>
                     {reasoningEffortOptions.length > 0 && (
@@ -2365,14 +2400,15 @@ export const TaskPage = memo(function TaskPage({
                               type="button"
                               role="menuitemradio"
                               aria-checked={model === selectedModel}
+                              disabled={isSwitchingModel}
                               key={model}
                               onClick={() => {
-                                selectModel(model);
+                                void selectModel(model);
                                 setComposerMenu(null);
                               }}
                             >
                               <span className="truncate">
-                                {modelDisplayName(model)}
+                                {composerModelDisplayName(model, cloudModelCatalog)}
                               </span>
                               {model === selectedModel && <Check />}
                             </Button>
@@ -2773,6 +2809,23 @@ function modelDisplayName(model: string): string {
     return "5.6 Terra";
   }
   return model;
+}
+
+function composerModelDisplayName(
+  model: string,
+  catalog?: CloudModelCatalog,
+): string {
+  return catalog?.models.find((candidate) => candidate.code === model)?.displayName
+    ?? modelDisplayName(model);
+}
+
+function selectedCloudModel(
+  catalog: CloudModelCatalog,
+  fallback: string,
+): string {
+  return catalog.models.find(
+    (model) => model.code === catalog.state.selectedCloudModelCode,
+  )?.code ?? catalog.models[0]?.code ?? fallback;
 }
 
 function runtimeMessageId(index: number): string {

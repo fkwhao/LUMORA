@@ -7,7 +7,11 @@ export interface ModelSettings {
   models: ProviderModel[];
 }
 
-export type ApiFormat = "anthropic" | "chat-completions" | "responses";
+export type ApiFormat =
+  | "anthropic"
+  | "chat-completions"
+  | "responses"
+  | "lumora-cloud";
 
 export interface ModelProvider {
   providerId: string;

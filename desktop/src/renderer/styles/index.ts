@@ -13,5 +13,6 @@ import "./responsive.css";
 import "./appearance.css";
 import "./appearance-settings.css";
 import "./mcp-settings.css";
+import "./cloud-account.css";
 import "./motion.css";
 import "./typography.css";

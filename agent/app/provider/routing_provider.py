@@ -12,6 +12,7 @@ from app.prompt.prompt_assembly import PromptAssembly
 from app.provider.anthropic_provider import AnthropicProvider
 from app.provider.openai_compatible_provider import OpenAICompatibleProvider
 from app.provider.responses_provider import ResponsesProvider
+from app.provider.lumora_cloud_provider import LumoraCloudProvider
 
 
 class RoutingModelProvider:
@@ -25,6 +26,7 @@ class RoutingModelProvider:
             "chat-completions": OpenAICompatibleProvider(),
             "responses": ResponsesProvider(),
             "anthropic": AnthropicProvider(),
+            "lumora-cloud": LumoraCloudProvider(),
         }
 
     def _adapter(self, settings: ModelConnectionSettings) -> ModelProviderPort:

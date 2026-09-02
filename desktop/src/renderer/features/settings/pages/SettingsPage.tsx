@@ -6,6 +6,7 @@ import {
   Cable,
   ChevronDown,
   CircleCheck,
+  Cloud,
   Eye,
   EyeOff,
   Folder,
@@ -30,6 +31,7 @@ import type {
   ProviderModel,
   SaveProviderModelInput,
 } from "../../../../shared/model-contract";
+import type { LumoraCloudApi } from "../../../../shared/cloud-contract";
 import type { LumoraMemoryApi } from "../../../../shared/memory-contract";
 import type { LumoraMcpApi } from "../../../../shared/mcp-contract";
 import type { LumoraSkillApi } from "../../../../shared/skill-contract";
@@ -48,6 +50,7 @@ import {
 } from "../../../components/ui/select";
 import { Switch } from "../../../components/ui/switch";
 import { AppearancePage } from "./AppearancePage";
+import { CloudAccountPage } from "./CloudAccountPage";
 import { PersonalizationPage } from "./PersonalizationPage";
 import { PluginsSettingsPage } from "./PluginsSettingsPage";
 import { ProfilePage } from "./ProfilePage";
@@ -58,6 +61,7 @@ import {
 
 interface SettingsPageProps {
   api?: LumoraModelApi;
+  cloudApi?: LumoraCloudApi;
   memoryApi?: LumoraMemoryApi;
   mcpApi?: LumoraMcpApi;
   skillApi?: LumoraSkillApi;
@@ -83,6 +87,7 @@ const apiFormatOptions: Array<{
 
 type SettingsSection =
   | "profile"
+  | "cloud"
   | "model"
   | "personalization"
   | "plugins"
@@ -91,6 +96,7 @@ type SettingsSection =
 
 export function SettingsPage({
   api,
+  cloudApi,
   memoryApi,
   mcpApi,
   skillApi,
@@ -110,6 +116,9 @@ export function SettingsPage({
   const [pendingDelete, setPendingDelete] = useState<string | "all">();
   const normalizedSettingsQuery = settingsQuery.trim().toLowerCase();
   const showProfile = "个人资料 Token 用量 统计 活动".toLowerCase().includes(
+    normalizedSettingsQuery,
+  );
+  const showCloud = "云端账号 登录 套餐 额度 用量 官方模型".includes(
     normalizedSettingsQuery,
   );
   const showModel = "模型与 API".toLowerCase().includes(
@@ -168,6 +177,14 @@ export function SettingsPage({
               onClick={() => setSection("profile")}
             />
           )}
+          {showCloud && (
+            <SettingsNavItem
+              active={section === "cloud"}
+              icon={Cloud}
+              label="账号与套餐"
+              onClick={() => setSection("cloud")}
+            />
+          )}
           {showModel && (
             <SettingsNavItem
               active={section === "model"}
@@ -209,7 +226,7 @@ export function SettingsPage({
               onClick={() => setSection("archived")}
             />
           )}
-          {!showProfile && !showModel && !showPersonalization && !showPlugins && !showAppearance
+          {!showProfile && !showCloud && !showModel && !showPersonalization && !showPlugins && !showAppearance
             && !showArchived && (
             <p className="settings-search-empty">没有匹配的设置</p>
           )}
@@ -220,9 +237,15 @@ export function SettingsPage({
         <header className="settings-topbar" aria-hidden="true" />
         {section === "profile" ? (
           <ProfilePage api={api} />
+        ) : section === "cloud" ? (
+          <CloudAccountPage api={cloudApi} notify={notify} />
         ) : section === "model" ? (
           api ? (
-            <ModelSettingsPanel api={api} />
+            <ModelSettingsPanel
+              api={api}
+              cloudApi={cloudApi}
+              onOpenCloud={() => setSection("cloud")}
+            />
           ) : (
             <main className="settings-layout">
               <div className="settings-unavailable">
@@ -533,7 +556,15 @@ function projectNameFromPath(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 }
 
-function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
+function ModelSettingsPanel({
+  api,
+  cloudApi,
+  onOpenCloud,
+}: {
+  api: LumoraModelApi;
+  cloudApi?: LumoraCloudApi;
+  onOpenCloud(): void;
+}) {
   const [providers, setProviders] = useState<ModelProvider[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
   const [providerName, setProviderName] = useState("");
@@ -577,7 +608,9 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
   }
 
   async function reloadProviders(preferredId?: string) {
-    const loaded = await api.listProviders();
+    const loaded = (await api.listProviders()).filter(
+      (provider) => provider.providerName !== "LUMORA Cloud",
+    );
     setProviders(loaded);
     const next = loaded.find((provider) => provider.providerId === preferredId)
       ?? loaded.find((provider) => provider.active)
@@ -725,6 +758,8 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
     try {
       if (selectedProvider?.active) {
         await api.disableProvider(selectedId);
+      } else if (cloudApi) {
+        await cloudApi.selectLocalProvider(selectedId);
       } else {
         await api.activateProvider(selectedId);
       }
@@ -837,11 +872,11 @@ function ModelSettingsPanel({ api }: { api: LumoraModelApi }) {
           <button
             className="model-provider-item builtin"
             type="button"
-            disabled
-            aria-label="BigModel 套餐暂未开放"
+            aria-label="打开 LUMORA Cloud 账号与套餐"
+            onClick={onOpenCloud}
           >
             <span className="provider-logo bigmodel">◆</span>
-            <strong>BigModel</strong>
+            <strong>LUMORA Cloud</strong>
             <i />
           </button>
 

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { app, BrowserWindow, screen, shell } from "electron";
+import { app, BrowserWindow, safeStorage, screen, shell } from "electron";
 
 import { registerTaskIpc } from "./ipc";
 import { registerAppearanceIpc } from "./appearance-ipc";
@@ -11,6 +11,12 @@ import { registerMcpIpc } from "./mcp-ipc";
 import { registerSkillIpc } from "./skill-ipc";
 import { registerWorkspaceIpc } from "./workspace-ipc";
 import { registerWorkspaceGitIpc } from "./workspace-git-ipc";
+import { CloudCredentialStore } from "./features/cloud/cloud-credential-store";
+import { registerCloudIpc } from "./features/cloud/cloud-ipc";
+import { CloudModelCoordinator } from "./features/cloud/cloud-model-coordinator";
+import { CloudModelProxy } from "./features/cloud/cloud-model-proxy";
+import { CloudPreferenceStore } from "./features/cloud/cloud-preference-store";
+import { CloudSessionClient } from "./features/cloud/cloud-session-client";
 import { RestModelGateway } from "./rest-model-gateway";
 import { RestMemoryGateway } from "./rest-memory-gateway";
 import { RestMcpGateway } from "./rest-mcp-gateway";
@@ -68,6 +74,8 @@ let unregisterAttachmentIpc: (() => void) | undefined;
 let unregisterCitationIpc: (() => void) | undefined;
 let unregisterWorkspaceIpc: (() => void) | undefined;
 let unregisterWorkspaceGitIpc: (() => void) | undefined;
+let unregisterCloudIpc: (() => void) | undefined;
+let cloudModelProxy: CloudModelProxy | undefined;
 
 async function createWindow(): Promise<BrowserWindow> {
   const preloadPath = path.join(__dirname, "preload.js");
@@ -116,7 +124,29 @@ async function createWindow(): Promise<BrowserWindow> {
 }
 
 app.whenReady().then(async () => {
+  const cloudCredentialStore = new CloudCredentialStore(
+    path.join(app.getPath("userData"), "cloud-session.json"),
+    safeStorage,
+  );
+  const cloudSession = new CloudSessionClient(
+    devConfig.cloudApiUrl,
+    cloudCredentialStore,
+  );
+  cloudModelProxy = new CloudModelProxy(cloudSession);
+  await cloudModelProxy.start();
+  const cloudCoordinator = new CloudModelCoordinator(
+    cloudSession,
+    new CloudPreferenceStore(
+      path.join(app.getPath("userData"), "cloud-preferences.json"),
+    ),
+    modelGateway,
+    cloudModelProxy,
+  );
   unregisterIpc = registerTaskIpc(gateway);
+  unregisterCloudIpc = registerCloudIpc(
+    cloudCoordinator,
+    devConfig.cloudConsoleUrl,
+  );
   unregisterModelIpc = registerModelIpc(modelGateway);
   unregisterMemoryIpc = registerMemoryIpc(memoryGateway);
   unregisterMcpIpc = registerMcpIpc(mcpGateway);
@@ -127,6 +157,9 @@ app.whenReady().then(async () => {
   unregisterWorkspaceIpc = registerWorkspaceIpc();
   unregisterWorkspaceGitIpc = registerWorkspaceGitIpc(workspaceGateway);
   await createWindow();
+  // 不阻塞本地应用启动；若上次选择了官方套餐，后台会恢复会话并重新绑定
+  // 本次进程的 loopback 代理地址与临时凭据。
+  void cloudCoordinator.restoreSession().catch(() => undefined);
 
   app.on("activate", async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -152,6 +185,8 @@ app.on("before-quit", () => {
   unregisterCitationIpc?.();
   unregisterWorkspaceIpc?.();
   unregisterWorkspaceGitIpc?.();
+  unregisterCloudIpc?.();
+  void cloudModelProxy?.stop();
   gateway.dispose();
 });
 

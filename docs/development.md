@@ -26,16 +26,26 @@ desktop/config/dev-local.example.yml
 Electron 与 Java 使用相同的 Core 令牌；令牌至少 32 个字符，不写入已提交的示例
 配置。端口和服务地址也在这些本地 YAML 中维护。
 
-模型连接通过桌面端“设置 → 模型与 API”配置。“套餐”区域仅展示 LUMORA 托管套餐
-入口；“自定义供应商”支持保存多条 BYOK 配置，并从中启用一条作为当前聊天连接。
+模型连接通过桌面端“设置 → 模型与 API”配置。“账号与套餐”区域承载可选登录、只读套餐/额度/用量
+和 LUMORA 托管模型选择；购买、续费、充值和套餐管理只通过系统默认浏览器进入网页用户控制台，
+网页端独立登录。“自定义供应商”支持保存多条 BYOK 配置，并从中启用一条作为当前聊天连接；
+未登录可以使用 BYOK，登录后也仍可在套餐和自定义供应商之间显式切换。
+套餐模式下首页和会话中的模型列表取当前套餐版本允许模型与 Cloud 已发布模型目录的交集，且不会混入
+本地供应商模型；套餐运行投影固定使用 `lumora-cloud` 内部适配器，不在套餐模型选择界面暴露上游协议。
+Desktop Cloud API 和网页控制台地址分别由 `desktop/config/dev-local.yml` 的 `cloud-api-url` 与
+`cloud-console-url` 配置；省略时使用本机 `46100` 与 `5175` 开发端口。Access Token 仅驻留 Electron
+Main 内存，Refresh Token 使用 Electron `safeStorage` 加密后写入用户数据目录。官方模型请求由
+Java Core/Python Agent 访问 Electron Main 的随机 loopback 代理，不向 Renderer 或本地服务下发云端 Token。
 供应商名称、Base URL、默认模型指针和 API 格式等非敏感字段，以及经过
 Windows DPAPI 加密的 API Key 密文，统一写入 Java SQLite。Python 只在当前模型请求
 中临时接收明文，不保存到 YAML、日志或数据库。旧的
 `agent/config/model-local.yml` 已不再使用。
 
-API 格式支持 `anthropic`、`chat-completions` 和 `responses`。Python Runtime 的
+用户可编辑的本地 API 格式支持 `anthropic`、`chat-completions` 和 `responses`。Python Runtime 的
 `RoutingModelProvider` 会按该值分别调用 `/messages`、`/chat/completions` 或 `/responses`；
 三种适配器共用 Agent Harness、工具循环、审批、上下文压缩和 TokenUsage 归一化链路。
+官方套餐另有不可编辑的 `lumora-cloud` 适配器，经 Electron loopback 代理调用 Cloud 的 LUMORA Internal
+Protocol v1 统一入口；它不改变、替换或降级上述任何本地 Provider。
 
 每个自定义供应商可以保存多个模型 ID。上下文窗口和最大输出 Token 属于模型配置，
 不属于供应商公共字段；最大输出 Token 会映射为所选协议对应的请求字段。
@@ -43,7 +53,8 @@ API 格式支持 `anthropic`、`chat-completions` 和 `responses`。Python Runti
 显式禁用；没有启用供应商时，聊天请求会提示先配置模型 API。
 
 Hosted Web Search 按模型显式开启：Responses 与 Anthropic 当前支持，Chat Completions 暂不
-启用。远程 MCP Server 在“设置 → MCP”维护，当前支持 Streamable HTTP、静态认证以及
+启用。官方套餐模式下该开关来自 Cloud 已发布模型能力，由 Model Gateway 执行供应商托管搜索并把
+搜索进度和引用来源转换为统一事件；本地 BYOK 行为不变。远程 MCP Server 在“设置 → MCP”维护，当前支持 Streamable HTTP、静态认证以及
 Tools/Resources/Resource Templates/Prompts；不支持本地 stdio 和 OAuth。
 
 ## Python

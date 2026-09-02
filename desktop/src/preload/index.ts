@@ -8,6 +8,11 @@ import type {
   TaskWorkspaceInput,
 } from "../shared/task-contract";
 import type {
+  CloudConsoleDestination,
+  CloudLoginInput,
+  CloudModelSource,
+} from "../shared/cloud-contract";
+import type {
   ChatMessage,
   ChatRequestOptions,
   ChatStreamEvent,
@@ -69,6 +74,32 @@ import {
 } from "../shared/validation";
 
 const api: LumoraApi = {
+  cloud: {
+    getState: () => ipcRenderer.invoke("cloud:get-state"),
+    restoreSession: () => ipcRenderer.invoke("cloud:restore-session"),
+    login: (input: CloudLoginInput) =>
+      ipcRenderer.invoke("cloud:login", validateCloudLogin(input)),
+    logout: () => ipcRenderer.invoke("cloud:logout"),
+    getDashboard: () => ipcRenderer.invoke("cloud:get-dashboard"),
+    getModelCatalog: () => ipcRenderer.invoke("cloud:get-model-catalog"),
+    setModelSource: (source: CloudModelSource) =>
+      ipcRenderer.invoke("cloud:set-model-source", validateCloudModelSource(source)),
+    selectCloudModel: (modelCode: string) =>
+      ipcRenderer.invoke(
+        "cloud:select-cloud-model",
+        validateCloudIdentifier(modelCode, "模型编码"),
+      ),
+    selectLocalProvider: (providerId: string) =>
+      ipcRenderer.invoke(
+        "cloud:select-local-provider",
+        validateCloudIdentifier(providerId, "供应商 ID"),
+      ),
+    openConsole: (destination: CloudConsoleDestination) =>
+      ipcRenderer.invoke(
+        "cloud:open-console",
+        validateCloudDestination(destination),
+      ),
+  },
   attachments: {
     prepare: async (file: File) => {
       if (
@@ -552,6 +583,41 @@ function validateBranchName(value: unknown): string {
     throw new TypeError("分支名称不能超过 255 个字符");
   }
   return branchName;
+}
+
+function validateCloudLogin(value: CloudLoginInput): CloudLoginInput {
+  if (!value || typeof value !== "object") {
+    throw new TypeError("登录参数无效");
+  }
+  const email = value.email?.trim().toLowerCase();
+  if (!email || email.length > 254 || !email.includes("@")) {
+    throw new TypeError("请输入有效邮箱");
+  }
+  if (typeof value.password !== "string" || !value.password || value.password.length > 72) {
+    throw new TypeError("请输入有效密码");
+  }
+  return { email, password: value.password };
+}
+
+function validateCloudModelSource(value: unknown): CloudModelSource {
+  if (value !== "LOCAL_BYOK" && value !== "CLOUD_MANAGED") {
+    throw new TypeError("模型来源无效");
+  }
+  return value;
+}
+
+function validateCloudIdentifier(value: unknown, label: string): string {
+  if (typeof value !== "string" || !value.trim() || value.length > 200) {
+    throw new TypeError(`${label}无效`);
+  }
+  return value.trim();
+}
+
+function validateCloudDestination(value: unknown): CloudConsoleDestination {
+  if (value !== "home" && value !== "plans" && value !== "wallet") {
+    throw new TypeError("控制台目标无效");
+  }
+  return value;
 }
 
 function validateCitationPath(value: unknown): string {
