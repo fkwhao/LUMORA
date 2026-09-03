@@ -1,8 +1,10 @@
 import asyncio
 import json
+from dataclasses import replace
 
 import httpx
 
+from app.context.estimator import TokenEstimator
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.provider.lumora_cloud_provider import LumoraCloudProvider
 
@@ -142,3 +144,264 @@ async def _assert_stream_parses_lumora_events() -> None:
     assert events[-1].turn is not None
     assert events[-1].turn.content == "hello"
     assert events[-1].turn.usage.total_tokens == 6
+
+
+def test_stream_normalizes_only_web_search_active_context() -> None:
+    asyncio.run(_assert_stream_normalizes_only_web_search_active_context())
+
+
+async def _assert_stream_normalizes_only_web_search_active_context() -> None:
+    raw_usage = {
+        "promptTokens": 32_000,
+        "completionTokens": 100,
+        "totalTokens": 32_100,
+        "inputTokens": 12_000,
+        "outputTokens": 100,
+        "reasoningTokens": 0,
+        "cacheReadTokens": 20_000,
+        "cacheWriteTokens": 0,
+        "cacheMetricsAvailable": True,
+    }
+    provider_state = {
+        "protocol": "ANTHROPIC",
+        "modelCode": "lumora-test",
+        "providerCode": "managed-provider",
+        "content": [
+            {"type": "server_tool_use", "id": "search-1", "name": "web_search"},
+            {"type": "web_search_tool_result", "tool_use_id": "search-1", "content": []},
+        ],
+    }
+    body = "\n".join([
+        'data: {"protocolVersion":"1","type":"web_search_started","resolvedModel":"lumora-test","itemId":"search-1","query":"LUMORA"}',
+        "",
+        "data: " + json.dumps({
+            "protocolVersion": "1",
+            "type": "usage",
+            "resolvedModel": "lumora-test",
+            "usage": raw_usage,
+        }),
+        "",
+        "data: " + json.dumps({
+            "protocolVersion": "1",
+            "type": "completed",
+            "resolvedModel": "lumora-test",
+            "result": {
+                "content": "done",
+                "reasoning": "",
+                "model": "lumora-test",
+                "toolCalls": [],
+                "providerState": provider_state,
+            },
+            "usage": raw_usage,
+        }),
+        "",
+        "data: [DONE]",
+        "",
+    ])
+
+    async def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=body, headers={"Content-Type": "text/event-stream"})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = LumoraCloudProvider(http_client=client)
+    cloud_settings = replace(settings(), web_search_enabled=True)
+    messages = [
+        {
+            "role": "assistant",
+            "content": "previous answer",
+            "provider_state": {"opaque": "x" * 80_000},
+        },
+        {"role": "user", "content": "搜索 LUMORA"},
+    ]
+    events = [
+        event
+        async for event in provider.stream_agent_turn(
+            cloud_settings, messages, (), None
+        )
+    ]
+    await client.aclose()
+
+    usage_event = next(event for event in events if event.type == "usage")
+    completed = events[-1].turn
+    assert usage_event.usage is not None
+    assert completed is not None
+    expected_prompt = TokenEstimator().estimate_messages([
+        {"role": "assistant", "content": "previous answer"},
+        {"role": "user", "content": "搜索 LUMORA"},
+    ]) + TokenEstimator().estimate_tools(())
+    assert usage_event.usage.prompt_tokens == expected_prompt
+    assert completed.usage.prompt_tokens == usage_event.usage.prompt_tokens
+    assert completed.usage.total_tokens == raw_usage["totalTokens"]
+    assert completed.usage.input_tokens == raw_usage["inputTokens"]
+    assert completed.usage.cache_read_tokens == raw_usage["cacheReadTokens"]
+
+
+def test_stream_keeps_cloud_prompt_usage_without_actual_web_search() -> None:
+    asyncio.run(_assert_stream_keeps_cloud_prompt_usage_without_actual_web_search())
+
+
+async def _assert_stream_keeps_cloud_prompt_usage_without_actual_web_search() -> None:
+    body = (
+        'data: {"protocolVersion":"1","type":"completed",'
+        '"resolvedModel":"lumora-test","result":{"content":"done",'
+        '"reasoning":"","model":"lumora-test","toolCalls":[]},'
+        '"usage":{"promptTokens":32000,"completionTokens":1,'
+        '"totalTokens":32001,"inputTokens":32000,"outputTokens":1,'
+        '"reasoningTokens":0,"cacheReadTokens":0,"cacheWriteTokens":0,'
+        '"cacheMetricsAvailable":false}}\n\ndata: [DONE]\n\n'
+    )
+
+    async def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=body, headers={"Content-Type": "text/event-stream"})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = LumoraCloudProvider(http_client=client)
+    events = [
+        event
+        async for event in provider.stream_agent_turn(
+            replace(settings(), web_search_enabled=True),
+            [{"role": "user", "content": "普通问题"}],
+            (),
+            None,
+        )
+    ]
+    await client.aclose()
+
+    assert events[-1].turn is not None
+    assert events[-1].turn.usage.prompt_tokens == 32_000
+    assert events[-1].turn.provider_state is not None
+    assert (
+        events[-1].turn.provider_state["_lumoraCloudContext"]["activeTokens"]
+        == 32_000
+    )
+
+
+def test_web_search_reuses_persisted_cloud_context_anchor() -> None:
+    asyncio.run(_assert_web_search_reuses_persisted_cloud_context_anchor())
+
+
+async def _assert_web_search_reuses_persisted_cloud_context_anchor() -> None:
+    responses = [
+        {
+            "protocolVersion": "1",
+            "model": "lumora-test",
+            "result": {
+                "content": "ordinary answer",
+                "reasoning": "",
+                "model": "lumora-test",
+                "toolCalls": [],
+                "providerState": {
+                    "protocol": "ANTHROPIC",
+                    "modelCode": "lumora-test",
+                    "providerCode": "managed-provider",
+                    "content": [{"type": "thinking", "thinking": "x" * 80_000}],
+                },
+            },
+            "usage": {
+                "promptTokens": 15_000,
+                "completionTokens": 20,
+                "totalTokens": 15_020,
+                "inputTokens": 3_000,
+                "outputTokens": 20,
+                "reasoningTokens": 0,
+                "cacheReadTokens": 12_000,
+                "cacheWriteTokens": 0,
+                "cacheMetricsAvailable": True,
+            },
+        },
+        {
+            "protocolVersion": "1",
+            "model": "lumora-test",
+            "result": {
+                "content": "search answer",
+                "reasoning": "",
+                "model": "lumora-test",
+                "toolCalls": [],
+                "providerState": {
+                    "protocol": "ANTHROPIC",
+                    "modelCode": "lumora-test",
+                    "providerCode": "managed-provider",
+                    "content": [
+                        {
+                            "type": "server_tool_use",
+                            "id": "search-1",
+                            "name": "web_search",
+                        },
+                        {
+                            "type": "web_search_tool_result",
+                            "tool_use_id": "search-1",
+                            "content": [],
+                        },
+                    ],
+                },
+            },
+            "usage": {
+                "promptTokens": 60_000,
+                "completionTokens": 100,
+                "totalTokens": 60_100,
+                "inputTokens": 20_000,
+                "outputTokens": 100,
+                "reasoningTokens": 0,
+                "cacheReadTokens": 40_000,
+                "cacheWriteTokens": 0,
+                "cacheMetricsAvailable": True,
+            },
+        },
+    ]
+
+    async def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=responses.pop(0))
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = LumoraCloudProvider(http_client=client)
+    cloud_settings = replace(settings(), web_search_enabled=True)
+    base_messages = [
+        {"role": "system", "content": "You are an agent."},
+        {"role": "user", "content": "First question"},
+    ]
+    huge_tools = ({
+        "type": "function",
+        "function": {
+            "name": "large_tool",
+            "description": "large schema " * 20_000,
+            "parameters": {"type": "object"},
+        },
+    },)
+    ordinary = await provider.complete_agent_turn(
+        cloud_settings,
+        base_messages,
+        huge_tools,
+        None,
+    )
+    assert ordinary.provider_state is not None
+
+    next_messages = [
+        *base_messages,
+        {
+            "role": "assistant",
+            "content": ordinary.content,
+            "provider_state": ordinary.provider_state,
+        },
+        {"role": "user", "content": "Search this now"},
+    ]
+    searched = await provider.complete_agent_turn(
+        cloud_settings,
+        next_messages,
+        huge_tools,
+        None,
+    )
+    await client.aclose()
+
+    expected_prompt = 15_000 + TokenEstimator().estimate_messages([
+        {"role": "assistant", "content": ordinary.content},
+        {"role": "user", "content": "Search this now"},
+    ])
+    assert searched.usage.prompt_tokens == expected_prompt
+    assert searched.usage.total_tokens == 60_100
+    assert searched.usage.input_tokens == 20_000
+    assert searched.usage.cache_read_tokens == 40_000
+    assert searched.provider_state is not None
+    assert (
+        searched.provider_state["_lumoraCloudContext"]["activeTokens"]
+        == expected_prompt
+    )
