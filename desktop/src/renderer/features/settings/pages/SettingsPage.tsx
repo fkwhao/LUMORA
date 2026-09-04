@@ -130,7 +130,7 @@ export function SettingsPage({
   const showPersonalization = "个性化 记忆 重置记忆".includes(
     normalizedSettingsQuery,
   );
-  const showPlugins = "插件 MCP 技能 Skills 工具 Server Streamable HTTP".toLowerCase().includes(
+  const showPlugins = "插件 MCP 技能 Skills 工具 Server Streamable HTTP stdio".toLowerCase().includes(
     normalizedSettingsQuery,
   );
   const showArchived = "已归档任务".includes(normalizedSettingsQuery);

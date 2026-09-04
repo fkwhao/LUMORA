@@ -187,7 +187,7 @@ export function PluginsSettingsPage({
                     <div>
                       <strong>/{skill.name}</strong>
                       <p>{skill.description}</p>
-                      <small>{skill.source === "project" ? "项目" : skill.source === "user" ? "个人" : "内置"} · {skill.mode === "fork" ? "独立上下文" : "当前上下文"}{skill.resourceCount ? ` · ${skill.resourceCount} 个资源` : ""}</small>
+                      <small>{skill.source === "project" ? "项目" : skill.source === "user" ? "个人" : "内置"} · {skill.mode === "fork" ? "声明 Fork（当前以内联执行）" : "当前上下文"}{skill.resourceCount ? ` · ${skill.resourceCount} 个资源` : ""}</small>
                     </div>
                     <Switch checked={skill.enabled} aria-label={`${skill.enabled ? "停用" : "启用"} ${skill.name}`} onCheckedChange={(enabled) => void toggleSkill(skill, enabled)} />
                   </article>

@@ -3,3 +3,4 @@ mypy>=1.17,<2
 pytest>=8.4,<9
 ruff>=0.12,<1
 types-PyYAML>=6.0.12,<7
+types-jsonschema>=4.26,<5

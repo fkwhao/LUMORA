@@ -698,25 +698,44 @@ class ChatService:
                 if error is None and lease is not None:
                     session = lease.session
                     client = session.client
-                    server_tools = [
-                        *(
-                            create_mcp_tool(client, definition)
-                            for definition in session.tools
-                        ),
-                        *(
+                    server_tools = []
+                    for definition in session.tools:
+                        try:
+                            server_tools.append(
+                                create_mcp_tool(client, definition)
+                            )
+                        except ValueError as definition_error:
+                            errors.append((
+                                server.name,
+                                (
+                                    f"MCP 工具 {definition.name} 定义无效："
+                                    f"{definition_error}"
+                                ),
+                            ))
+                    if expose_capabilities:
+                        server_tools.extend(
                             create_mcp_capability_tools(client)
-                            if expose_capabilities
-                            else ()
-                        ),
-                    ]
-                    tool_names = [tool.name for tool in server_tools]
-                    if len(tool_names) != len(set(tool_names)):
-                        raise ValueError("MCP Server 返回了重复的工具名称")
+                        )
                     existing_names = set(registry.names())
-                    if any(name in existing_names for name in tool_names):
-                        raise ValueError("MCP 工具名称与现有工具冲突")
                     for tool in server_tools:
-                        registry.register(tool)
+                        if tool.name in existing_names:
+                            errors.append((
+                                server.name,
+                                f"MCP 工具名称冲突，已跳过：{tool.name}",
+                            ))
+                            continue
+                        try:
+                            registry.register(tool)
+                        except ValueError as registration_error:
+                            errors.append((
+                                server.name,
+                                (
+                                    f"MCP 工具 {tool.name} 注册失败："
+                                    f"{registration_error}"
+                                ),
+                            ))
+                            continue
+                        existing_names.add(tool.name)
         except BaseException:
             await asyncio.gather(
                 *(lease.release() for lease in leases),

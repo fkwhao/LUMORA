@@ -51,7 +51,7 @@ Electron Renderer
   原样保留，不进入自动应用或清理。冲突与异常退出会保留现场等待恢复。
 - 标题栏提供当前 Workspace 与 Git 分支状态、分支切换/创建及精简 Git 图谱；右侧审阅栏支持本轮、
   全部未提交、未暂存、已暂存、指定提交和分支比较，审阅操作本身不会切换分支。
-- 接入远程 Streamable HTTP MCP 的 Tools、Resources、Resource Templates 与 Prompts，所有远程能力继续经过现有权限和审计链路。
+- 通过官方 MCP Python SDK v2 接入远程 Streamable HTTP 与 Windows 本地 stdio Server 的 Tools、Resources、Resource Templates 与 Prompts；工具调用继续经过现有权限和审计链路。
 - 支持项目级与个人级 Skills：只在上下文中暴露名称和描述，命中后由 Agent 按需加载完整 SOP 与附属文本资源；输入 `/` 可搜索显式 Skill 指令。
 - 对支持的模型启用供应商托管 Web Search，并在工作过程中展示搜索状态、引用和来源。
 - 自动或手动压缩较早上下文，并在 Java SQLite 中保存摘要、活动上下文 Token 和输入、输出、推理、缓存等消息用量。
@@ -86,6 +86,8 @@ context: full
 
 `name` 只允许小写字母、数字和连字符。`mode` 支持 `inline` 与 `fork` 元数据；
 当前 Skill 仍以内联方式执行，`fork` 元数据尚未连接到 Supervisor 子 Session。
+Skill SOP 与附属文本资源按需分块读取；运行时会限制单文件大小、资源数量和目录扫描范围，
+并拒绝符号链接与目录越界路径。
 
 开发阶段分别启动三个工程：
 

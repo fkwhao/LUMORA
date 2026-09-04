@@ -1,10 +1,17 @@
 export type McpAuthenticationType = "none" | "bearer" | "api_key" | "custom_header";
+export type McpTransportType = "streamable_http" | "stdio";
 
 export interface McpServer {
   serverId: string;
   name: string;
   enabled: boolean;
-  url: string;
+  transportType: McpTransportType;
+  url?: string;
+  command?: string;
+  arguments: string[];
+  workingDirectory?: string;
+  environmentKeys: string[];
+  environmentConfigured: boolean;
   authType: McpAuthenticationType;
   headerName?: string;
   credentialConfigured: boolean;
@@ -13,7 +20,13 @@ export interface McpServer {
 export interface SaveMcpServerInput {
   name: string;
   enabled: boolean;
-  url: string;
+  transportType: McpTransportType;
+  url?: string;
+  command?: string;
+  arguments?: string[];
+  workingDirectory?: string;
+  environment?: Record<string, string>;
+  clearEnvironment?: boolean;
   authType: McpAuthenticationType;
   headerName?: string;
   credential?: string;

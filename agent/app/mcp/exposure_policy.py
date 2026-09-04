@@ -81,8 +81,8 @@ def should_connect_server(
 ) -> bool:
     """Select an enabled MCP server from the current request, before I/O.
 
-    Connecting is observable network work and may fail, so an enabled server is
-    not contacted merely to discover whether it could be useful. Explicit MCP
+    Connecting may perform network I/O or start a local process, so an enabled
+    server is not activated merely to discover whether it could be useful. Explicit MCP
     intent activates configured servers; otherwise a server is activated only
     when its meaningful name or endpoint identity occurs in the request.
     """
@@ -97,8 +97,13 @@ def should_connect_server(
 
 
 def _server_signals(server: McpServerRequest) -> tuple[str, ...]:
-    parsed = urlparse(server.url.strip())
-    candidates = [server.name, server.server_id, parsed.hostname or ""]
+    parsed = urlparse((server.url or "").strip())
+    candidates = [
+        server.name,
+        server.server_id,
+        parsed.hostname or "",
+        server.command or "",
+    ]
     signals: list[str] = []
     for candidate in candidates:
         for token in re.findall(r"[\w\u4e00-\u9fff]+", candidate.casefold()):

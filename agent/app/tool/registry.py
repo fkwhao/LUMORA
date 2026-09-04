@@ -11,6 +11,10 @@ from app.execution.write_intents import (
     scopes_from_resource_accesses,
 )
 from app.tool.base import Tool, ToolContext, ToolInput, ToolResult
+from app.tool.json_schema import (
+    validate_schema_definition,
+    validate_schema_instance,
+)
 from app.tool.resource_locks import (
     ResourceAccess,
     ResourceAccessMode,
@@ -67,6 +71,7 @@ class ToolRegistry:
             raise ValueError(f"工具名称重复：{name}")
         if not tool.description.strip():
             raise ValueError(f"工具 {name} 缺少描述")
+        validate_schema_definition(tool.input_schema, require_object_root=True)
         self._tools[name] = tool
 
     def get(self, name: str) -> Tool:
@@ -449,43 +454,7 @@ def _validate_schema(
     schema: Mapping[str, Any],
     input_data: Mapping[str, Any],
 ) -> None:
-    if schema.get("type") != "object":
-        raise ToolInputError("工具输入 Schema 根节点必须是 object")
-    properties = schema.get("properties") or {}
-    required = schema.get("required") or []
-    for name in required:
-        if name not in input_data:
-            raise ToolInputError(f"缺少必填参数：{name}")
-    if schema.get("additionalProperties") is False:
-        unknown = set(input_data) - set(properties)
-        if unknown:
-            raise ToolInputError(f"包含未知参数：{min(unknown)}")
-    for name, value in input_data.items():
-        property_schema = properties.get(name)
-        if isinstance(property_schema, Mapping):
-            _validate_value(name, value, property_schema)
-
-
-def _validate_value(
-    name: str,
-    value: Any,
-    schema: Mapping[str, Any],
-) -> None:
-    expected = schema.get("type")
-    valid = (
-        expected == "string" and isinstance(value, str)
-        or expected == "integer"
-        and isinstance(value, int)
-        and not isinstance(value, bool)
-        or expected == "boolean" and isinstance(value, bool)
-        or expected == "object" and isinstance(value, Mapping)
-        or expected == "array" and isinstance(value, list)
-        or expected is None
-    )
-    if not valid:
-        raise ToolInputError(f"参数 {name} 类型无效")
-    if isinstance(value, int):
-        if "minimum" in schema and value < int(schema["minimum"]):
-            raise ToolInputError(f"参数 {name} 小于最小值")
-        if "maximum" in schema and value > int(schema["maximum"]):
-            raise ToolInputError(f"参数 {name} 超过最大值")
+    try:
+        validate_schema_instance(schema, input_data)
+    except ValueError as error:
+        raise ToolInputError(str(error)) from error

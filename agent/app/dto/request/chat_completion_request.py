@@ -1,4 +1,6 @@
+import re
 from datetime import datetime
+from pathlib import PureWindowsPath
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -87,8 +89,7 @@ class ChatMessageRequest(BaseModel):
             message["tool_call_id"] = self.tool_call_id
         if self.attachments:
             message["attachments"] = [
-                attachment.model_dump(by_alias=True)
-                for attachment in self.attachments
+                attachment.model_dump(by_alias=True) for attachment in self.attachments
             ]
         if self.provider_state:
             message["provider_state"] = dict(self.provider_state)
@@ -100,24 +101,18 @@ class AgentInboxMessageRequest(BaseModel):
 
     message_id: str = Field(alias="messageId", min_length=1, max_length=160)
     sequence: int = Field(ge=1)
-    sender_agent_id: str = Field(
-        alias="senderAgentId", min_length=1, max_length=160
-    )
+    sender_agent_id: str = Field(alias="senderAgentId", min_length=1, max_length=160)
     content: str = Field(min_length=1, max_length=100_000)
     status: Literal["pending", "consumed"] = "pending"
     kind: Literal["task", "peer"] = Field(default="task", alias="messageKind")
-    sender_label: str | None = Field(
-        default=None, alias="senderLabel", max_length=120
-    )
+    sender_label: str | None = Field(default=None, alias="senderLabel", max_length=120)
 
 
 class AgentCheckpointRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     sequence: int = Field(ge=0)
-    consumed_inbox_sequence: int = Field(
-        default=0, alias="consumedInboxSequence", ge=0
-    )
+    consumed_inbox_sequence: int = Field(default=0, alias="consumedInboxSequence", ge=0)
     transcript: list[ChatMessageRequest] = Field(
         default_factory=list, max_length=10_000
     )
@@ -129,9 +124,7 @@ class AgentSessionSnapshotRequest(BaseModel):
 
     agent_id: str = Field(alias="agentId", min_length=1, max_length=160)
     session_id: str = Field(alias="sessionId", min_length=1, max_length=500)
-    parent_agent_id: str = Field(
-        alias="parentAgentId", min_length=1, max_length=160
-    )
+    parent_agent_id: str = Field(alias="parentAgentId", min_length=1, max_length=160)
     parent_session_id: str = Field(
         alias="parentSessionId", min_length=1, max_length=500
     )
@@ -140,15 +133,11 @@ class AgentSessionSnapshotRequest(BaseModel):
         default=None, alias="activeActivationId", max_length=160
     )
     label: str = Field(min_length=1, max_length=120)
-    status: Literal[
-        "idle", "running", "interrupted", "closed", "failed"
-    ] = "idle"
+    status: Literal["idle", "running", "interrupted", "closed", "failed"] = "idle"
     mode: Literal["one_shot", "continuable"] = "continuable"
     delegation_depth: int = Field(alias="delegationDepth", ge=1, le=20)
     model: str = Field(default="", max_length=160)
-    unread_report_count: int = Field(
-        default=0, alias="unreadReportCount", ge=0
-    )
+    unread_report_count: int = Field(default=0, alias="unreadReportCount", ge=0)
     latest_report: str | None = Field(
         default=None, alias="latestReport", max_length=100_000
     )
@@ -201,16 +190,12 @@ class MemoryContextRequest(BaseModel):
 
     memory_id: str = Field(alias="memoryId", min_length=1, max_length=100)
     scope: Literal["USER", "PROJECT", "CONVERSATION"]
-    type: Literal[
-        "PREFERENCE", "FACT", "DECISION", "CONSTRAINT", "SUMMARY"
-    ]
+    type: Literal["PREFERENCE", "FACT", "DECISION", "CONSTRAINT", "SUMMARY"]
     content: str = Field(min_length=1, max_length=4_000)
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     usage_count: int = Field(default=0, alias="usageCount", ge=0)
-    last_used_time: datetime | None = Field(
-        default=None, alias="lastUsedTime"
-    )
+    last_used_time: datetime | None = Field(default=None, alias="lastUsedTime")
     updated_time: datetime = Field(alias="updatedTime")
 
 
@@ -225,10 +210,30 @@ class McpServerRequest(BaseModel):
     )
     name: str = Field(min_length=1, max_length=120)
     enabled: bool = True
-    url: str = Field(max_length=2000)
-    auth_type: Literal[
-        "none", "bearer", "api_key", "custom_header"
-    ] = Field(default="none", alias="authType")
+    transport: Literal["streamable_http", "stdio"] = Field(
+        default="streamable_http",
+        alias="transportType",
+    )
+    url: str | None = Field(default=None, max_length=2000)
+    command: str | None = Field(default=None, max_length=1000)
+    arguments: list[str] = Field(
+        default_factory=list,
+        max_length=64,
+        repr=False,
+    )
+    working_directory: str | None = Field(
+        default=None,
+        alias="workingDirectory",
+        max_length=2000,
+    )
+    environment: dict[str, str] = Field(
+        default_factory=dict,
+        max_length=64,
+        repr=False,
+    )
+    auth_type: Literal["none", "bearer", "api_key", "custom_header"] = Field(
+        default="none", alias="authType"
+    )
     header_name: str | None = Field(
         default=None,
         alias="headerName",
@@ -239,8 +244,51 @@ class McpServerRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_transport_fields(self) -> "McpServerRequest":
-        if not self.url.strip().startswith(("http://", "https://")):
-            raise ValueError("远程 MCP Server 必须配置 HTTP(S) 地址")
+        if self.transport == "streamable_http":
+            if not (self.url or "").strip().startswith(("http://", "https://")):
+                raise ValueError("远程 MCP Server 必须配置 HTTP(S) 地址")
+            if (
+                self.command
+                or self.arguments
+                or self.working_directory
+                or self.environment
+            ):
+                raise ValueError("HTTP MCP Server 不能包含 stdio 启动配置")
+        else:
+            command = (self.command or "").strip()
+            if not command:
+                raise ValueError("stdio MCP Server 必须配置启动命令")
+            if any(character in command for character in ("\0", "\r", "\n")):
+                raise ValueError("stdio 启动命令包含无效字符")
+            if self.url:
+                raise ValueError("stdio MCP Server 不能配置 HTTP 地址")
+            if self.auth_type != "none" or self.header_name or self.credential:
+                raise ValueError("stdio MCP Server 不使用 HTTP 静态认证")
+            if (
+                self.working_directory
+                and not PureWindowsPath(self.working_directory).is_absolute()
+            ):
+                raise ValueError("stdio 工作目录必须是 Windows 绝对路径")
+            if self.working_directory and any(
+                character in self.working_directory
+                for character in ("\0", "\r", "\n")
+            ):
+                raise ValueError("stdio 工作目录包含无效字符")
+            for argument in self.arguments:
+                if len(argument) > 2000 or any(
+                    character in argument for character in ("\0", "\r", "\n")
+                ):
+                    raise ValueError("stdio 参数格式无效")
+            normalized_environment_keys: set[str] = set()
+            for key, value in self.environment.items():
+                if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", key):
+                    raise ValueError(f"stdio 环境变量名称无效：{key}")
+                normalized_key = key.casefold()
+                if normalized_key in normalized_environment_keys:
+                    raise ValueError(f"stdio 环境变量名称重复：{key}")
+                normalized_environment_keys.add(normalized_key)
+                if len(value) > 4096 or "\0" in value:
+                    raise ValueError(f"stdio 环境变量值无效：{key}")
         if self.auth_type in {"api_key", "custom_header"} and not self.header_name:
             raise ValueError("API Key 或自定义 Header 认证必须配置 Header 名称")
         if self.auth_type != "none" and not self.credential:
@@ -326,9 +374,9 @@ class PromptContextRequest(BaseModel):
         alias="conversationSummary",
         max_length=100_000,
     )
-    permission_mode: Literal[
-        "full_access", "auto_approve", "request_approval"
-    ] = Field(default="request_approval", alias="permissionMode")
+    permission_mode: Literal["full_access", "auto_approve", "request_approval"] = Field(
+        default="request_approval", alias="permissionMode"
+    )
     permission_rules: list[PermissionRuleRequest] = Field(
         default_factory=list,
         alias="permissionRules",
@@ -364,12 +412,10 @@ class ChatCompletionRequest(BaseModel):
         default_factory=PromptContextRequest,
         alias="promptContext",
     )
-    reasoning_effort: str | None = (
-        Field(
-            default=None,
-            alias="reasoningEffort",
-            min_length=1,
-            max_length=64,
-            pattern=r"^[A-Za-z0-9._-]+$",
-        )
+    reasoning_effort: str | None = Field(
+        default=None,
+        alias="reasoningEffort",
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9._-]+$",
     )

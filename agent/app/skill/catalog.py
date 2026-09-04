@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from itertools import islice
 from pathlib import Path
 from typing import Any, Literal
 
@@ -12,6 +13,8 @@ SkillSource = Literal["project", "user", "builtin"]
 _NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _MAX_SKILL_BYTES = 256 * 1024
 _MAX_RESOURCE_BYTES = 1024 * 1024
+_MAX_RESOURCE_COUNT = 256
+_MAX_RESOURCE_SCAN_ENTRIES = 4_096
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,13 +163,26 @@ class SkillCatalog:
             return None
         directory = file_path.parent
         resources: tuple[str, ...] = ()
-        if file_path.name == "SKILL.md":
+        if include_body and file_path.name == "SKILL.md":
             try:
-                resources = tuple(sorted(
-                    str(path.relative_to(directory)).replace("\\", "/")
-                    for path in directory.rglob("*")
-                    if path.is_file() and path != file_path and not path.is_symlink()
-                ))
+                discovered_resources: list[str] = []
+                for path in islice(
+                    directory.rglob("*"),
+                    _MAX_RESOURCE_SCAN_ENTRIES,
+                ):
+                    if len(discovered_resources) >= _MAX_RESOURCE_COUNT:
+                        break
+                    if (
+                        path == file_path
+                        or path.is_symlink()
+                        or not path.is_file()
+                        or path.stat().st_size > _MAX_RESOURCE_BYTES
+                    ):
+                        continue
+                    discovered_resources.append(
+                        str(path.relative_to(directory)).replace("\\", "/")
+                    )
+                resources = tuple(sorted(discovered_resources))
             except OSError:
                 resources = ()
         return SkillDefinition(
@@ -196,8 +212,10 @@ class SkillCatalog:
             root = definition.directory.resolve(strict=True)
             target = (root / resource_path).resolve(strict=True)
             target.relative_to(root)
+            relative_path = str(target.relative_to(root)).replace("\\", "/")
             if (
-                not target.is_file()
+                relative_path not in definition.resources
+                or not target.is_file()
                 or target.is_symlink()
                 or target.name == "SKILL.md"
                 or target.stat().st_size > _MAX_RESOURCE_BYTES

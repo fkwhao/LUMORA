@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 
 @dataclass(frozen=True, slots=True)
@@ -12,8 +12,15 @@ class McpServerConfig:
     auth_type: str = "none"
     header_name: str | None = None
     credential: str | None = field(default=None, repr=False)
+    transport: Literal["streamable_http", "stdio"] = "streamable_http"
+    command: str | None = None
+    arguments: tuple[str, ...] = field(default=(), repr=False)
+    working_directory: str | None = None
+    environment: Mapping[str, str] = field(default_factory=dict, repr=False)
 
     def authentication_headers(self) -> dict[str, str]:
+        if self.transport == "stdio":
+            return {}
         if self.auth_type == "none":
             return {}
         if not self.credential:
@@ -31,6 +38,8 @@ class McpToolDefinition:
     description: str
     input_schema: Mapping[str, Any]
     annotations: Mapping[str, Any]
+    output_schema: Mapping[str, Any] | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

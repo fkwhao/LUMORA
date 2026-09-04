@@ -12,7 +12,7 @@ Java 21、Spring Boot、MyBatis-Plus 和 SQLite 本地核心。
 - 持久化会话消息和活动上下文 Token，聚合每日及累计 Token 使用统计，并转发模型流式响应。
 - 将 Agent 生成建模为持久化 Run；SSE 连接只负责观察，支持暂停、继续、断线事件重放和重启后安全恢复。
 - 将模型可见的 Assistant tool call 与 Tool Result 轨迹和 UI 工作日志分开封存，续接时只恢复原生协议消息。
-- 保存远程 MCP Server 配置并向当前 Agent 请求提供经解密的临时运行配置。
+- 保存 Streamable HTTP/stdio MCP Server 配置，并只向当前 Agent 请求提供经解密的临时凭据或环境变量。
 - 使用 Windows DPAPI 加密 API Key，并通过 MyBatis-Plus 将密文与模型配置统一保存到 SQLite。
 
 ## 边界
@@ -28,7 +28,7 @@ Java 21、Spring Boot、MyBatis-Plus 和 SQLite 本地核心。
 agent/           Java 调用 Python Agent 的 HTTP Client、DTO 与转换
 approval/        工具审批用例和 API
 conversation/    消息、上下文摘要、Artifact、TokenUsage 与会话流
-mcp/             远程 MCP 配置、认证密文和连接测试
+mcp/             MCP Transport 配置、认证/环境变量密文和连接测试
 memory/          动态 Memory、个性化设置和项目指令同步
 model/           供应商、多模型配置、连接测试与 API 格式
 task/            任务、计划、工作区和任务偏好

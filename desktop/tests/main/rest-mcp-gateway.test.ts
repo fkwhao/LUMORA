@@ -31,6 +31,7 @@ describe("Java REST MCP gateway", () => {
     await gateway.saveServer("remote-echo", {
       name: "Echo",
       enabled: true,
+      transportType: "streamable_http",
       url: "http://127.0.0.1:8765/mcp",
       authType: "none",
     });
@@ -43,10 +44,49 @@ describe("Java REST MCP gateway", () => {
       {
         method: "PUT",
         path: "/api/v1/mcp/servers/remote-echo",
-        body: '{"name":"Echo","enabled":true,"url":"http://127.0.0.1:8765/mcp","authType":"none"}',
+        body: '{"name":"Echo","enabled":true,"transportType":"streamable_http","url":"http://127.0.0.1:8765/mcp","authType":"none"}',
       },
       { method: "POST", path: "/api/v1/mcp/servers/remote-echo/test", body: "" },
     ]);
+  });
+
+  it("serializes a local stdio server configuration", async () => {
+    const requests: string[] = [];
+    const baseUrl = await listen(async (request) => {
+      requests.push(await readBody(request));
+      return {
+        serverId: "local-tools",
+        name: "Local tools",
+        enabled: true,
+        transportType: "stdio",
+        command: "python.exe",
+        arguments: ["-m", "local_tools"],
+        authType: "none",
+      };
+    });
+    const gateway = new RestMcpGateway({ baseUrl, sessionToken: "test-token" });
+
+    await gateway.saveServer("local-tools", {
+      name: "Local tools",
+      enabled: true,
+      transportType: "stdio",
+      command: "python.exe",
+      arguments: ["-m", "local_tools"],
+      workingDirectory: "F:\\project\\local-tools",
+      environment: { API_TOKEN: "secret" },
+      authType: "none",
+    });
+
+    expect(JSON.parse(requests[0] || "{}")).toEqual({
+      name: "Local tools",
+      enabled: true,
+      transportType: "stdio",
+      command: "python.exe",
+      arguments: ["-m", "local_tools"],
+      workingDirectory: "F:\\project\\local-tools",
+      environment: { API_TOKEN: "secret" },
+      authType: "none",
+    });
   });
 });
 

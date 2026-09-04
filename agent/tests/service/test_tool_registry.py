@@ -3,6 +3,7 @@ import threading
 from pathlib import Path
 
 import pytest
+
 from app.tool import (
     ResourceAccess,
     ResourceAccessMode,
@@ -51,6 +52,66 @@ def test_registry_rejects_duplicate_names_and_invalid_input() -> None:
     context = ToolContext(workspace_path=Path.cwd())
     with pytest.raises(ToolInputError, match="缺少必填参数"):
         asyncio.run(registry.execute("echo", context, {}))
+
+
+def test_registry_validates_nested_json_schema() -> None:
+    tool = function_tool(
+        name="nested",
+        description="验证嵌套参数",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "options": {
+                    "type": "object",
+                    "properties": {
+                        "mode": {"enum": ["safe", "fast"]},
+                        "paths": {
+                            "type": "array",
+                            "items": {"type": "string", "minLength": 1},
+                        },
+                    },
+                    "required": ["mode", "paths"],
+                    "additionalProperties": False,
+                }
+            },
+            "required": ["options"],
+            "additionalProperties": False,
+        },
+        execute=lambda _context, _data: ToolResult(content="ok"),
+    )
+    registry = ToolRegistry((tool,))
+
+    registry.validate(
+        "nested",
+        {"options": {"mode": "safe", "paths": ["src"]}},
+    )
+    with pytest.raises(ToolInputError, match="options.mode"):
+        registry.validate(
+            "nested",
+            {"options": {"mode": "unsafe", "paths": ["src"]}},
+        )
+    with pytest.raises(ToolInputError, match="options.paths.0"):
+        registry.validate(
+            "nested",
+            {"options": {"mode": "safe", "paths": [""]}},
+        )
+
+
+def test_registry_rejects_external_schema_references() -> None:
+    tool = function_tool(
+        name="external_ref",
+        description="外部引用",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "value": {"$ref": "https://example.test/schema.json"},
+            },
+        },
+        execute=lambda _context, _data: ToolResult(content="ok"),
+    )
+
+    with pytest.raises(ValueError, match="外部引用"):
+        ToolRegistry((tool,))
 
 
 def test_registry_adds_policy_and_duration_metadata() -> None:

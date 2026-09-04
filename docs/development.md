@@ -54,8 +54,10 @@ Protocol v1 统一入口；它不改变、替换或降级上述任何本地 Prov
 
 Hosted Web Search 按模型显式开启：Responses 与 Anthropic 当前支持，Chat Completions 暂不
 启用。官方套餐模式下该开关来自 Cloud 已发布模型能力，由 Model Gateway 执行供应商托管搜索并把
-搜索进度和引用来源转换为统一事件；本地 BYOK 行为不变。远程 MCP Server 在“设置 → MCP”维护，当前支持 Streamable HTTP、静态认证以及
-Tools/Resources/Resource Templates/Prompts；不支持本地 stdio 和 OAuth。
+搜索进度和引用来源转换为统一事件；本地 BYOK 行为不变。MCP Server 在“设置 → MCP”维护，
+当前通过官方 Python SDK v2 支持 Streamable HTTP、Windows stdio、HTTP 静态认证以及
+Tools/Resources/Resource Templates/Prompts。stdio 环境变量由 Core 使用 DPAPI 加密；
+本地 Server 进程仍以当前 Windows 用户权限运行。OAuth 与 MCP Apps 尚未接入。
 
 ## Python
 

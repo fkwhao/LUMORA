@@ -10,7 +10,7 @@ Python 3.12 Agent 推理与编排运行时。
 - 根 Run 与全部子 Agent 共用请求级执行预算；模型流和只读工具使用带稳定 Effect ID 的有限安全重试，写工具不对未知执行状态自动重放。
 - Chat Completions、OpenAI Responses、Anthropic Messages 三种协议适配，
   对话流式响应、TokenUsage 归一化和模型设置。
-- 文件、PDF 分页读取/检索、Shell、Artifact 与远程 MCP 工具注册、结果保护和权限执行。
+- 文件、PDF 分页读取/检索、Shell、Artifact 与 Streamable HTTP/stdio MCP 工具注册、结果保护和权限执行。
 - 确定性权限分级、自动审批 Reviewer 和人工审批暂停/恢复。
 - Responses 与 Anthropic 的供应商托管 Web Search 事件和来源转换。
 - 通过 REST/SSE 接收 Java 的会话请求并返回统一运行事件。
@@ -18,7 +18,8 @@ Python 3.12 Agent 推理与编排运行时。
   Python 不长期保留被冻结的协程或模型连接。
 - 以不可见 `protocol_message` 输出完整 Assistant/Tool 轨迹；未派发工具在暂停封口时
   获得结构化终止结果，下一 Turn 可直接恢复供应商原生消息。
-- 远程 MCP Session 按任务和配置指纹进入引用计数池，跨 Turn 复用连接与能力目录。
+- MCP Session 按任务、Transport 和完整配置指纹进入引用计数池，跨 Turn 复用连接与能力目录。
+- Skill 发现阶段只加载名称与描述；命中后分块读取 SOP 和有界附属文本资源，拒绝符号链接与目录越界。
 
 ## 边界
 
@@ -49,7 +50,7 @@ app/provider/          三种模型协议适配、路由、流式事件和 Token
 app/prompt/            分层 System Prompt、动态上下文和模板装配
 app/tool/              工具工厂、注册中心和受工作区限制的内置工具
 app/permission/        分层权限策略、Shell 分类与自动 Reviewer
-app/mcp/               远程 Streamable HTTP MCP 客户端和能力适配
+app/mcp/               官方 SDK v2、Streamable HTTP/stdio Transport 和能力适配
 app/subagent/          Supervisor 委派工具、子 Session 边界和事件投影
 app/config/            YAML 运行配置
 app/exception/         运行时异常
@@ -179,12 +180,14 @@ Reviewer 的自然语言业务策略参考
 
 ## MCP
 
-Agent 只连接由 Java Core 在当前请求中提供的远程 Streamable HTTP MCP Server。
-MCP 配置在桌面端设置中维护，静态 Bearer/API Key/自定义 Header 凭据由 Core 使用
-Windows DPAPI 加密，Python 仅在当前请求内使用且不持久化。
+Agent 只连接由 Java Core 在当前请求中提供的 MCP Server。官方 Python SDK v2 负责
+Streamable HTTP 与 Windows stdio 传输，并以自动模式兼容现代协议和旧版初始化握手。
+MCP 配置在桌面端设置中维护；HTTP 静态 Bearer/API Key/自定义 Header 凭据和 stdio
+环境变量由 Core 使用 Windows DPAPI 加密，Python 仅在当前请求内使用且不持久化。
 
 发现的 MCP Tools 会注册到当前请求的 Tool Registry，并继续经过现有权限与审批链路。
-Resources、Resource Templates 与 Prompts 会以只读桥接工具提供给 Agent；远程返回内容
-视为不可信上下文，不能覆盖系统指令和权限策略。当前不启动本地 stdio Server，也不实现
-OAuth、资源订阅或能力变更通知。完整边界见
+Resources、Resource Templates 与 Prompts 会以只读桥接工具提供给 Agent；MCP 返回内容
+视为不可信上下文，不能覆盖系统指令和权限策略。本地 stdio 进程仍拥有当前 Windows
+用户权限，并非 OS 沙箱；只能配置可信 Server，且敏感值应放入加密环境变量而非命令参数。
+当前不实现 OAuth、MCP Apps、资源订阅或能力变更通知。完整边界见
 [`docs/mcp-runtime-design.md`](../docs/mcp-runtime-design.md)。

@@ -1,5 +1,25 @@
 import logging
+import sys
 from pathlib import Path
+
+
+def _same_search_location(entry: str, target: Path) -> bool:
+    try:
+        return Path(entry or Path.cwd()).resolve() == target
+    except (OSError, RuntimeError):
+        return False
+
+
+if not __package__:
+    # Direct IDE/script execution prepends ``agent/app`` to sys.path. That
+    # would make the local ``app/mcp`` package shadow the official ``mcp`` SDK.
+    _script_directory = Path(__file__).resolve().parent
+    sys.path[:] = [
+        entry
+        for entry in sys.path
+        if not _same_search_location(entry, _script_directory)
+    ]
+    sys.path.insert(0, str(_script_directory.parent))
 
 import uvicorn
 from fastapi import FastAPI, Request, status

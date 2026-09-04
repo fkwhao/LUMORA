@@ -1,9 +1,10 @@
+from __future__ import annotations
+
 import asyncio
-import json
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-import httpx
+from mcp import Client as SdkClient
 
 from app.mcp.model import (
     McpPromptArgument,
@@ -14,8 +15,11 @@ from app.mcp.model import (
     McpTestResult,
     McpToolDefinition,
 )
+from app.mcp.transport import McpTransport, create_mcp_transport
 
-_PROTOCOL_VERSION = "2025-11-25"
+_MAX_LIST_PAGES = 100
+_MAX_LIST_ITEMS = 10_000
+_CONNECT_TIMEOUT_SECONDS = 30.0
 
 
 class McpConnectionError(OSError):
@@ -23,43 +27,39 @@ class McpConnectionError(OSError):
 
 
 class McpClient:
-    """MCP client for Tools, Resources and Prompts over Streamable HTTP."""
+    """LUMORA MCP facade backed by the official SDK v2 client."""
 
     def __init__(
         self,
         config: McpServerConfig,
-        http_client: httpx.AsyncClient | None = None,
+        transport: McpTransport | None = None,
     ) -> None:
         self.config = config
-        self._http = http_client
-        self._session_id: str | None = None
-        self._next_request_id = 1
-        self._lock = asyncio.Lock()
+        self._transport = transport or create_mcp_transport(config)
+        self._client: SdkClient | None = None
         self._server_name = config.name
         self._server_version = ""
         self._server_capabilities: dict[str, Any] = {}
 
     async def connect(self) -> None:
-        if self._http is None:
-            self._http = httpx.AsyncClient(timeout=15.0, follow_redirects=False)
-        result = await self._request(
-            "initialize",
-            {
-                "protocolVersion": _PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {"name": "LUMORA", "version": "0.1.0"},
-            },
-        )
-        if not isinstance(result, Mapping):
-            raise McpConnectionError("MCP initialize 返回无效结果")
-        server_info = result.get("serverInfo")
-        if isinstance(server_info, Mapping):
-            self._server_name = str(server_info.get("name") or self.config.name)
-            self._server_version = str(server_info.get("version") or "")
-        capabilities = result.get("capabilities")
-        if isinstance(capabilities, Mapping):
-            self._server_capabilities = dict(capabilities)
-        await self._notify("notifications/initialized", {})
+        if self._client is not None:
+            return
+        try:
+            async with asyncio.timeout(_CONNECT_TIMEOUT_SECONDS):
+                client = await self._transport.connect()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            raise McpConnectionError(self._transport_error(error)) from error
+
+        self._client = client
+        server_info = client.server_info
+        if server_info is not None:
+            self._server_name = server_info.name or self.config.name
+            self._server_version = server_info.version or ""
+        capabilities = client.server_capabilities
+        if capabilities is not None:
+            self._server_capabilities = _model_dict(capabilities)
 
     def supports(self, capability: str) -> bool:
         return capability in self._server_capabilities
@@ -67,18 +67,19 @@ class McpClient:
     async def list_tools(self) -> tuple[McpToolDefinition, ...]:
         if not self.supports("tools"):
             return ()
-        result = await self._request("tools/list", {})
-        if not isinstance(result, Mapping) or not isinstance(result.get("tools"), list):
-            raise McpConnectionError("MCP tools/list 返回无效结果")
+        raw_tools = await self._list_all(self._require_client().list_tools, "tools")
         tools: list[McpToolDefinition] = []
-        for raw in result["tools"]:
-            if not isinstance(raw, Mapping) or not str(raw.get("name") or "").strip():
+        for raw in raw_tools:
+            name = str(raw.get("name") or "").strip()
+            if not name:
                 continue
             schema = raw.get("inputSchema")
+            output_schema = raw.get("outputSchema")
             annotations = raw.get("annotations")
+            metadata = raw.get("_meta")
             tools.append(
                 McpToolDefinition(
-                    name=str(raw["name"]),
+                    name=name,
                     description=str(raw.get("description") or "MCP tool"),
                     input_schema=(
                         dict(schema)
@@ -86,7 +87,17 @@ class McpClient:
                         else {"type": "object", "properties": {}}
                     ),
                     annotations=(
-                        dict(annotations) if isinstance(annotations, Mapping) else {}
+                        dict(annotations)
+                        if isinstance(annotations, Mapping)
+                        else {}
+                    ),
+                    output_schema=(
+                        dict(output_schema)
+                        if isinstance(output_schema, Mapping)
+                        else None
+                    ),
+                    metadata=(
+                        dict(metadata) if isinstance(metadata, Mapping) else {}
                     ),
                 )
             )
@@ -95,7 +106,10 @@ class McpClient:
     async def list_resources(self) -> tuple[McpResourceDefinition, ...]:
         if not self.supports("resources"):
             return ()
-        raw_items = await self._list_all("resources/list", "resources")
+        raw_items = await self._list_all(
+            self._require_client().list_resources,
+            "resources",
+        )
         resources: list[McpResourceDefinition] = []
         for raw in raw_items:
             uri = str(raw.get("uri") or "").strip()
@@ -125,7 +139,7 @@ class McpClient:
         if not self.supports("resources"):
             return ()
         raw_items = await self._list_all(
-            "resources/templates/list",
+            self._require_client().list_resource_templates,
             "resourceTemplates",
         )
         templates: list[McpResourceTemplateDefinition] = []
@@ -152,17 +166,22 @@ class McpClient:
         return tuple(templates)
 
     async def read_resource(self, uri: str) -> Mapping[str, Any]:
-        result = await self._request("resources/read", {"uri": uri})
-        if not isinstance(result, Mapping) or not isinstance(
-            result.get("contents"), list
-        ):
+        result = await self._call(
+            "resources/read",
+            self._require_client().read_resource(uri),
+        )
+        payload = _model_dict(result)
+        if not isinstance(payload.get("contents"), list):
             raise McpConnectionError("MCP resources/read 返回无效结果")
-        return result
+        return payload
 
     async def list_prompts(self) -> tuple[McpPromptDefinition, ...]:
         if not self.supports("prompts"):
             return ()
-        raw_items = await self._list_all("prompts/list", "prompts")
+        raw_items = await self._list_all(
+            self._require_client().list_prompts,
+            "prompts",
+        )
         prompts: list[McpPromptDefinition] = []
         for raw in raw_items:
             name = str(raw.get("name") or "").strip()
@@ -174,7 +193,9 @@ class McpClient:
                 for raw_argument in raw_arguments:
                     if not isinstance(raw_argument, Mapping):
                         continue
-                    argument_name = str(raw_argument.get("name") or "").strip()
+                    argument_name = str(
+                        raw_argument.get("name") or ""
+                    ).strip()
                     if argument_name:
                         arguments.append(
                             McpPromptArgument(
@@ -200,28 +221,31 @@ class McpClient:
         name: str,
         arguments: Mapping[str, Any],
     ) -> Mapping[str, Any]:
-        result = await self._request(
+        result = await self._call(
             "prompts/get",
-            {"name": name, "arguments": dict(arguments)},
+            self._require_client().get_prompt(
+                name,
+                {key: str(value) for key, value in arguments.items()},
+            ),
         )
-        if not isinstance(result, Mapping) or not isinstance(
-            result.get("messages"), list
-        ):
+        payload = _model_dict(result)
+        if not isinstance(payload.get("messages"), list):
             raise McpConnectionError("MCP prompts/get 返回无效结果")
-        return result
+        return payload
 
     async def call_tool(
         self,
         name: str,
         arguments: Mapping[str, Any],
     ) -> Mapping[str, Any]:
-        result = await self._request(
+        result = await self._call(
             "tools/call",
-            {"name": name, "arguments": dict(arguments)},
+            self._require_client().call_tool(name, dict(arguments)),
         )
-        if not isinstance(result, Mapping):
+        payload = _model_dict(result)
+        if not isinstance(payload, Mapping):
             raise McpConnectionError("MCP tools/call 返回无效结果")
-        return result
+        return payload
 
     async def test(self) -> McpTestResult:
         await self.connect()
@@ -229,11 +253,6 @@ class McpClient:
         resources = await self.list_resources()
         resource_templates = await self.list_resource_templates()
         prompts = await self.list_prompts()
-        echo_output: str | None = None
-        echo = next((tool for tool in tools if tool.name == "echo"), None)
-        if echo is not None:
-            result = await self.call_tool("echo", {"text": "LUMORA MCP connected"})
-            echo_output = _content_text(result)
         return McpTestResult(
             server_name=self._server_name,
             server_version=self._server_version,
@@ -243,138 +262,94 @@ class McpClient:
                 template.uri_template for template in resource_templates
             ),
             prompts=tuple(prompt.name for prompt in prompts),
-            echo_output=echo_output,
+            echo_output=None,
         )
 
     async def close(self) -> None:
-        if self._http is not None:
-            await self._http.aclose()
-            self._http = None
+        self._client = None
+        await self._transport.close()
 
-    async def _request(
-        self,
-        method: str,
-        params: Mapping[str, Any],
-    ) -> Any:
-        async with self._lock:
-            request_id = self._next_request_id
-            self._next_request_id += 1
-            message = {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "method": method,
-                "params": dict(params),
-            }
-            response = await self._exchange(message, expect_response=True)
-            if not isinstance(response, Mapping):
-                raise McpConnectionError("MCP Server 返回空响应")
-            if response.get("error") is not None:
-                error = response["error"]
-                detail = error.get("message") if isinstance(error, Mapping) else error
-                raise McpConnectionError(f"MCP 调用失败：{detail}")
-            if response.get("id") != request_id:
-                raise McpConnectionError("MCP 响应 ID 不匹配")
-            return response.get("result")
-
-    async def _notify(self, method: str, params: Mapping[str, Any]) -> None:
-        message = {"jsonrpc": "2.0", "method": method, "params": dict(params)}
-        await self._exchange(message, expect_response=False)
+    def _require_client(self) -> SdkClient:
+        if self._client is None:
+            raise McpConnectionError("MCP Server 尚未连接")
+        return self._client
 
     async def _list_all(
         self,
-        method: str,
+        fetch: Callable[..., Awaitable[Any]],
         result_key: str,
     ) -> tuple[Mapping[str, Any], ...]:
         items: list[Mapping[str, Any]] = []
         cursor: str | None = None
-        for _page in range(100):
-            params = {"cursor": cursor} if cursor else {}
-            result = await self._request(method, params)
-            if not isinstance(result, Mapping) or not isinstance(
-                result.get(result_key), list
-            ):
-                raise McpConnectionError(f"MCP {method} 返回无效结果")
-            items.extend(
-                item for item in result[result_key] if isinstance(item, Mapping)
+        seen_cursors: set[str] = set()
+        for _page in range(_MAX_LIST_PAGES):
+            result = await self._call(
+                result_key,
+                fetch(cursor=cursor),
             )
-            next_cursor = result.get("nextCursor")
+            payload = _model_dict(result)
+            raw_items = payload.get(result_key)
+            if not isinstance(raw_items, list):
+                raise McpConnectionError(
+                    f"MCP {result_key} 列表返回无效结果"
+                )
+            items.extend(
+                item for item in raw_items if isinstance(item, Mapping)
+            )
+            if len(items) > _MAX_LIST_ITEMS:
+                raise McpConnectionError(
+                    f"MCP {result_key} 列表超过安全限制"
+                )
+            next_cursor = payload.get("nextCursor")
             if not isinstance(next_cursor, str) or not next_cursor:
                 return tuple(items)
+            if next_cursor in seen_cursors:
+                raise McpConnectionError(
+                    f"MCP {result_key} 分页游标重复"
+                )
+            seen_cursors.add(next_cursor)
             cursor = next_cursor
-        raise McpConnectionError(f"MCP {method} 分页超过安全限制")
+        raise McpConnectionError(f"MCP {result_key} 分页超过安全限制")
 
-    async def _exchange(
-        self,
-        message: Mapping[str, Any],
-        *,
-        expect_response: bool,
-    ) -> Mapping[str, Any] | None:
-        return await self._exchange_http(message, expect_response=expect_response)
-
-    async def _exchange_http(
-        self,
-        message: Mapping[str, Any],
-        *,
-        expect_response: bool,
-    ) -> Mapping[str, Any] | None:
-        if self._http is None:
-            raise McpConnectionError("Streamable HTTP MCP Server 尚未连接")
-        headers = {
-            "Accept": "application/json, text/event-stream",
-            "Content-Type": "application/json",
-            "MCP-Protocol-Version": _PROTOCOL_VERSION,
-        }
-        headers.update(self.config.authentication_headers())
-        if self._session_id:
-            headers["MCP-Session-Id"] = self._session_id
+    async def _call(self, label: str, awaitable: Awaitable[Any]) -> Any:
         try:
-            response = await self._http.post(
-                self.config.url,
-                headers=headers,
-                json=dict(message),
+            return await awaitable
+        except asyncio.CancelledError:
+            raise
+        except McpConnectionError:
+            raise
+        except Exception as error:
+            detail = _redact(
+                str(error).strip() or type(error).__name__,
+                self.config,
             )
-        except httpx.HTTPError as error:
-            raise McpConnectionError(f"无法连接 MCP Server：{self.config.name}") from error
-        if response.status_code >= 400:
-            raise McpConnectionError(
-                f"MCP Server 返回 HTTP {response.status_code}"
-            )
-        session_id = response.headers.get("MCP-Session-Id")
-        if session_id:
-            self._session_id = session_id
-        if not expect_response or response.status_code == 202:
-            return None
-        content_type = response.headers.get("content-type", "").lower()
-        try:
-            if "text/event-stream" in content_type:
-                return _parse_sse_response(response.text, message.get("id"))
-            payload = response.json()
-        except (json.JSONDecodeError, ValueError) as error:
-            raise McpConnectionError("MCP Server 返回了无效 JSON") from error
-        return payload if isinstance(payload, Mapping) else None
+            raise McpConnectionError(f"MCP {label} 失败：{detail}") from error
+
+    def _transport_error(self, error: Exception) -> str:
+        detail = str(error).strip() or type(error).__name__
+        diagnostics = self._transport.diagnostics()
+        if diagnostics and diagnostics not in detail:
+            detail = f"{detail}\n{diagnostics}"
+        return (
+            f"无法连接 MCP Server：{self.config.name}："
+            f"{_redact(detail, self.config)}"
+        )
 
 
-def _parse_sse_response(text: str, request_id: Any) -> Mapping[str, Any] | None:
-    for line in text.splitlines():
-        if not line.startswith("data:"):
-            continue
-        try:
-            payload = json.loads(line[5:].strip())
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, Mapping) and payload.get("id") == request_id:
-            return payload
-    return None
+def _model_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump(by_alias=True, exclude_none=True)
+        if isinstance(dumped, Mapping):
+            return dict(dumped)
+    raise McpConnectionError("MCP SDK 返回了无法识别的结果")
 
 
-def _content_text(result: Mapping[str, Any]) -> str:
-    parts: list[str] = []
-    content = result.get("content")
-    if isinstance(content, list):
-        for item in content:
-            if isinstance(item, Mapping) and item.get("type") == "text":
-                parts.append(str(item.get("text") or ""))
-    if parts:
-        return "\n".join(parts)
-    structured = result.get("structuredContent")
-    return json.dumps(structured, ensure_ascii=False) if structured is not None else ""
+def _redact(value: str, config: McpServerConfig) -> str:
+    secrets = [config.credential, *config.environment.values()]
+    for secret in secrets:
+        if secret:
+            value = value.replace(secret, "<redacted>")
+    return value

@@ -594,7 +594,7 @@ components:
     McpServer:
       type: object
       additionalProperties: false
-      required: [serverId, name, url]
+      required: [serverId, name, transportType]
       properties:
         serverId:
           type: string
@@ -602,22 +602,68 @@ components:
           maxLength: 80
         name: { type: string, minLength: 1, maxLength: 120 }
         enabled: { type: boolean, default: true }
-        url:
+        transportType:
           type: string
+          enum: [streamable_http, stdio]
+          default: streamable_http
+        url:
+          type: [string, "null"]
           maxLength: 2000
           pattern: '^https?://'
+        command:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 1000
+        arguments:
+          type: array
+          maxItems: 64
+          items: { type: string, maxLength: 2000 }
+        workingDirectory:
+          type: [string, "null"]
+          maxLength: 2000
+        environment:
+          type: object
+          maxProperties: 64
+          propertyNames:
+            pattern: '^[A-Za-z_][A-Za-z0-9_]{0,127}$'
+          additionalProperties:
+            type: string
+            maxLength: 4096
+          writeOnly: true
         authType:
           type: string
           enum: [none, bearer, api_key, custom_header]
           default: none
         headerName:
-          type: string
+          type: [string, "null"]
           maxLength: 100
           pattern: "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"
         credential:
-          type: string
+          type: [string, "null"]
           maxLength: 4096
           writeOnly: true
+      allOf:
+        - if:
+            properties:
+              transportType: { const: streamable_http }
+          then:
+            required: [url]
+            properties:
+              url:
+                type: string
+                minLength: 1
+                maxLength: 2000
+                pattern: '^https?://'
+        - if:
+            properties:
+              transportType: { const: stdio }
+          then:
+            required: [command]
+            properties:
+              command:
+                type: string
+                minLength: 1
+                maxLength: 1000
     McpTestResponse:
       type: object
       additionalProperties: false

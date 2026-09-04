@@ -71,6 +71,64 @@ def test_load_skill_expands_arguments_and_lists_resources(tmp_path: Path) -> Non
     assert escaped.is_error is True
 
 
+def test_load_skill_requires_all_chunks_before_execution(tmp_path: Path) -> None:
+    root = tmp_path / "skills"
+    _write_skill(root, "long-sop", "长流程", "A" * 70_000)
+    catalog = SkillCatalog(
+        user_root=root,
+        builtin_root=tmp_path / "builtin",
+        settings_path=tmp_path / "settings.json",
+    )
+    tool = skill_tools(catalog)[0]
+    context = ToolContext(workspace_path=tmp_path, workspace_scoped=False)
+
+    first = asyncio.run(tool.execute(context, {"name": "long-sop"}))
+    assert first.metadata["complete"] is False
+    assert first.metadata["nextOffset"] == 30_000
+    assert "加载完整前不要开始执行" in first.content
+
+    final = asyncio.run(tool.execute(
+        context,
+        {"name": "long-sop", "offset": 60_000},
+    ))
+    assert final.metadata["complete"] is True
+    assert final.metadata["nextOffset"] is None
+    assert "执行 SOP" in final.content
+
+
+def test_read_skill_resource_returns_bounded_chunks(tmp_path: Path) -> None:
+    root = tmp_path / "skills"
+    _write_skill(root, "long-resource", "长资源", "读取 examples.md")
+    resource_path = root / "long-resource" / "examples.md"
+    resource_path.write_text("R" * 70_000, encoding="utf-8")
+    catalog = SkillCatalog(
+        user_root=root,
+        builtin_root=tmp_path / "builtin",
+        settings_path=tmp_path / "settings.json",
+    )
+    resource_tool = skill_tools(catalog)[1]
+    context = ToolContext(workspace_path=tmp_path, workspace_scoped=False)
+
+    first = asyncio.run(resource_tool.execute(
+        context,
+        {"name": "long-resource", "path": "examples.md"},
+    ))
+    assert first.metadata["complete"] is False
+    assert first.metadata["nextOffset"] == 30_000
+    assert len(first.content) < 31_000
+
+    final = asyncio.run(resource_tool.execute(
+        context,
+        {
+            "name": "long-resource",
+            "path": "examples.md",
+            "offset": 60_000,
+        },
+    ))
+    assert final.content == "R" * 10_000
+    assert final.metadata["complete"] is True
+
+
 def test_prompt_contains_only_skill_discovery_index() -> None:
     from app.skill.catalog import SkillSummary
 

@@ -47,7 +47,7 @@ Python Agent Runtime
 ### Python Agent Runtime
 
 - FastAPI 提供版本化 REST/SSE 接口。
-- 负责三种模型协议的路由与适配、流式响应解析、Agent Harness、动态编排、远程 MCP 和 Hosted Web Search 事件转换。
+- 负责三种模型协议的路由与适配、流式响应解析、Agent Harness、动态编排、MCP 和 Hosted Web Search 事件转换。
 - 当前文件与命令工具由 Python Tool Registry 在 Java 授权的工作区和工具白名单内
   执行；未来浏览器、系统级能力仍应通过单独的受控 Capability 接入。
 - Python 的 Workspace Mutation Coordinator 负责共享 Local 的 Workspace/文件两级锁域、文件
@@ -246,7 +246,7 @@ Desktop 在点击时立即冻结新增输出并退出“正在生成”视觉状
 Token 阈值触发时执行。
 
 继续入口的会话读取和上下文装配在 Run Worker 内执行，HTTP/IPC 不再同步等待整套准备流程；Run
-会先发布“正在恢复执行现场”，随后进入模型或工具阶段。远程 MCP 连接按任务和完整 Server 配置
+会先发布“正在恢复执行现场”，随后进入模型或工具阶段。MCP 连接按任务和完整 Server 配置
 进入带引用计数的有界会话池，同一任务的续接 Turn 直接复用既有 Session 与工具定义；不同 Server
 并行准备，配置变化自动使用新会话，空闲项才允许淘汰，应用退出时统一关闭。因此暂停恢复不会再
 为每个 MCP Server 串行重复 initialize/list_tools，同时仍可安全扩展到多个会话并发。
@@ -510,15 +510,17 @@ Provider 根据模型能力映射、校验或明确拒绝，不允许未知值�
 
 ### MCP 与 Hosted Web Search
 
-远程 MCP Server 配置由 Desktop 设置页经白名单 IPC 写入 Java Core。Core 以
-`application_setting` 保存 Server 配置，使用 DPAPI 加密 Bearer/API Key/自定义 Header 凭据，
-并只在当前模型请求中把临时运行配置交给 Python。Python 按请求相关性发现远程 Streamable HTTP
-MCP 的 Tools、Resources、Resource Templates 与 Prompts；工具统一进入当前请求的 Tool Registry，
-继续接受 Schema 校验、权限判断、自动 Reviewer/HITL、事件投影和结果保护。远程内容一律视为
-不可信上下文。任务内的远程 Session 和工具目录会跨模型 Turn 复用，并以引用计数保护并发使用；
-Server 配置改变时使用新的缓存键，应用退出时关闭全部 Session。当前不支持本地 stdio MCP、OAuth、
+MCP Server 配置由 Desktop 设置页经白名单 IPC 写入 Java Core。Core 以
+`application_setting` 保存 Server 配置，使用 DPAPI 加密 HTTP Bearer/API Key/自定义 Header
+凭据与 stdio 环境变量，并只在当前模型请求中把临时运行配置交给 Python。Python 通过官方
+SDK v2 按请求相关性发现 Streamable HTTP 或 Windows stdio MCP 的 Tools、Resources、
+Resource Templates 与 Prompts；工具统一进入当前请求的 Tool Registry，
+继续接受 Schema 校验、权限判断、自动 Reviewer/HITL、事件投影和结果保护。MCP 返回内容一律视为
+不可信上下文。任务内的 Session 和工具目录会跨模型 Turn 复用，并以引用计数保护并发使用；
+Server 配置改变时使用新的缓存键，应用退出时关闭全部 Session。stdio 子进程由 SDK 的 Windows
+Job Object 生命周期管理，但仍拥有宿主用户权限，不构成 OS 沙箱。当前不支持 OAuth、MCP Apps、
 订阅和能力变更通知，完整边界见
-[MCP 远程能力接入](mcp-runtime-design.md)。
+[MCP 能力接入](mcp-runtime-design.md)。
 
 Hosted Web Search 由模型供应商执行，不经过本地 Shell。Responses 使用原生 `web_search`，Anthropic
 使用原生 Web Search Tool；适配器把搜索状态、错误、引用和来源统一投影为 RunEvent 与工作记录。
