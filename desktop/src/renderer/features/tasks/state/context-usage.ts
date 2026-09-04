@@ -1,9 +1,90 @@
-import type { ChatMessage } from "../../../../shared/model-contract";
-import { normalizeTokenUsage } from "./token-usage";
+import type { ChatMessage, ChatStreamEvent } from "../../../../shared/model-contract";
 
 export interface ContextUsageSnapshot {
   tokens: number;
   estimated: boolean;
+}
+
+/** Renderer-only state; never used for billing or the Agent's compaction policy. */
+export interface ContextUsageState {
+  snapshot: ContextUsageSnapshot;
+  awaitingModelUsage: boolean;
+  updatedDuringRun: boolean;
+}
+
+export function createContextUsageState(
+  messages: ChatMessage[],
+  snapshot = resolveContextUsage(messages),
+): ContextUsageState {
+  return { snapshot, awaitingModelUsage: false, updatedDuringRun: false };
+}
+
+export function beginContextUsage(
+  state: ContextUsageState,
+  messages: ChatMessage[],
+): ContextUsageState {
+  return createContextUsageState(
+    messages,
+    state.snapshot.tokens > 0 ? state.snapshot : undefined,
+  );
+}
+
+/**
+ * Agent Loop emits an assistant protocol message before each settled model
+ * usage, and tool protocol messages before intermediate context estimates.
+ * Use that boundary instead of letting streaming text or cumulative billing
+ * snapshots move the context indicator.
+ */
+export function reduceContextUsage(
+  state: ContextUsageState,
+  event: ChatStreamEvent,
+): ContextUsageState {
+  if (event.type === "protocol_message") {
+    const message = event.metadata?.message;
+    if (!message || typeof message !== "object" || !("role" in message)) {
+      return state;
+    }
+    const awaitingModelUsage = message.role === "assistant";
+    return awaitingModelUsage === state.awaitingModelUsage
+      ? state
+      : { ...state, awaitingModelUsage };
+  }
+  if (event.type === "context_compacted") {
+    const tokens = positive(event.activeContextTokens)
+      || positiveNumber(event.metadata?.afterTokens);
+    return tokens > 0 ? settledContextUsage(tokens) : state;
+  }
+  if (
+    event.type !== "usage"
+    || event.metadata?.usageProvisional === true
+    || !state.awaitingModelUsage
+  ) return state;
+  const tokens = positive(event.activeContextTokens);
+  return tokens > 0
+    ? settledContextUsage(tokens)
+    : { ...state, awaitingModelUsage: false };
+}
+
+/** History/billing refreshes must not replace an already settled live sample. */
+export function reconcileContextUsage(
+  state: ContextUsageState,
+  messages: ChatMessage[],
+): ContextUsageState {
+  return state.updatedDuringRun
+    ? { ...state, awaitingModelUsage: false }
+    : createContextUsageState(messages);
+}
+
+function settledContextUsage(tokens: number): ContextUsageState {
+  return {
+    snapshot: { tokens, estimated: true },
+    awaitingModelUsage: false,
+    updatedDuringRun: true,
+  };
+}
+
+function positiveNumber(value: unknown): number {
+  return typeof value === "number" ? positive(value) : 0;
 }
 
 export interface ContextBreakdownPart {
@@ -13,12 +94,11 @@ export interface ContextBreakdownPart {
 }
 
 /**
- * Project the next request's prompt pressure from the newest provider anchor.
- *
- * Provider usage describes the prompt that produced an assistant message, so
- * that assistant message and everything after it are estimated as additions to
- * the next prompt. This intentionally stays separate from durable cumulative
- * billing totals, which repeatedly include earlier conversation history.
+ * Restore the latest recorded context sample, not a projection of the next
+ * request. Draft assistant text can move into the work log during tool calls;
+ * adding it to the sample would make the indicator grow and shrink mid-turn.
+ * Cumulative TokenUsage is billing data and must never be a context fallback.
+ * The event contract has no accuracy flag, so samples remain labelled "约".
  */
 export function resolveContextUsage(
   messages: ChatMessage[],
@@ -28,8 +108,7 @@ export function resolveContextUsage(
     const anchorTokens = providerPromptAnchor(projectionMessages[index]);
     if (anchorTokens > 0) {
       return {
-        tokens: anchorTokens
-          + estimateConversationTokens(projectionMessages.slice(index)),
+        tokens: anchorTokens,
         estimated: true,
       };
     }
@@ -95,6 +174,7 @@ function contextProjectionMessages(messages: ChatMessage[]): ChatMessage[] {
     ),
   );
   const visit = (message: ChatMessage) => {
+    if (message.usageRecordOnly && !isFailedProviderUsageRecord(message)) return;
     const id = message.messageId ?? message.runtimeId;
     if (id ? seenIds.has(id) : seenObjects.has(message)) return;
     if (id) seenIds.add(id);
@@ -135,10 +215,7 @@ function isFailedProviderUsageRecord(message: ChatMessage): boolean {
 
 function providerPromptAnchor(message: ChatMessage | undefined): number {
   if (!message || message.role !== "assistant") return 0;
-  const activeContextTokens = positive(message.activeContextTokens);
-  if (activeContextTokens > 0) return activeContextTokens;
-  const usage = normalizeTokenUsage(message.usage);
-  return usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
+  return positive(message.activeContextTokens);
 }
 
 function estimateMessageTokens(message: ChatMessage): number {

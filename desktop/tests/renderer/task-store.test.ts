@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type {
   ChatMessage,
+  ChatStreamEvent,
   ConversationInput,
   ConversationRunSnapshot,
   LumoraModelApi,
@@ -12,6 +13,7 @@ import type {
   TaskSnapshot,
 } from "../../src/shared/task-contract";
 import { createTaskStore } from "../../src/renderer/features/tasks/task-store";
+import { cancelSupplementalUsageRefresh } from "../../src/renderer/features/tasks/state/chat-event-handler";
 import { TASK_PROJECT_PATHS_STORAGE_KEY } from "../../src/renderer/constants/storage";
 
 const createdTask: TaskSnapshot = {
@@ -512,6 +514,7 @@ describe("task store", () => {
       activeContextTokens: 2_800,
       workLog: [expect.objectContaining({ status: "completed" })],
     });
+    expect(store.getState().contextUsage.snapshot.tokens).toBe(2_800);
   });
 
   it("replaces the latest answer after editing the latest user message", async () => {
@@ -865,6 +868,7 @@ describe("task store", () => {
           messageId: "paused-assistant-1",
           role: "assistant",
           content: "已经完成扫描",
+          activeContextTokens: 3_000,
         },
       ])
       .mockResolvedValueOnce([
@@ -873,8 +877,9 @@ describe("task store", () => {
           messageId: "paused-assistant-1",
           role: "assistant",
           content: "已经完成扫描",
+          activeContextTokens: 3_000,
         },
-        { messageId: "assistant-1", role: "assistant", content: "整理完成" },
+        { messageId: "assistant-1", role: "assistant", content: "整理完成", activeContextTokens: 4_000 },
       ]);
     let onRunEvent: Parameters<LumoraModelApi["subscribeRun"]>[3] | undefined;
     vi.mocked(modelApi.subscribeRun).mockImplementation(
@@ -889,6 +894,7 @@ describe("task store", () => {
 
     const pendingResume = store.getState().resumeChat();
     await Promise.resolve();
+    expect(store.getState().contextUsage.snapshot.tokens).toBe(3_000);
     expect(store.getState().messages.at(-1)).toMatchObject({
       role: "assistant",
       content: "",
@@ -929,6 +935,8 @@ describe("task store", () => {
       },
     });
     await pendingResume;
+
+    expect(store.getState().contextUsage.snapshot.tokens).toBe(4_000);
 
     expect(modelApi.resumeRun).toHaveBeenCalledWith(
       createdTask.taskId,
@@ -1078,6 +1086,7 @@ describe("task store", () => {
         messageId: "assistant-1",
         role: "assistant" as const,
         content: "remembered",
+        activeContextTokens: 10,
         usage: {
           promptTokens: 10,
           completionTokens: 2,
@@ -1114,6 +1123,7 @@ describe("task store", () => {
         errorMessage: "",
       });
       await pending;
+      const settledContext = store.getState().contextUsage.snapshot;
       await vi.advanceTimersByTimeAsync(5_000);
 
       expect(
@@ -1123,6 +1133,8 @@ describe("task store", () => {
           ),
         ),
       ).toBe(true);
+      expect(store.getState().contextUsage.snapshot).toBe(settledContext);
+      expect(settledContext.tokens).toBe(10);
     } finally {
       vi.clearAllTimers();
       vi.useRealTimers();
@@ -1396,6 +1408,179 @@ describe("task store", () => {
     localStorage.clear();
   });
 });
+
+describe("task context display lifecycle", () => {
+  it.each(["local", "cloud"])("keeps %s tool-stage text and estimates out of the ring", async (mode) => {
+    const api = createApi();
+    const modelApi = createModelApi();
+    const history: ChatMessage[] = [
+      { messageId: "old-user", role: "user", content: "旧问题" },
+      { messageId: "old-answer", role: "assistant", content: "旧回答", activeContextTokens: 2_000 },
+    ];
+    vi.mocked(modelApi.listMessages)
+      .mockResolvedValueOnce(history)
+      .mockResolvedValueOnce([
+        ...history,
+        { messageId: "new-user", role: "user", content: "编辑文件" },
+        { messageId: "new-answer", role: "assistant", content: "完成", activeContextTokens: 3_000 },
+      ]);
+    const store = createTaskStore(api, modelApi);
+    await store.getState().openTask(createdTask.taskId);
+    const pending = store.getState().sendMessage("编辑文件");
+    const emit = vi.mocked(modelApi.streamMessage).mock.calls[0]![2];
+    const baseline = store.getState().contextUsage.snapshot;
+    emit(contextEvent("text_delta", { delta: "正在分析文件".repeat(2_000) }));
+    emit(contextEvent("usage", {
+      activeContextTokens: 40_000,
+      usage: { promptTokens: 40_000, completionTokens: 100, totalTokens: 40_100 },
+      metadata: { usageProvisional: true },
+    }));
+    expect(store.getState().messages.at(-1)?.content.length).toBeGreaterThan(10_000);
+    expect(store.getState().messages.at(-1)?.usage?.totalTokens).toBe(40_100);
+    expect(store.getState().contextUsage.snapshot).toBe(baseline);
+    emit(contextEvent("progress_message", {
+      itemId: "stage-1",
+      delta: "正在分析文件",
+      metadata: { replacesAssistantContent: true },
+    }));
+    expect(store.getState().messages.at(-1)?.content).toBe("");
+    expect(store.getState().contextUsage.snapshot).toBe(baseline);
+    emit(contextEvent("protocol_message", { metadata: { message: { role: "assistant" } } }));
+    emit(contextEvent("usage", { activeContextTokens: 4_000 }));
+    const settled = store.getState().contextUsage.snapshot;
+    expect(settled.tokens).toBe(4_000);
+    emit(contextEvent("protocol_message", { metadata: { message: { role: "tool" } } }));
+    emit(contextEvent("usage", { activeContextTokens: mode === "local" ? 24_000 : 4_000 }));
+    emit(contextEvent("text_delta", { delta: "已编辑".repeat(2_000) }));
+    emit(contextEvent("text_reset"));
+    expect(store.getState().contextUsage.snapshot).toBe(settled);
+    emit(contextEvent("text_delta", { delta: "完成" }));
+    emit(contextEvent("protocol_message", { metadata: { message: { role: "assistant" } } }));
+    emit(contextEvent("usage", { activeContextTokens: 3_000 }));
+    const finalSnapshot = store.getState().contextUsage.snapshot;
+    emit(contextEvent("completed"));
+    await pending;
+    expect(store.getState().messages.at(-1)?.messageId).toBe("new-answer");
+    expect(store.getState().contextUsage.snapshot).toBe(finalSnapshot);
+    expect(finalSnapshot.tokens).toBe(3_000);
+    cancelSupplementalUsageRefresh(createdTask.taskId);
+  });
+
+  it("preserves a pending model boundary in the task cache without leaking it to another task", async () => {
+    const api = createApi();
+    const modelApi = createModelApi();
+    vi.mocked(api.get).mockImplementation(async (taskId) => ({ ...createdTask, taskId }));
+    vi.mocked(modelApi.listMessages).mockImplementation(async (taskId) => [
+      { role: "user", content: taskId },
+      { role: "assistant", content: "", activeContextTokens: taskId === "task-1" ? 2_000 : 900 },
+    ]);
+    vi.mocked(modelApi.getActiveRun).mockImplementation(async (taskId) =>
+      taskId === "task-1" ? activeRun("RUNNING") : undefined,
+    );
+    const store = createTaskStore(api, modelApi);
+    await store.getState().openTask("task-1");
+    vi.mocked(modelApi.subscribeRun).mock.calls[0]![3]({
+      runId: "run-1", sequence: 1, occurredAt: "2026-09-04T00:00:00Z",
+      event: contextEvent("protocol_message", { metadata: { message: { role: "assistant" } } }),
+    });
+    const firstState = store.getState().contextUsage;
+    expect(firstState.awaitingModelUsage).toBe(true);
+    await store.getState().openTask("task-2");
+    expect(store.getState().contextUsage.snapshot.tokens).toBe(900);
+    expect(store.getState().contextUsage.awaitingModelUsage).toBe(false);
+    await store.getState().openTask("task-1");
+    expect(store.getState().contextUsage).toBe(firstState);
+    expect(vi.mocked(modelApi.subscribeRun).mock.lastCall?.[2]).toBe(1);
+    vi.mocked(modelApi.subscribeRun).mock.lastCall![3]({
+      runId: "run-1", sequence: 2, occurredAt: "2026-09-04T00:00:01Z",
+      event: contextEvent("usage", { activeContextTokens: 4_000 }),
+    });
+    expect(store.getState().contextUsage.snapshot.tokens).toBe(4_000);
+    store.getState().clearActiveTask();
+    expect(store.getState().contextUsage.snapshot.tokens).toBe(0);
+  });
+
+  it.each(["paused", "failed"] as const)("retains the settled sample when a run is %s after a tool", async (type) => {
+    const modelApi = createModelApi();
+    vi.mocked(modelApi.listMessages)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { role: "user", content: "继续" },
+        { role: "assistant", content: "已完成一步", activeContextTokens: 24_000 },
+      ]);
+    const store = createTaskStore(createApi(), modelApi);
+    await store.getState().openTask(createdTask.taskId);
+    const pending = store.getState().sendMessage("继续");
+    const emit = vi.mocked(modelApi.streamMessage).mock.calls[0]![2];
+    emit(contextEvent("protocol_message", { metadata: { message: { role: "assistant" } } }));
+    emit(contextEvent("usage", { activeContextTokens: 4_000 }));
+    emit(contextEvent("protocol_message", { metadata: { message: { role: "tool" } } }));
+    emit(contextEvent("usage", { activeContextTokens: 24_000 }));
+    emit(contextEvent(type));
+    await pending;
+    expect(store.getState().isChatting).toBe(false);
+    expect(store.getState().contextUsage.snapshot.tokens).toBe(4_000);
+  });
+
+  it("ignores a terminal history response arriving after the user switches tasks", async () => {
+    const api = createApi();
+    const modelApi = createModelApi();
+    vi.mocked(api.get).mockImplementation(async (taskId) => ({ ...createdTask, taskId }));
+    let finishOldRefresh!: (messages: ChatMessage[]) => void;
+    vi.mocked(modelApi.listMessages)
+      .mockResolvedValueOnce([])
+      .mockImplementationOnce(() => new Promise((resolve) => { finishOldRefresh = resolve; }))
+      .mockResolvedValueOnce([
+        { role: "assistant", content: "另一任务", activeContextTokens: 9_000 },
+      ]);
+    const store = createTaskStore(api, modelApi);
+    await store.getState().openTask("task-1");
+    const pending = store.getState().sendMessage("继续");
+    vi.mocked(modelApi.streamMessage).mock.calls[0]![2](contextEvent("completed"));
+    await store.getState().openTask("task-2");
+    finishOldRefresh([{ role: "assistant", content: "旧任务完成", activeContextTokens: 4_000 }]);
+    await pending;
+    expect(store.getState().activeTask?.taskId).toBe("task-2");
+    expect(store.getState().messages[0]?.content).toBe("另一任务");
+    expect(store.getState().contextUsage.snapshot.tokens).toBe(9_000);
+  });
+
+  it("reseeds the snapshot when regenerating or switching a message branch", async () => {
+    const modelApi = createModelApi();
+    const history: ChatMessage[] = [
+      { messageId: "user-old", role: "user", content: "原问题" },
+      { messageId: "answer-old", role: "assistant", content: "原回答", activeContextTokens: 2_000 },
+      { messageId: "user-current", role: "user", content: "当前问题" },
+      { messageId: "answer-current", role: "assistant", content: "待替换", activeContextTokens: 8_000 },
+    ];
+    vi.mocked(modelApi.listMessages)
+      .mockResolvedValueOnce(history)
+      .mockResolvedValueOnce([
+        ...history.slice(0, 3),
+        { messageId: "new-answer", role: "assistant", content: "新回答", activeContextTokens: 3_000 },
+      ])
+      .mockResolvedValueOnce(history);
+    modelApi.activateMessageBranch = vi.fn(async () => undefined);
+    const store = createTaskStore(createApi(), modelApi);
+    await store.getState().openTask(createdTask.taskId);
+    expect(store.getState().contextUsage.snapshot.tokens).toBe(8_000);
+    const pending = store.getState().regenerateMessage("user-current", "重写问题");
+    expect(store.getState().contextUsage.snapshot.tokens).toBe(2_000);
+    vi.mocked(modelApi.regenerateMessage).mock.calls[0]![3](contextEvent("completed"));
+    await pending;
+    expect(store.getState().contextUsage.snapshot.tokens).toBe(3_000);
+    await store.getState().switchMessageBranch("answer-current");
+    expect(store.getState().contextUsage.snapshot.tokens).toBe(8_000);
+    cancelSupplementalUsageRefresh(createdTask.taskId);
+  });
+});
+
+function contextEvent(
+  type: ChatStreamEvent["type"],
+  fields: Partial<ChatStreamEvent> = {},
+): ChatStreamEvent {
+  return { type, delta: "", model: "demo", errorMessage: "", ...fields };
+}
 
 function createApi(): LumoraTaskApi {
   return {

@@ -73,8 +73,32 @@ def _settings() -> ModelConnectionSettings:
     )
 
 
+def _cloud_settings() -> ModelConnectionSettings:
+    return ModelConnectionSettings(
+        provider_name="LUMORA Cloud",
+        base_url="http://127.0.0.1:4567",
+        model="test-model",
+        api_key="cloud-token",
+        api_format="lumora-cloud",
+    )
+
+
 def test_agent_loop_streams_tool_lifecycle_before_final_answer() -> None:
-    asyncio.run(_assert_tool_lifecycle_before_final_answer())
+    asyncio.run(
+        _assert_tool_lifecycle_before_final_answer(
+            _settings(),
+            stable_during_tools=False,
+        )
+    )
+
+
+def test_agent_loop_keeps_cloud_context_stable_while_tools_run() -> None:
+    asyncio.run(
+        _assert_tool_lifecycle_before_final_answer(
+            _cloud_settings(),
+            stable_during_tools=True,
+        )
+    )
 
 
 def test_agent_loop_forwards_final_answer_deltas_in_tool_mode() -> None:
@@ -1613,7 +1637,11 @@ async def _assert_final_answer_deltas_are_forwarded() -> None:
     assert events[-1].type == "completed"
 
 
-async def _assert_tool_lifecycle_before_final_answer() -> None:
+async def _assert_tool_lifecycle_before_final_answer(
+    connection_settings: ModelConnectionSettings,
+    *,
+    stable_during_tools: bool,
+) -> None:
     turns = iter((
         ProviderTurn(
             content="我先读取文件。",
@@ -1663,7 +1691,7 @@ async def _assert_tool_lifecycle_before_final_answer() -> None:
     events = [
         event
         async for event in AgentLoopRunner(complete_turn).stream(
-            _settings(),
+            connection_settings,
             PromptAssembly(()),
             [ChatMessageRequest(role="user", content="读取")],
             None,
@@ -1693,7 +1721,10 @@ async def _assert_tool_lifecycle_before_final_answer() -> None:
         30,
     ]
     assert usage_events[0].active_context_tokens == 10
-    assert usage_events[1].active_context_tokens > 10
+    if stable_during_tools:
+        assert usage_events[1].active_context_tokens == 10
+    else:
+        assert usage_events[1].active_context_tokens > 10
     assert usage_events[2].active_context_tokens == 15
     assert captured_messages[1][-1]["role"] == "tool"
     assert "文件内容" in str(captured_messages[1][-1]["content"])

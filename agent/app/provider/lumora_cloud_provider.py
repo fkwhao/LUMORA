@@ -1,4 +1,5 @@
 import json
+import re
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import replace
@@ -7,7 +8,15 @@ from typing import Any, Literal, cast
 import httpx
 
 from app.context.estimator import TokenEstimator
-from app.dto.response.chat_completion_response import TokenUsageResponse
+from app.dto.request.chat_completion_request import ChatMessageRequest
+from app.dto.response.chat_completion_response import (
+    ChatCompletionResponse,
+    TokenUsageResponse,
+)
+from app.dto.response.memory_extraction_response import (
+    MemoryCandidateResponse,
+    MemoryExtractionResponse,
+)
 from app.harness.contracts import (
     ProviderToolCall,
     ProviderTurn,
@@ -15,10 +24,12 @@ from app.harness.contracts import (
     ProviderWebSource,
 )
 from app.model.model_connection_settings import ModelConnectionSettings
+from app.prompt.prompt_assembly import PromptAssembly
 from app.prompt.prompt_loader import PromptLoader
 from app.provider.attachment_content import openai_chat_messages
 from app.provider.http_client import create_model_http_client
 from app.provider.protocol_provider import ProtocolProviderBase
+from app.provider.token_usage import add_token_usage
 
 CloudWebSearchEventType = Literal[
     "web_search_started",
@@ -29,6 +40,19 @@ CloudWebSearchEventType = Literal[
 
 _CONTEXT_ANCHOR_KEY = "_lumoraCloudContext"
 _CONTEXT_ANCHOR_VERSION = 1
+_MEMORY_EXTRACTION_PROMPT_KEY = "memory.extraction"
+_MEMORY_EXTRACTION_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "candidates": {
+            "type": "array",
+            "maxItems": 8,
+            "items": MemoryCandidateResponse.model_json_schema(by_alias=True),
+        },
+    },
+    "required": ["candidates"],
+    "additionalProperties": False,
+}
 
 
 class LumoraCloudProvider(ProtocolProviderBase):
@@ -62,12 +86,97 @@ class LumoraCloudProvider(ProtocolProviderBase):
         # must not probe provider-native model-list endpoints.
         return [settings.model]
 
+    async def complete(
+        self,
+        settings: ModelConnectionSettings,
+        prompt: PromptAssembly,
+        messages: list[ChatMessageRequest],
+        reasoning_effort: str | None = None,
+    ) -> ChatCompletionResponse:
+        if not _is_memory_extraction_prompt(prompt):
+            return await super().complete(
+                settings,
+                prompt,
+                messages,
+                reasoning_effort,
+            )
+
+        cloud_settings = replace(settings, web_search_enabled=False)
+        request_messages: list[dict[str, Any]] = [
+            cast(dict[str, Any], message)
+            for message in (*prompt.system_messages, *prompt.context_messages)
+        ]
+        request_messages.extend(
+            cast(dict[str, Any], message.as_provider_message())
+            for message in messages
+        )
+        first = await self._complete_cloud_turn(
+            cloud_settings,
+            request_messages,
+            prompt.tools,
+            reasoning_effort,
+            response_schema=_MEMORY_EXTRACTION_RESPONSE_SCHEMA,
+        )
+        try:
+            normalized = _normalize_memory_extraction_json(first.content)
+            return _completion_response(first, normalized)
+        except (TypeError, ValueError):
+            pass
+
+        repaired = await self._complete_cloud_turn(
+            cloud_settings,
+            [
+                *request_messages,
+                {"role": "assistant", "content": first.content},
+                {
+                    "role": "user",
+                    "content": (
+                        "上一条输出不是有效的记忆提取 JSON。请修复格式，"
+                        "并且只输出一个符合既定 candidates Schema 的 JSON 对象；"
+                        "不要输出 Markdown 或解释。"
+                    ),
+                },
+            ],
+            prompt.tools,
+            reasoning_effort,
+            response_schema=_MEMORY_EXTRACTION_RESPONSE_SCHEMA,
+        )
+        combined_usage = add_token_usage((first.usage, repaired.usage))
+        try:
+            response = _completion_response(
+                repaired,
+                _normalize_memory_extraction_json(repaired.content),
+            )
+        except (TypeError, ValueError):
+            response = ChatCompletionResponse(
+                message=repaired.content.strip(),
+                model=repaired.model,
+                usage=repaired.usage,
+            )
+        return response.model_copy(update={"usage": combined_usage})
+
     async def complete_agent_turn(
         self,
         settings: ModelConnectionSettings,
         messages: list[dict[str, Any]],
         tools: tuple[dict[str, Any], ...],
         reasoning_effort: str | None,
+    ) -> ProviderTurn:
+        return await self._complete_cloud_turn(
+            settings,
+            messages,
+            tools,
+            reasoning_effort,
+        )
+
+    async def _complete_cloud_turn(
+        self,
+        settings: ModelConnectionSettings,
+        messages: list[dict[str, Any]],
+        tools: tuple[dict[str, Any], ...],
+        reasoning_effort: str | None,
+        *,
+        response_schema: dict[str, Any] | None = None,
     ) -> ProviderTurn:
         active_context_estimate, request_projection_tokens = (
             self._context_estimates(messages, tools)
@@ -81,6 +190,7 @@ class LumoraCloudProvider(ProtocolProviderBase):
                 tools,
                 reasoning_effort,
                 stream=False,
+                response_schema=response_schema,
             ),
             timeout=120.0,
         )
@@ -100,6 +210,7 @@ class LumoraCloudProvider(ProtocolProviderBase):
         reasoning_effort: str | None,
     ) -> AsyncIterator[ProviderTurnEvent]:
         completed: ProviderTurn | None = None
+        latest_usage: TokenUsageResponse | None = None
         web_search_seen = False
         active_context_estimate, request_projection_tokens = (
             self._context_estimates(messages, tools)
@@ -166,22 +277,14 @@ class LumoraCloudProvider(ProtocolProviderBase):
                         model=model,
                     )
                 elif event_type == "usage":
-                    usage = _usage(event.get("usage"))
-                    yield ProviderTurnEvent(
-                        type="usage",
-                        model=model,
-                        usage=(
-                            _normalize_web_search_usage(
-                                usage,
-                                active_context_estimate,
-                            )
-                            if web_search_seen
-                            else usage
-                        ),
-                        usage_estimated=False,
-                    )
+                    # Cloud usage events are cumulative billing snapshots, not
+                    # active-context deltas. Buffer them so the UI does not use
+                    # transient provider-side work as a context anchor.
+                    latest_usage = _usage(event.get("usage"))
                 elif event_type == "completed":
                     completed = _parse_turn(event, settings.model)
+                    if not _has_usage(completed.usage) and latest_usage is not None:
+                        completed = replace(completed, usage=latest_usage)
                     completed = _finalize_cloud_turn(
                         completed,
                         active_context_estimate,
@@ -243,6 +346,7 @@ def _request_body(
     reasoning_effort: str | None,
     *,
     stream: bool,
+    response_schema: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     body: dict[str, Any] = {
         "protocolVersion": "1",
@@ -258,6 +362,8 @@ def _request_body(
         generation["maxOutputTokens"] = settings.max_output_tokens
     if reasoning_effort:
         generation["reasoningEffort"] = reasoning_effort
+    if response_schema is not None:
+        generation["responseSchema"] = response_schema
     return body
 
 
@@ -342,6 +448,63 @@ def _parse_turn(payload: dict[str, Any], fallback_model: str) -> ProviderTurn:
 
 def _usage(value: Any) -> TokenUsageResponse:
     return TokenUsageResponse.model_validate(value if isinstance(value, dict) else {})
+
+
+def _has_usage(usage: TokenUsageResponse) -> bool:
+    return any(
+        (
+            usage.prompt_tokens,
+            usage.completion_tokens,
+            usage.total_tokens,
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.reasoning_tokens,
+            usage.cache_read_tokens,
+            usage.cache_write_tokens,
+        )
+    )
+
+
+def _is_memory_extraction_prompt(prompt: PromptAssembly) -> bool:
+    return any(
+        segment.key == _MEMORY_EXTRACTION_PROMPT_KEY for segment in prompt.segments
+    )
+
+
+def _normalize_memory_extraction_json(value: str) -> str:
+    normalized = value.strip()
+    fenced = re.fullmatch(
+        r"```(?:json)?\s*(\{.*\})\s*```",
+        normalized,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    if fenced:
+        normalized = fenced.group(1)
+    else:
+        start = normalized.find("{")
+        end = normalized.rfind("}")
+        if start < 0 or end < start:
+            raise ValueError("云端记忆提取响应不包含 JSON 对象")
+        normalized = normalized[start : end + 1]
+    parsed = json.loads(normalized)
+    if not isinstance(parsed, dict):
+        raise TypeError("云端记忆提取响应必须是 JSON 对象")
+    validated = MemoryExtractionResponse.model_validate(parsed)
+    payload = validated.model_dump(
+        by_alias=True,
+        exclude={"model", "usage"},
+    )
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def _completion_response(turn: ProviderTurn, content: str) -> ChatCompletionResponse:
+    if turn.tool_calls or not content.strip():
+        raise ValueError("云端记忆提取响应缺少最终 JSON")
+    return ChatCompletionResponse(
+        message=content.strip(),
+        model=turn.model,
+        usage=turn.usage,
+    )
 
 
 def _finalize_cloud_turn(

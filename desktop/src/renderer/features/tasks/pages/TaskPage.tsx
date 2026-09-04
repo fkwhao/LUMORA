@@ -127,7 +127,6 @@ import {
   loadContextPaneWidth,
   saveContextPaneWidth,
 } from "../../layout/context-pane-preferences";
-import { resolveContextUsage } from "../state/context-usage";
 import {
   citationsFromMessage,
   citationTabId,
@@ -204,6 +203,7 @@ export const TaskPage = memo(function TaskPage({
 }: TaskPageProps) {
   const task = useStore(store, (state) => state.activeTask);
   const messages = useStore(store, (state) => state.messages);
+  const contextUsage = useStore(store, (state) => state.contextUsage.snapshot);
   const isLoadingHistory = useStore(
     store,
     (state) => state.isLoadingHistory,
@@ -1744,7 +1744,6 @@ export const TaskPage = memo(function TaskPage({
   const contextLimit = modelSettings?.models.find(
     (model) => model.modelId === selectedModel,
   )?.contextWindow ?? modelSettings?.contextWindow ?? 128_000;
-  const contextUsage = resolveContextUsage(messages);
   const contextTokens = contextUsage.tokens;
   const contextPercent = Math.min(
     100,
@@ -2309,7 +2308,7 @@ export const TaskPage = memo(function TaskPage({
                     role="tooltip"
                   >
                     <span>
-                      {isChatting ? "当前模型请求：" : "最近一次模型请求："}
+                      上下文占用快照：
                     </span>
                     <strong>
                       {contextUsage.estimated ? "约 " : ""}

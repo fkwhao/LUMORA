@@ -27,6 +27,12 @@ import {
 } from "./chat-event-handler";
 import { reconcilePersistedMessages } from "./chat-message-reconciliation";
 import {
+  beginContextUsage,
+  createContextUsageState,
+  reconcileContextUsage,
+  type ContextUsageState,
+} from "./context-usage";
+import {
   createChatEventBatcher,
   type ChatEventBatcher,
 } from "./chat-event-batcher";
@@ -62,6 +68,7 @@ export interface TaskState {
   error?: string;
   chatError?: string;
   messages: ChatMessage[];
+  contextUsage: ContextUsageState;
   taskEvents: TaskEvent[];
   taskProjectPaths: Record<string, string>;
   pendingToolApproval?: ToolApprovalRequest;
@@ -121,6 +128,7 @@ const HISTORY_MAX_RENDER_PASSES = 12;
 interface ConversationCacheEntry {
   task: TaskSnapshot;
   messages: ChatMessage[];
+  contextUsage: ContextUsageState;
   activeRun?: ConversationRunSnapshot;
   pendingInputs: ConversationInput[];
   taskEvents: TaskEvent[];
@@ -144,6 +152,7 @@ function conversationCacheEntry(
     messages: state.isHydratingHistory
       ? (previous?.messages ?? state.messages)
       : state.messages,
+    contextUsage: state.contextUsage,
     activeRun: state.activeRun,
     pendingInputs: state.pendingInputs,
     taskEvents: state.taskEvents,
@@ -301,6 +310,7 @@ export function createTaskStore(
     error: undefined,
     chatError: undefined,
     messages: [],
+    contextUsage: createContextUsageState([]),
     taskEvents: [],
     taskProjectPaths: loadTaskProjectPaths(),
     pendingToolApproval: undefined,
@@ -402,6 +412,7 @@ export function createTaskStore(
         activeRun: cached?.activeRun,
         pendingInputs: cached?.pendingInputs ?? [],
         messages: cachedWindow?.messages ?? [],
+        contextUsage: cached?.contextUsage ?? createContextUsageState([]),
         taskEvents: cached?.taskEvents ?? [],
         isLoadingHistory: !cached,
         isHydratingHistory: Boolean(cachedWindow?.hasEarlierMessages),
@@ -496,6 +507,9 @@ export function createTaskStore(
               resumeCachedRun ? restoredCache?.chatStartedAt : undefined,
             )
           : undefined;
+        const restoredContextUsage = resumeCachedRun && restoredCache
+          ? restoredCache.contextUsage
+          : createContextUsageState(runMessages);
         const restoredTaskEvents = resumeCachedRun
           ? (restoredCache?.taskEvents ?? [])
           : [];
@@ -519,6 +533,7 @@ export function createTaskStore(
         conversationCache.set(taskId, {
           task,
           messages: runMessages,
+          contextUsage: restoredContextUsage,
           activeRun: restoredRun,
           pendingInputs,
           taskEvents: restoredTaskEvents,
@@ -543,6 +558,7 @@ export function createTaskStore(
           activeRun: restoredRun,
           pendingInputs,
           messages: historyWindow.messages,
+          contextUsage: restoredContextUsage,
           taskEvents: restoredTaskEvents,
           isLoadingHistory: false,
           isHydratingHistory: historyWindow.hasEarlierMessages,
@@ -628,6 +644,7 @@ export function createTaskStore(
           pendingInputs: [],
           isCreating: false,
           messages: [],
+          contextUsage: createContextUsageState([]),
           isLoadingHistory: false,
           isHydratingHistory: false,
           historyHydrationProgress: 1,
@@ -709,6 +726,7 @@ export function createTaskStore(
       set({
         activeRun: undefined,
         messages,
+        contextUsage: beginContextUsage(get().contextUsage, messages),
         taskEvents: [],
         isChatting: true,
         isPausing: false,
@@ -909,7 +927,14 @@ export function createTaskStore(
       try {
         const result = await modelApi.compactContext(task.taskId, model);
         const messages = await modelApi.listMessages(task.taskId);
-        set({ messages, isCompacting: false });
+        set({
+          messages,
+          isCompacting: false,
+          contextUsage: createContextUsageState(messages, {
+            tokens: result.afterTokens,
+            estimated: true,
+          }),
+        });
         if (messages.length === 0) {
           set({
             messages: updateContextWorkLog(get().messages, {
@@ -982,6 +1007,10 @@ export function createTaskStore(
               messages: paused
                 ? reconcilePausedMessages(get().messages, persistedMessages)
                 : reconcilePersistedMessages(get().messages, persistedMessages),
+              contextUsage: reconcileContextUsage(
+                get().contextUsage,
+                persistedMessages,
+              ),
             });
           }
         } catch {
@@ -1071,6 +1100,7 @@ export function createTaskStore(
       cancelSupplementalUsageRefresh(taskId);
       set({
         messages: appendContinuationAssistant(previousMessages),
+        contextUsage: beginContextUsage(get().contextUsage, previousMessages),
         isChatting: true,
         isPausing: false,
         chatWasStopped: false,
@@ -1203,6 +1233,7 @@ export function createTaskStore(
       set({
         activeRun: undefined,
         messages,
+        contextUsage: createContextUsageState(messages),
         taskEvents: [],
         isChatting: true,
         isPausing: false,
@@ -1263,7 +1294,9 @@ export function createTaskStore(
       if (!taskId || !modelApi?.activateMessageBranch) return;
       await modelApi.activateMessageBranch(taskId, messageId);
       const messages = await modelApi.listMessages(taskId);
-      set({ messages });
+      if (get().activeTask?.taskId === taskId) {
+        set({ messages, contextUsage: createContextUsageState(messages) });
+      }
     },
 
     async decideApproval(decision) {
@@ -1417,6 +1450,7 @@ export function createTaskStore(
         error: undefined,
         chatError: undefined,
         messages: [],
+        contextUsage: createContextUsageState([]),
         taskEvents: [],
         isLoadingHistory: false,
         isHydratingHistory: false,

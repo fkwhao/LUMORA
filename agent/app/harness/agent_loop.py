@@ -613,7 +613,11 @@ class AgentLoopRunner:
                 type="usage",
                 model=resolved_model,
                 usage=_to_run_usage(cumulative_usage),
-                active_context_tokens=active_tokens,
+                active_context_tokens=(
+                    active_context_tokens
+                    if settings.api_format == "lumora-cloud"
+                    else active_tokens
+                ),
             )
             tool_fingerprint = _tool_iteration_fingerprint(
                 turn.tool_calls,

@@ -5,6 +5,7 @@ import type {
 } from "../../../../shared/model-contract";
 import { workLogItemFromEvent } from "../../../../shared/work-log";
 import { reconcilePersistedMessages } from "./chat-message-reconciliation";
+import { reconcileContextUsage, reduceContextUsage } from "./context-usage";
 import type { TaskState } from "./task-store";
 
 const supplementalUsageRefreshDelaysMs = [5_000, 15_000, 30_000, 60_000, 120_000];
@@ -31,6 +32,7 @@ export function applyChatEvent(
   set: (partial: Partial<TaskState>) => void,
   resolve: () => void,
 ): void {
+  if (get().activeTask?.taskId !== taskId) return;
   if (
     get().isPausing &&
     event.type !== "paused" &&
@@ -42,6 +44,8 @@ export function applyChatEvent(
     // reconciles the complete resumable state.
     return;
   }
+  const contextUsage = reduceContextUsage(get().contextUsage, event);
+  if (contextUsage !== get().contextUsage) set({ contextUsage });
   if (event.type === "steer_claimed") {
     if (event.itemId && event.delta.trim()) {
       set({
@@ -189,6 +193,12 @@ export function applyChatEvent(
   const lastChatDurationMs = chatStartedAt
     ? Date.now() - chatStartedAt
     : undefined;
+  // A task switch or a new run replaces this state object. Do not let an old
+  // terminal history request overwrite that newer conversation or snapshot.
+  const terminalContextUsage = get().contextUsage;
+  const isCurrentSettlement = () =>
+    get().activeTask?.taskId === taskId
+    && get().contextUsage === terminalContextUsage;
   if (event.type === "paused") {
     const currentRun = get().activeRun;
     set({
@@ -206,9 +216,14 @@ export function applyChatEvent(
     void modelApi
       .listMessages(taskId)
       .then((persistedMessages) => {
+        if (!isCurrentSettlement()) return;
         set({
           messages: reconcilePersistedMessages(
             get().messages,
+            persistedMessages,
+          ),
+          contextUsage: reconcileContextUsage(
+            terminalContextUsage,
             persistedMessages,
           ),
         });
@@ -238,9 +253,14 @@ export function applyChatEvent(
     void modelApi
       .listMessages(taskId)
       .then((persistedMessages) => {
+        if (!isCurrentSettlement()) return;
         set({
           messages: reconcilePersistedMessages(
             get().messages,
+            persistedMessages,
+          ),
+          contextUsage: reconcileContextUsage(
+            terminalContextUsage,
             persistedMessages,
           ),
         });
@@ -269,6 +289,7 @@ export function applyChatEvent(
     void modelApi
       .listMessages(taskId)
       .then((persistedMessages) => {
+        if (!isCurrentSettlement()) return;
         const liveAssistant = get().messages.at(-1);
         const messages =
           persistedMessages.at(-1)?.role === "assistant" ||
@@ -281,6 +302,7 @@ export function applyChatEvent(
         set({
           activeRun: failedRun,
           messages,
+          contextUsage: reconcileContextUsage(terminalContextUsage, messages),
           isChatting: false,
           isPausing: false,
           chatWasStopped: false,
@@ -291,7 +313,8 @@ export function applyChatEvent(
           isDecidingToolApproval: false,
         });
       })
-      .catch(() =>
+      .catch(() => {
+        if (!isCurrentSettlement()) return;
         set({
           activeRun: failedRun,
           isChatting: false,
@@ -302,8 +325,8 @@ export function applyChatEvent(
           chatError: event.errorMessage || "模型流式响应失败",
           pendingToolApproval: undefined,
           isDecidingToolApproval: false,
-        }),
-      )
+        });
+      })
       .finally(resolve);
   }
 }

@@ -150,8 +150,9 @@ describe("visible task flow", () => {
       "context-usage-tooltip",
     );
     expect(screen.getByRole("tooltip")).toHaveTextContent(
-      /最近一次模型请求：约 0% 已用已用约 \d+ 标记，共 128k/,
+      /上下文占用快照：约 0% 已用已用约 \d+ 标记，共 128k/,
     );
+    expect(screen.getByRole("tooltip")).not.toHaveTextContent("结算或压缩后更新");
     fireEvent.click(contextUsageButton);
     expect(contextUsageButton).not.toHaveAttribute("aria-describedby");
     expect(screen.getByRole("complementary", {

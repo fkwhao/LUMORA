@@ -5,7 +5,16 @@ from dataclasses import replace
 import httpx
 
 from app.context.estimator import TokenEstimator
+from app.dto.request.chat_completion_request import ChatMessageRequest
 from app.model.model_connection_settings import ModelConnectionSettings
+from app.prompt.prompt_assembly import PromptAssembly
+from app.prompt.prompt_segment import (
+    PromptCachePolicy,
+    PromptPriority,
+    PromptSegment,
+    PromptTarget,
+    PromptTrustLevel,
+)
 from app.provider.lumora_cloud_provider import LumoraCloudProvider
 
 
@@ -18,6 +27,21 @@ def settings() -> ModelConnectionSettings:
         max_output_tokens=2048,
         context_window=128_000,
         api_format="lumora-cloud",
+    )
+
+
+def memory_prompt() -> PromptAssembly:
+    return PromptAssembly(
+        (
+            PromptSegment(
+                key="memory.extraction",
+                target=PromptTarget.SYSTEM,
+                content="Return memory candidates as JSON.",
+                trust_level=PromptTrustLevel.TRUSTED,
+                priority=PromptPriority.REQUIRED,
+                cache_policy=PromptCachePolicy.STATIC,
+            ),
+        )
     )
 
 
@@ -97,6 +121,79 @@ async def _assert_complete_uses_internal_protocol_without_provider_format() -> N
     assert turn.usage.reasoning_tokens == 1
 
 
+def test_memory_completion_repairs_invalid_cloud_json_once() -> None:
+    asyncio.run(_assert_memory_completion_repairs_invalid_cloud_json_once())
+
+
+async def _assert_memory_completion_repairs_invalid_cloud_json_once() -> None:
+    captured: list[dict[str, object]] = []
+    responses = [
+        {
+            "protocolVersion": "1",
+            "model": "lumora-test",
+            "result": {
+                "content": "not-json",
+                "reasoning": "",
+                "model": "lumora-test",
+                "toolCalls": [],
+            },
+            "usage": {
+                "promptTokens": 10,
+                "completionTokens": 2,
+                "totalTokens": 12,
+            },
+        },
+        {
+            "protocolVersion": "1",
+            "model": "lumora-test",
+            "result": {
+                "content": '```json\n{"candidates": []}\n```',
+                "reasoning": "",
+                "model": "lumora-test",
+                "toolCalls": [],
+            },
+            "usage": {
+                "promptTokens": 5,
+                "completionTokens": 1,
+                "totalTokens": 6,
+            },
+        },
+    ]
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert isinstance(body, dict)
+        captured.append(body)
+        return httpx.Response(200, json=responses.pop(0))
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = LumoraCloudProvider(http_client=client)
+    completion = await provider.complete(
+        replace(settings(), web_search_enabled=True),
+        memory_prompt(),
+        [ChatMessageRequest(role="user", content='{"turn":"remember me"}')],
+    )
+    await client.aclose()
+
+    assert completion.message == '{"candidates":[]}'
+    assert completion.usage.prompt_tokens == 15
+    assert completion.usage.completion_tokens == 3
+    assert completion.usage.total_tokens == 18
+    assert len(captured) == 2
+    for body in captured:
+        assert body["features"] == {"webSearch": False}
+        generation = body["generation"]
+        assert isinstance(generation, dict)
+        schema = generation["responseSchema"]
+        assert isinstance(schema, dict)
+        assert schema["required"] == ["candidates"]
+        assert schema["properties"]["candidates"]["maxItems"] == 8
+    retry_messages = captured[1]["messages"]
+    assert isinstance(retry_messages, list)
+    assert retry_messages[-2]["role"] == "assistant"
+    assert retry_messages[-1]["role"] == "user"
+
+
 def test_stream_parses_lumora_events() -> None:
     asyncio.run(_assert_stream_parses_lumora_events())
 
@@ -172,14 +269,14 @@ async def _assert_stream_normalizes_only_web_search_active_context() -> None:
         ],
     }
     body = "\n".join([
-        'data: {"protocolVersion":"1","type":"web_search_started","resolvedModel":"lumora-test","itemId":"search-1","query":"LUMORA"}',
-        "",
         "data: " + json.dumps({
             "protocolVersion": "1",
             "type": "usage",
             "resolvedModel": "lumora-test",
             "usage": raw_usage,
         }),
+        "",
+        'data: {"protocolVersion":"1","type":"web_search_started","resolvedModel":"lumora-test","itemId":"search-1","query":"LUMORA"}',
         "",
         "data: " + json.dumps({
             "protocolVersion": "1",
@@ -221,19 +318,77 @@ async def _assert_stream_normalizes_only_web_search_active_context() -> None:
     ]
     await client.aclose()
 
-    usage_event = next(event for event in events if event.type == "usage")
+    assert [event.type for event in events] == [
+        "web_search_started",
+        "completed",
+    ]
     completed = events[-1].turn
-    assert usage_event.usage is not None
     assert completed is not None
     expected_prompt = TokenEstimator().estimate_messages([
         {"role": "assistant", "content": "previous answer"},
         {"role": "user", "content": "搜索 LUMORA"},
     ]) + TokenEstimator().estimate_tools(())
-    assert usage_event.usage.prompt_tokens == expected_prompt
-    assert completed.usage.prompt_tokens == usage_event.usage.prompt_tokens
+    assert completed.usage.prompt_tokens == expected_prompt
     assert completed.usage.total_tokens == raw_usage["totalTokens"]
     assert completed.usage.input_tokens == raw_usage["inputTokens"]
     assert completed.usage.cache_read_tokens == raw_usage["cacheReadTokens"]
+
+
+def test_stream_uses_buffered_usage_when_completed_event_omits_it() -> None:
+    asyncio.run(_assert_stream_uses_buffered_usage_when_completed_event_omits_it())
+
+
+async def _assert_stream_uses_buffered_usage_when_completed_event_omits_it() -> None:
+    raw_usage = {
+        "promptTokens": 12,
+        "completionTokens": 3,
+        "totalTokens": 15,
+        "inputTokens": 12,
+        "outputTokens": 3,
+        "reasoningTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "cacheMetricsAvailable": False,
+    }
+    body = "\n".join(
+        [
+            "data: "
+            + json.dumps(
+                {
+                    "protocolVersion": "1",
+                    "type": "usage",
+                    "resolvedModel": "lumora-test",
+                    "usage": raw_usage,
+                }
+            ),
+            "",
+            'data: {"protocolVersion":"1","type":"completed","resolvedModel":"lumora-test","result":{"content":"done","reasoning":"","model":"lumora-test","toolCalls":[]}}',
+            "",
+            "data: [DONE]",
+            "",
+        ]
+    )
+
+    async def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text=body,
+            headers={"Content-Type": "text/event-stream"},
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = LumoraCloudProvider(http_client=client)
+    events = [
+        event
+        async for event in provider.stream_agent_turn(
+            settings(), [{"role": "user", "content": "hello"}], (), None
+        )
+    ]
+    await client.aclose()
+
+    assert [event.type for event in events] == ["completed"]
+    assert events[0].turn is not None
+    assert events[0].turn.usage.total_tokens == 15
 
 
 def test_stream_keeps_cloud_prompt_usage_without_actual_web_search() -> None:
