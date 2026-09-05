@@ -9,6 +9,7 @@ import httpx
 
 from app.artifact.store import ArtifactStore
 from app.context.planner import ContextPlanner
+from app.context.usage import ContextUsageSnapshot
 from app.dto.request.artifact_request import ArtifactReadRequest, ArtifactSearchRequest
 from app.dto.request.chat_completion_request import ChatCompletionRequest
 from app.dto.request.model_list_request import ModelListRequest
@@ -378,6 +379,7 @@ class ChatService:
                             f"{plan.after_tokens} Token"
                         ),
                         metadata={
+                            **ContextUsageSnapshot(plan.after_tokens).as_metadata(),
                             "summary": plan.summary,
                             "beforeTokens": plan.before_tokens,
                             "afterTokens": plan.after_tokens,
@@ -933,6 +935,7 @@ async def _stream_with_background_events(
         background_usage = _sum_run_usage(background_usage, event.usage)
         metadata = dict(event.metadata)
         metadata.pop("usageDelta", None)
+        metadata.pop("contextUsage", None)
         return replace(
             event,
             usage=_sum_run_usage(root_usage, background_usage),

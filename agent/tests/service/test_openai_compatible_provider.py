@@ -237,6 +237,8 @@ def test_agent_turn_stream_stops_at_done_marker(monkeypatch) -> None:
     assert events[-1].turn is not None
     assert events[-1].turn.content == "完成"
     assert events[-1].turn.usage.total_tokens == 6
+    assert events[-1].turn.context_snapshot().tokens == 4
+    assert events[-1].turn.context_snapshot().estimated is False
 
 
 def test_agent_turn_stream_estimates_usage_before_disconnect(monkeypatch) -> None:
@@ -273,3 +275,34 @@ def test_agent_turn_stream_estimates_usage_before_disconnect(monkeypatch) -> Non
     assert usage_events[1].usage is not None
     assert usage_events[1].usage.completion_tokens == 40
     assert usage_events[1].usage_estimated is True
+
+
+def test_settled_context_remains_estimated_when_provider_omits_usage(monkeypatch) -> None:
+    async def without_usage(self):
+        yield "data: " + json.dumps({
+            "choices": [{"delta": {"content": "done"}}],
+        })
+        yield "data: [DONE]"
+
+    monkeypatch.setattr(_StreamingResponse, "aiter_lines", without_usage)
+    monkeypatch.setattr(
+        "app.provider.openai_compatible_provider.httpx.AsyncClient",
+        _StreamingClient,
+    )
+
+    async def collect():
+        return [
+            event
+            async for event in OpenAICompatibleProvider().stream_agent_turn(
+                ModelConnectionSettings(
+                    provider_name="test", base_url="https://example.com",
+                    model="example-model", api_key="secret",
+                ),
+                [{"role": "user", "content": "hello"}], (), None,
+            )
+        ]
+
+    turn = asyncio.run(collect())[-1].turn
+    assert turn is not None
+    assert turn.context_snapshot().tokens > 0
+    assert turn.context_snapshot().estimated is True

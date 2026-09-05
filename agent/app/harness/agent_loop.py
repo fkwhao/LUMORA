@@ -11,6 +11,7 @@ import httpx
 
 from app.context.estimator import TokenEstimator
 from app.context.planner import ContextPlanner
+from app.context.usage import ContextUsageSnapshot
 from app.dto.request.chat_completion_request import ChatMessageRequest
 from app.dto.response.chat_completion_response import TokenUsageResponse
 from app.execution.budget import BudgetExceeded
@@ -334,10 +335,7 @@ class AgentLoopRunner:
                             type="usage",
                             model=turn_event.model or resolved_model,
                             usage=_to_run_usage(preview_usage),
-                            active_context_tokens=(
-                                provisional_usage.prompt_tokens
-                                or active_context_tokens
-                            ),
+                            active_context_tokens=active_context_tokens,
                             metadata={
                                 "usageProvisional": True,
                                 "usageEstimated": turn_event.usage_estimated,
@@ -471,10 +469,11 @@ class AgentLoopRunner:
                     )
                     yield _budget_failed_event(error, resolved_model)
                     return
-            active_context_tokens = turn.usage.prompt_tokens or (
+            context_usage = turn.context_snapshot(
                 self._token_estimator.estimate_messages(request_messages)
                 + self._token_estimator.estimate_tools(prompt.tools)
             )
+            active_context_tokens = context_usage.tokens
             assistant_message = _assistant_protocol_message(turn)
             yield _protocol_message_event(assistant_message, resolved_model)
             if not turn.tool_calls:
@@ -489,6 +488,7 @@ class AgentLoopRunner:
                     model=resolved_model,
                     usage=_to_run_usage(cumulative_usage),
                     active_context_tokens=active_context_tokens,
+                    metadata=context_usage.as_metadata(),
                 )
                 pending_steers = (
                     run_control.close_and_claim_steers()
@@ -534,6 +534,7 @@ class AgentLoopRunner:
                 model=resolved_model,
                 usage=_to_run_usage(cumulative_usage),
                 active_context_tokens=active_context_tokens,
+                metadata=context_usage.as_metadata(),
             )
             request_messages.append(assistant_message)
             pending_tool_messages: list[dict[str, Any]] = []
@@ -604,7 +605,7 @@ class AgentLoopRunner:
                 return
 
             active_tokens = self._token_estimator.estimate_hybrid(
-                turn.usage.prompt_tokens,
+                active_context_tokens,
                 pending_tool_messages,
                 request_messages,
                 prompt.tools,
@@ -613,11 +614,7 @@ class AgentLoopRunner:
                 type="usage",
                 model=resolved_model,
                 usage=_to_run_usage(cumulative_usage),
-                active_context_tokens=(
-                    active_context_tokens
-                    if settings.api_format == "lumora-cloud"
-                    else active_tokens
-                ),
+                active_context_tokens=active_context_tokens,
             )
             tool_fingerprint = _tool_iteration_fingerprint(
                 turn.tool_calls,
@@ -702,12 +699,14 @@ class AgentLoopRunner:
                         self._token_estimator.estimate_messages(request_messages)
                         + self._token_estimator.estimate_tools(prompt.tools)
                     )
+                    active_context_tokens = after_tokens
                     yield RunEvent(
                         type="context_compacted",
                         item_id=compact_item_id,
                         title="已压缩上下文",
                         delta=f"已压缩上下文 · {active_tokens} → {after_tokens} Token",
                         metadata={
+                            **ContextUsageSnapshot(after_tokens).as_metadata(),
                             "summary": active_summary,
                             "beforeTokens": active_tokens,
                             "afterTokens": after_tokens,

@@ -84,7 +84,9 @@ export interface ChatMessage {
   attachments?: MessageAttachment[];
   model?: string;
   usage?: TokenUsage;
+  /** Latest settled request input or post-compaction estimate; never billing usage. */
   activeContextTokens?: number;
+  activeContextEstimated?: boolean;
   durationMs?: number;
   workLog?: WorkLogItem[];
   workLogJson?: string;

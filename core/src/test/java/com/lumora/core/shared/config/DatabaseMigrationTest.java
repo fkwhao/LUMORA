@@ -53,6 +53,16 @@ class DatabaseMigrationTest {
     }
 
     @Test
+    void keepsLegacyContextSamplesEstimated() {
+        String defaultValue = jdbcTemplate.queryForObject(
+                "SELECT dflt_value FROM pragma_table_info('conversation_message') "
+                        + "WHERE name = 'active_context_estimated'",
+                String.class
+        );
+        assertThat(defaultValue).isEqualTo("1");
+    }
+
+    @Test
     void appliesAllSchemaChangesOnlyOnceToTheSameDatabase() throws Exception {
         Integer businessTableCount = jdbcTemplate.queryForObject(
                 """
@@ -90,7 +100,7 @@ class DatabaseMigrationTest {
                 "parent_message_id", "message_depth", "active_path",
                 "input_tokens", "output_tokens", "reasoning_tokens",
                 "cache_read_tokens", "cache_write_tokens",
-                "cache_metrics_available"
+                "cache_metrics_available", "active_context_estimated"
         );
         assertThat(taskPlanStepPrimaryKeyColumns())
                 .containsExactly("plan_step_id");

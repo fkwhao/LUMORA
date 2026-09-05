@@ -307,3 +307,12 @@ databaseChangeLog:
             relativeToChangelogFile: false
             splitStatements: true
             stripComments: false
+  - changeSet:
+      id: 035-context-usage-snapshot
+      author: lumora
+      changes:
+        - sqlFile:
+            path: db/migration/V35__context_usage_snapshot.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+            stripComments: false

@@ -14,6 +14,68 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class ConversationStreamAccumulatorTest {
 
     @Test
+    void keepsOnlySettledContextSamplesWhileBillingContinuesUpdating() {
+        var accumulator = new ConversationStreamAccumulator();
+        var usage = new TokenUsage(40_000, 500, 40_500);
+        accumulator.accept(contextEvent(ChatStreamEventType.USAGE, 40_000, usage,
+                Map.of("contextUsage", Map.of("tokens", 4_000, "estimated", false))));
+        accumulator.accept(protocolEvent(Map.of("role", "tool", "content", "result")));
+        accumulator.accept(contextEvent(ChatStreamEventType.USAGE, 24_000, usage, Map.of()));
+        accumulator.accept(contextEvent(ChatStreamEventType.USAGE, 80_000, usage,
+                Map.of("usageProvisional", true,
+                        "contextUsage", Map.of("tokens", 80_000, "estimated", true))));
+        accumulator.accept(contextEvent(ChatStreamEventType.COMPLETED, 90_000, null, Map.of()));
+        assertThat(accumulator.getActiveContextTokens()).isEqualTo(4_000);
+        assertThat(accumulator.isActiveContextEstimated()).isFalse();
+        assertThat(accumulator.getUsage().getTotalTokens()).isEqualTo(40_500);
+
+        ChatStreamEvent compacted = contextEvent(ChatStreamEventType.CONTEXT_COMPACTED, 800, null,
+                Map.of("contextUsage", Map.of("tokens", 800, "estimated", true)));
+        ChatStreamEvent projected = WorkLogEventProjector.project(compacted);
+        assertThat(projected.getMetadata()).containsEntry(
+                "contextUsage", Map.of("tokens", 800, "estimated", true));
+        accumulator.accept(projected);
+        assertThat(accumulator.getActiveContextTokens()).isEqualTo(800);
+        assertThat(accumulator.isActiveContextEstimated()).isTrue();
+    }
+
+    @Test
+    void supportsLegacyModelBoundariesWithoutSavingToolProjections() {
+        var accumulator = new ConversationStreamAccumulator();
+        accumulator.accept(protocolEvent(Map.of("role", "assistant")));
+        accumulator.accept(contextEvent(ChatStreamEventType.USAGE, 4_000, null, Map.of()));
+        accumulator.accept(protocolEvent(Map.of("role", "tool")));
+        accumulator.accept(contextEvent(ChatStreamEventType.USAGE, 24_000, null, Map.of()));
+        assertThat(accumulator.getActiveContextTokens()).isEqualTo(4_000);
+        assertThat(accumulator.isActiveContextEstimated()).isTrue();
+        accumulator.accept(protocolEvent(Map.of("role", "assistant")));
+        accumulator.accept(contextEvent(ChatStreamEventType.USAGE, 3_000, null, Map.of()));
+        assertThat(accumulator.getActiveContextTokens()).isEqualTo(3_000);
+    }
+
+    @Test
+    void ignoresInvalidExplicitSamplesWithoutFallingBackToBilling() {
+        var accumulator = new ConversationStreamAccumulator();
+        accumulator.accept(contextEvent(ChatStreamEventType.USAGE, 0, null,
+                Map.of("contextUsage", Map.of("tokens", 4_000, "estimated", false))));
+        for (Object tokens : List.of(-1, 0, 1.5, Double.NaN, Double.POSITIVE_INFINITY,
+                2_147_483_648L, "9000")) {
+            accumulator.accept(contextEvent(ChatStreamEventType.USAGE, 90_000, null,
+                    Map.of("contextUsage", Map.of("tokens", tokens))));
+            assertThat(accumulator.getActiveContextTokens()).isEqualTo(4_000);
+            assertThat(accumulator.isActiveContextEstimated()).isFalse();
+        }
+    }
+
+    private static ChatStreamEvent contextEvent(
+            ChatStreamEventType type, int tokens, TokenUsage usage, Map<String, Object> metadata
+    ) {
+        return new ChatStreamEvent(type, "", "model", usage, "",
+                "", "", "", "", Map.of(), "", 0L, null, metadata,
+                "", "", "", "", null, "", tokens);
+    }
+
+    @Test
     void resetsProvisionalAnswerBeforePersistingFinalText() {
         ConversationStreamAccumulator accumulator =
                 new ConversationStreamAccumulator();

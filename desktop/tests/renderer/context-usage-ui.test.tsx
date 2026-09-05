@@ -60,7 +60,10 @@ it("renders the same settled snapshot in the context ring and usage pane during 
   act(() => {
     for (const event of [
       { type: "protocol_message" as const, metadata: { message: { role: "assistant" } } },
-      { type: "usage" as const, activeContextTokens: 25_600 },
+      {
+        type: "usage" as const, activeContextTokens: 90_000,
+        metadata: { contextUsage: { tokens: 25_600, estimated: false } },
+      },
     ]) {
       applyChatEvent(
         { delta: "", model: "demo", errorMessage: "", ...event },
@@ -73,5 +76,6 @@ it("renders the same settled snapshot in the context ring and usage pane during 
     }
   });
   expect(ring).toHaveAttribute("stroke-dasharray", "20 100");
-  expect(screen.getByText("约 20%")).toBeVisible();
+  expect(screen.getByText("20%")).toBeVisible();
+  expect(screen.queryByText("约 20%")).not.toBeInTheDocument();
 });

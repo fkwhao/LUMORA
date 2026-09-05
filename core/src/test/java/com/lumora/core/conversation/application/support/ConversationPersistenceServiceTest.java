@@ -1,6 +1,7 @@
 package com.lumora.core.conversation.application.support;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lumora.core.conversation.api.converter.ConversationMessageResponseConverter;
 import com.lumora.core.conversation.domain.entity.Conversation;
 import com.lumora.core.conversation.domain.entity.ConversationMessage;
 import com.lumora.core.conversation.domain.model.ChatMessageRole;
@@ -191,7 +192,9 @@ class ConversationPersistenceServiceTest {
                 "demo-model",
                 new TokenUsage(10, 2, 12),
                 ""
-        ));
+        ).withMetadata(Map.of("contextUsage", Map.of(
+                "tokens", 10, "estimated", false
+        ))));
 
         service.persistPausedTurn(context, accumulator, "run-1:0");
 
@@ -205,6 +208,11 @@ class ConversationPersistenceServiceTest {
         assertThat(saved.isUsageRecordOnly()).isFalse();
         assertThat(saved.getParentMessageId()).isEqualTo("user-1");
         assertThat(saved.getTotalTokens()).isEqualTo(12);
+        assertThat(saved.getActiveContextTokens()).isEqualTo(10);
+        assertThat(saved.isActiveContextEstimated()).isFalse();
+        var response = new ConversationMessageResponseConverter().fromEntity(saved);
+        assertThat(response.getActiveContextTokens()).isEqualTo(10);
+        assertThat(response.isActiveContextEstimated()).isFalse();
         assertThat(saved.getWorkLogJson()).contains("progress-1");
         assertThat(saved.getWorkLogJson()).contains(
                 RunProtocolContextCodec.markerItemId("run-1:0")

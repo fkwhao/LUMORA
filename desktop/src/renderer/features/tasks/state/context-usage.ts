@@ -30,10 +30,9 @@ export function beginContextUsage(
 }
 
 /**
- * Agent Loop emits an assistant protocol message before each settled model
- * usage, and tool protocol messages before intermediate context estimates.
- * Use that boundary instead of letting streaming text or cumulative billing
- * snapshots move the context indicator.
+ * Explicit samples are emitted only for settled main requests and compaction.
+ * Protocol boundaries support older Agent events without accepting temporary
+ * tool estimates or cumulative billing snapshots.
  */
 export function reduceContextUsage(
   state: ContextUsageState,
@@ -49,35 +48,67 @@ export function reduceContextUsage(
       ? state
       : { ...state, awaitingModelUsage };
   }
-  if (event.type === "context_compacted") {
-    const tokens = positive(event.activeContextTokens)
-      || positiveNumber(event.metadata?.afterTokens);
-    return tokens > 0 ? settledContextUsage(tokens) : state;
+  const compacted = event.type === "context_compacted";
+  if (!compacted && (
+    event.type !== "usage" || event.metadata?.usageProvisional === true
+  )) return state;
+
+  if (event.metadata && "contextUsage" in event.metadata) {
+    const snapshot = parseContextSnapshot(event.metadata.contextUsage);
+    return snapshot
+      ? settledContextUsage(snapshot)
+      : { ...state, awaitingModelUsage: false };
   }
-  if (
-    event.type !== "usage"
-    || event.metadata?.usageProvisional === true
-    || !state.awaitingModelUsage
-  ) return state;
-  const tokens = positive(event.activeContextTokens);
+  if (!compacted && !state.awaitingModelUsage) return state;
+  const tokens = positive(event.activeContextTokens)
+    || (compacted ? positiveNumber(event.metadata?.afterTokens) : 0);
   return tokens > 0
-    ? settledContextUsage(tokens)
+    ? settledContextUsage({ tokens, estimated: true })
     : { ...state, awaitingModelUsage: false };
 }
 
-/** History/billing refreshes must not replace an already settled live sample. */
+function parseContextSnapshot(value: unknown): ContextUsageSnapshot | undefined {
+  if (!value || typeof value !== "object" || !("tokens" in value)) return;
+  const tokens = value.tokens;
+  if (typeof tokens !== "number" || !Number.isInteger(tokens)
+    || tokens <= 0 || tokens > 2_147_483_647) return;
+  return {
+    tokens,
+    estimated: !("estimated" in value) || value.estimated !== false,
+  };
+}
+
+/**
+ * New Core histories persist the same sample and accuracy flag as live events.
+ * This also picks up safe settlements received by Core after the UI pauses.
+ * Legacy histories may still contain tool estimates, so retain live samples
+ * when their accuracy/provenance is unavailable.
+ */
 export function reconcileContextUsage(
   state: ContextUsageState,
   messages: ChatMessage[],
 ): ContextUsageState {
+  const recorded = contextProjectionMessages(messages).reverse().find(
+    (message) => providerPromptAnchor(message) > 0,
+  );
+  if (recorded && typeof recorded.activeContextEstimated === "boolean") {
+    const snapshot = {
+      tokens: recorded.activeContextTokens!,
+      estimated: recorded.activeContextEstimated,
+    };
+    return snapshot.tokens === state.snapshot.tokens
+      && snapshot.estimated === state.snapshot.estimated
+      ? { ...state, awaitingModelUsage: false }
+      : settledContextUsage(snapshot);
+  }
   return state.updatedDuringRun
     ? { ...state, awaitingModelUsage: false }
     : createContextUsageState(messages);
 }
 
-function settledContextUsage(tokens: number): ContextUsageState {
+function settledContextUsage(snapshot: ContextUsageSnapshot): ContextUsageState {
   return {
-    snapshot: { tokens, estimated: true },
+    snapshot,
     awaitingModelUsage: false,
     updatedDuringRun: true,
   };
@@ -98,7 +129,7 @@ export interface ContextBreakdownPart {
  * request. Draft assistant text can move into the work log during tool calls;
  * adding it to the sample would make the indicator grow and shrink mid-turn.
  * Cumulative TokenUsage is billing data and must never be a context fallback.
- * The event contract has no accuracy flag, so samples remain labelled "约".
+ * Legacy samples without an accuracy flag remain labelled "约".
  */
 export function resolveContextUsage(
   messages: ChatMessage[],
@@ -109,7 +140,7 @@ export function resolveContextUsage(
     if (anchorTokens > 0) {
       return {
         tokens: anchorTokens,
-        estimated: true,
+        estimated: projectionMessages[index]?.activeContextEstimated !== false,
       };
     }
   }

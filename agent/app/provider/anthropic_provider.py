@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 
+from app.context.usage import ContextUsageSnapshot
 from app.dto.response.chat_completion_response import TokenUsageResponse
 from app.harness.contracts import ProviderToolCall, ProviderTurn, ProviderTurnEvent
 from app.model.model_connection_settings import ModelConnectionSettings
@@ -485,6 +486,11 @@ class AnthropicProvider(ProtocolProviderBase):
                 usage=add_token_usage(usage_parts),
                 tool_calls=tool_calls,
                 provider_state=provider_state,
+                # Only the final continuation's input is a context sample.
+                context_usage=ContextUsageSnapshot(
+                    parse_anthropic_usage(call_usage).prompt_tokens,
+                    estimated=False,
+                ),
             ),
         )
 
@@ -1029,4 +1035,5 @@ def _turn_with_usage(
         usage=usage,
         tool_calls=turn.tool_calls,
         provider_state=turn.provider_state,
+        context_usage=turn.context_snapshot(),
     )

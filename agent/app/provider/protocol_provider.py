@@ -180,6 +180,7 @@ class ProtocolProviderBase(ABC):
                 completed_turn = event.turn
         if completed_turn is None:
             raise ValueError("模型流未返回完整回合")
+        context_usage = completed_turn.context_snapshot(estimated_context)
         yield RunEvent(
             type="usage",
             model=completed_turn.model,
@@ -196,9 +197,8 @@ class ProtocolProviderBase(ABC):
                     completed_turn.usage.cache_metrics_available
                 ),
             ),
-            active_context_tokens=(
-                completed_turn.usage.prompt_tokens or estimated_context
-            ),
+            active_context_tokens=context_usage.tokens,
+            metadata=context_usage.as_metadata(),
         )
         yield RunEvent(type="completed", model=completed_turn.model)
 

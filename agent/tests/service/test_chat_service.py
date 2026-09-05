@@ -328,7 +328,11 @@ def test_background_usage_preserves_root_context_without_root_usage() -> None:
 
     class Manager:
         async def wait_for_activations(self) -> None:
-            await queue.put(_usage_delta(30))
+            usage = _usage_delta(30)
+            await queue.put(replace(usage, metadata={
+                **usage.metadata,
+                "contextUsage": {"tokens": 90_000, "estimated": False},
+            }))
 
         async def shutdown(self) -> None:
             return None
@@ -345,6 +349,7 @@ def test_background_usage_preserves_root_context_without_root_usage() -> None:
     assert background_usage.usage is not None
     assert background_usage.usage.total_tokens == 30
     assert background_usage.active_context_tokens == 4_000
+    assert "contextUsage" not in background_usage.metadata
 
 
 def test_usage_on_non_usage_root_event_is_part_of_background_total() -> None:

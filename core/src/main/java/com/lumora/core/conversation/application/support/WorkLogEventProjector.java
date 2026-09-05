@@ -47,6 +47,7 @@ public final class WorkLogEventProjector {
             "artifactTruncated",
             "beforeTokens",
             "afterTokens",
+            "contextUsage",
             "throughSequence",
             "retainedFromSequence",
             "trigger",

@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 
 from app.context.estimator import TokenEstimator
+from app.context.usage import ContextUsageSnapshot
 from app.dto.response.chat_completion_response import TokenUsageResponse
 from app.harness.contracts import ProviderToolCall, ProviderTurn, ProviderTurnEvent
 from app.model.model_connection_settings import ModelConnectionSettings
@@ -511,6 +512,10 @@ class ResponsesProvider(ProtocolProviderBase):
                 model=model,
                 usage=usage,
                 tool_calls=tool_calls,
+                context_usage=ContextUsageSnapshot(
+                    usage.prompt_tokens,
+                    estimated=not authoritative_usage_received,
+                ),
             ),
         )
 

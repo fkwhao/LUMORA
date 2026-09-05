@@ -19,6 +19,7 @@ public class ConversationMessageResponse {
     private final String model;
     private final TokenUsageResponse usage;
     private final int activeContextTokens;
+    private final boolean activeContextEstimated;
     private final long durationMs;
     private final String workLogJson;
     private final Instant createdAt;
@@ -37,6 +38,7 @@ public class ConversationMessageResponse {
             String model,
             TokenUsageResponse usage,
             int activeContextTokens,
+            boolean activeContextEstimated,
             long durationMs,
             String workLogJson,
             Instant createdAt
@@ -54,6 +56,7 @@ public class ConversationMessageResponse {
         this.model = model;
         this.usage = usage;
         this.activeContextTokens = Math.max(0, activeContextTokens);
+        this.activeContextEstimated = activeContextEstimated;
         this.durationMs = durationMs;
         this.workLogJson = workLogJson == null ? "[]" : workLogJson;
         this.createdAt = createdAt;
@@ -94,6 +97,10 @@ public class ConversationMessageResponse {
 
     public int getActiveContextTokens() {
         return activeContextTokens;
+    }
+
+    public boolean isActiveContextEstimated() {
+        return activeContextEstimated;
     }
 
     public long getDurationMs() {

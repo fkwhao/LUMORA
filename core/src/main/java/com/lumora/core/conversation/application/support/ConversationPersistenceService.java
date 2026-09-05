@@ -604,6 +604,7 @@ public class ConversationPersistenceService {
         assistantMessage.setActiveContextTokens(
                 accumulator.getActiveContextTokens()
         );
+        assistantMessage.setActiveContextEstimated(accumulator.isActiveContextEstimated());
         messageMapper.insert(assistantMessage);
         Conversation conversation = conversationMapper.selectById(
                 context.getConversationId()
@@ -749,6 +750,7 @@ public class ConversationPersistenceService {
         usageRecord.setActiveContextTokens(
                 accumulator.getActiveContextTokens()
         );
+        usageRecord.setActiveContextEstimated(accumulator.isActiveContextEstimated());
         messageMapper.insert(usageRecord);
         Conversation conversation = conversationMapper.selectById(
                 context.getConversationId()

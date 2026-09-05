@@ -1410,6 +1410,54 @@ describe("task store", () => {
 });
 
 describe("task context display lifecycle", () => {
+  it.each(["completed", "paused", "failed"] as const)(
+    "keeps the same explicit snapshot after %s and reopening the task",
+    async (terminal) => {
+      const api = createApi();
+      const modelApi = createModelApi();
+      const history: ChatMessage[] = [
+        { messageId: "user-1", role: "user", content: "检查" },
+        {
+          messageId: "answer-1", role: "assistant", content: "完成",
+          activeContextTokens: terminal === "paused" ? 4_500 : 4_000,
+          activeContextEstimated: false,
+        },
+      ];
+      vi.mocked(modelApi.listMessages).mockResolvedValueOnce([]).mockResolvedValue(history);
+      const store = createTaskStore(api, modelApi);
+      await store.getState().openTask(createdTask.taskId);
+      const pending = store.getState().sendMessage("检查");
+      const emit = vi.mocked(modelApi.streamMessage).mock.calls[0]![2];
+      emit(contextEvent("usage", {
+        activeContextTokens: 40_000,
+        metadata: { contextUsage: { tokens: 4_000, estimated: false } },
+      }));
+      const snapshot = store.getState().contextUsage.snapshot;
+      emit(contextEvent("usage", { activeContextTokens: 24_000 }));
+      emit(contextEvent("usage", {
+        activeContextTokens: 80_000, metadata: { usageProvisional: true },
+      }));
+      expect(store.getState().messages.at(-1)?.activeContextTokens).toBe(4_000);
+      expect(store.getState().messages.at(-1)?.activeContextEstimated).toBe(false);
+      if (terminal === "paused") {
+        store.setState({ isPausing: true });
+        emit(contextEvent("usage", {
+          metadata: { contextUsage: { tokens: 4_500, estimated: false } },
+        }));
+        expect(store.getState().contextUsage.snapshot).toEqual(snapshot);
+      }
+      emit(contextEvent(terminal));
+      await pending;
+      const expected = { tokens: terminal === "paused" ? 4_500 : 4_000, estimated: false };
+      expect(store.getState().contextUsage.snapshot).toEqual(expected);
+      const reopened = createTaskStore(api, modelApi);
+      await reopened.getState().openTask(createdTask.taskId);
+      expect(reopened.getState().contextUsage.snapshot).toEqual(expected);
+      expect(snapshot).toEqual({ tokens: 4_000, estimated: false });
+      cancelSupplementalUsageRefresh(createdTask.taskId);
+    },
+  );
+
   it.each(["local", "cloud"])("keeps %s tool-stage text and estimates out of the ring", async (mode) => {
     const api = createApi();
     const modelApi = createModelApi();

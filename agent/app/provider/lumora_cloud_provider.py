@@ -8,6 +8,7 @@ from typing import Any, Literal, cast
 import httpx
 
 from app.context.estimator import TokenEstimator
+from app.context.usage import ContextUsageSnapshot
 from app.dto.request.chat_completion_request import ChatMessageRequest
 from app.dto.response.chat_completion_response import (
     ChatCompletionResponse,
@@ -517,12 +518,15 @@ def _finalize_cloud_turn(
     hosted_search = hosted_search_seen or _contains_hosted_web_search(
         turn.provider_state
     )
-    usage = (
-        _normalize_web_search_usage(turn.usage, active_context_estimate)
-        if hosted_search
-        else turn.usage
+    # Hosted search reports aggregate provider work, not one request's input.
+    # Keep every billing field intact and carry the context estimate separately.
+    context_usage = ContextUsageSnapshot(
+        active_context_estimate if hosted_search else (
+            turn.usage.prompt_tokens or active_context_estimate
+        ),
+        estimated=hosted_search or turn.usage.prompt_tokens <= 0,
     )
-    active_context_tokens = usage.prompt_tokens or active_context_estimate
+    active_context_tokens = context_usage.tokens
     provider_state = dict(turn.provider_state or {})
     if active_context_tokens > 0:
         provider_state[_CONTEXT_ANCHOR_KEY] = {
@@ -532,29 +536,9 @@ def _finalize_cloud_turn(
         }
     return replace(
         turn,
-        usage=usage,
+        context_usage=context_usage,
         provider_state=provider_state or None,
     )
-
-
-def _normalize_web_search_usage(
-    usage: TokenUsageResponse,
-    active_context_estimate: int,
-) -> TokenUsageResponse:
-    """Keep Cloud billing facts while removing hosted-search work from context UI.
-
-    Cloud usage contains every provider-side token consumed by hosted search.
-    Server-side plan billing remains authoritative and the detailed input,
-    cache, output and total fields stay untouched. ``prompt_tokens`` is also
-    used locally as the active-context anchor, so only that field is clamped to
-    the persistent request projection.
-    """
-    if usage.prompt_tokens <= 0 or active_context_estimate <= 0:
-        return usage
-    normalized_prompt = min(usage.prompt_tokens, active_context_estimate)
-    if normalized_prompt == usage.prompt_tokens:
-        return usage
-    return usage.model_copy(update={"prompt_tokens": normalized_prompt})
 
 
 def _context_projection_messages(

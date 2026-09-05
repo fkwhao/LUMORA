@@ -87,7 +87,6 @@ def test_agent_loop_streams_tool_lifecycle_before_final_answer() -> None:
     asyncio.run(
         _assert_tool_lifecycle_before_final_answer(
             _settings(),
-            stable_during_tools=False,
         )
     )
 
@@ -96,7 +95,6 @@ def test_agent_loop_keeps_cloud_context_stable_while_tools_run() -> None:
     asyncio.run(
         _assert_tool_lifecycle_before_final_answer(
             _cloud_settings(),
-            stable_during_tools=True,
         )
     )
 
@@ -1639,8 +1637,6 @@ async def _assert_final_answer_deltas_are_forwarded() -> None:
 
 async def _assert_tool_lifecycle_before_final_answer(
     connection_settings: ModelConnectionSettings,
-    *,
-    stable_during_tools: bool,
 ) -> None:
     turns = iter((
         ProviderTurn(
@@ -1721,10 +1717,14 @@ async def _assert_tool_lifecycle_before_final_answer(
         30,
     ]
     assert usage_events[0].active_context_tokens == 10
-    if stable_during_tools:
-        assert usage_events[1].active_context_tokens == 10
-    else:
-        assert usage_events[1].active_context_tokens > 10
+    assert usage_events[1].active_context_tokens == 10
+    assert usage_events[0].metadata["contextUsage"] == {
+        "tokens": 10, "estimated": False,
+    }
+    assert "contextUsage" not in usage_events[1].metadata
+    assert usage_events[2].metadata["contextUsage"] == {
+        "tokens": 15, "estimated": False,
+    }
     assert usage_events[2].active_context_tokens == 15
     assert captured_messages[1][-1]["role"] == "tool"
     assert "文件内容" in str(captured_messages[1][-1]["content"])
@@ -1813,7 +1813,14 @@ async def _assert_provisional_usage_survives_retry() -> None:
     assert attempts == 2
     assert usage_totals == [10, 30, 32]
     assert events[-2].usage is not None
-    assert events[-2].metadata == {}
+    assert events[-2].metadata == {
+        "contextUsage": {"tokens": 16, "estimated": False},
+    }
+    assert all(
+        event.active_context_tokens == 0
+        for event in events
+        if event.metadata.get("usageProvisional") is True
+    )
 
 
 async def _assert_invalid_tool_arguments_are_reported() -> None:

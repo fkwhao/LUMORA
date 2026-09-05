@@ -1691,6 +1691,8 @@ def test_anthropic_stream_continues_pause_turn_until_final_answer(monkeypatch) -
     assert events[-1].turn is not None
     assert events[-1].turn.content == "这是最终分析结果。"
     assert events[-1].turn.usage.total_tokens == 18
+    assert events[-1].turn.context_snapshot().tokens == 6
+    assert events[-1].turn.context_snapshot().estimated is False
 
 
 def test_anthropic_completion_continues_pause_turn(monkeypatch) -> None:
@@ -1747,6 +1749,8 @@ def test_anthropic_completion_continues_pause_turn(monkeypatch) -> None:
     }
     assert turn.content == "最终答案。"
     assert turn.usage.total_tokens == 18
+    assert turn.context_snapshot().tokens == 6
+    assert turn.context_snapshot().estimated is False
 
 
 class _Adapter:

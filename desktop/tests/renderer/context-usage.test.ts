@@ -252,6 +252,45 @@ describe("context usage", () => {
 });
 
 describe("context usage display state", () => {
+  it("restores explicit context samples with the same accuracy as live updates", () => {
+    for (const estimated of [true, false]) {
+      const event = streamEvent("usage", {
+        activeContextTokens: 80_000,
+        usage: { promptTokens: 90_000, completionTokens: 100, totalTokens: 90_100 },
+        metadata: { contextUsage: { tokens: 4_000, estimated } },
+      });
+      const live = reduceContextUsage(createContextUsageState([]), event);
+      const persisted: ChatMessage[] = [{
+        role: "assistant", content: "完成",
+        activeContextTokens: 4_000, activeContextEstimated: estimated,
+        usage: event.usage,
+      }];
+      expect(live.snapshot).toEqual({ tokens: 4_000, estimated });
+      expect(reconcileContextUsage(live, persisted).snapshot).toEqual(live.snapshot);
+      expect(createContextUsageState(persisted).snapshot).toEqual(live.snapshot);
+    }
+  });
+
+  it("rejects provisional and invalid explicit samples without using billing totals", () => {
+    const state = createContextUsageState([{
+      role: "assistant", content: "完成", activeContextTokens: 4_000,
+      activeContextEstimated: false,
+    }]);
+    expect(reduceContextUsage(state, streamEvent("usage", {
+      metadata: {
+        usageProvisional: true,
+        contextUsage: { tokens: 80_000, estimated: true },
+      },
+    }))).toBe(state);
+    for (const tokens of [undefined, -1, 0, 1.5, NaN, Infinity, 2_147_483_648, "9000"]) {
+      const next = reduceContextUsage(state, streamEvent("usage", {
+        activeContextTokens: 90_000,
+        metadata: { contextUsage: { tokens, estimated: false } },
+      }));
+      expect(next.snapshot).toBe(state.snapshot);
+    }
+  });
+
   const initial = () => createContextUsageState([
     { role: "assistant", content: "上一轮", activeContextTokens: 2_000 },
   ]);

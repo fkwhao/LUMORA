@@ -20,6 +20,8 @@ public class ConversationStreamAccumulator {
     private String model = "";
     private TokenUsage usage;
     private int activeContextTokens;
+    private boolean activeContextEstimated = true;
+    private boolean awaitingModelUsage;
     private boolean completed;
     private boolean paused;
     private final List<ChatStreamEvent> workLogEvents = new ArrayList<>();
@@ -76,9 +78,7 @@ public class ConversationStreamAccumulator {
         if (event.getUsage() != null) {
             usage = event.getUsage();
         }
-        if (event.getActiveContextTokens() > 0) {
-            activeContextTokens = event.getActiveContextTokens();
-        }
+        captureContextUsage(event);
         if (failed) {
             throw new IllegalStateException(valueOrEmpty(
                     event.getErrorMessage()
@@ -100,6 +100,58 @@ public class ConversationStreamAccumulator {
 
     public int getActiveContextTokens() {
         return activeContextTokens;
+    }
+
+    public boolean isActiveContextEstimated() {
+        return activeContextEstimated;
+    }
+
+    /** Keep the same settled-sample boundary as the desktop context indicator. */
+    private void captureContextUsage(ChatStreamEvent event) {
+        if (event.getType() == ChatStreamEventType.PROTOCOL_MESSAGE) {
+            Object message = event.getMetadata().get("message");
+            if (message instanceof Map<?, ?> fields && fields.containsKey("role")) {
+                awaitingModelUsage = "assistant".equals(fields.get("role"));
+            }
+            return;
+        }
+        boolean compacted = event.getType() == ChatStreamEventType.CONTEXT_COMPACTED;
+        if (!compacted && (event.getType() != ChatStreamEventType.USAGE
+                || Boolean.TRUE.equals(event.getMetadata().get("usageProvisional")))) {
+            return;
+        }
+        if (event.getMetadata().containsKey("contextUsage")) {
+            Object raw = event.getMetadata().get("contextUsage");
+            if (raw instanceof Map<?, ?> snapshot) {
+                int tokens = contextTokenNumber(snapshot.get("tokens"));
+                if (tokens > 0) {
+                    activeContextTokens = tokens;
+                    activeContextEstimated = !Boolean.FALSE.equals(snapshot.get("estimated"));
+                }
+            }
+            awaitingModelUsage = false;
+            return;
+        }
+        // Older Agent events have no explicit sample. Tool projections and
+        // supplemental billing snapshots must not overwrite model samples.
+        if (!compacted && !awaitingModelUsage) return;
+        int tokens = event.getActiveContextTokens();
+        if (compacted && tokens <= 0) {
+            tokens = contextTokenNumber(event.getMetadata().get("afterTokens"));
+        }
+        if (tokens > 0) {
+            activeContextTokens = tokens;
+            activeContextEstimated = true;
+        }
+        awaitingModelUsage = false;
+    }
+
+    private static int contextTokenNumber(Object value) {
+        if (!(value instanceof Number number)) return 0;
+        double tokens = number.doubleValue();
+        return Double.isFinite(tokens) && tokens > 0
+                && tokens <= Integer.MAX_VALUE && tokens == Math.floor(tokens)
+                ? (int) tokens : 0;
     }
 
     public boolean isCompleted() {

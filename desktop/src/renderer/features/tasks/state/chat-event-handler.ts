@@ -46,6 +46,10 @@ export function applyChatEvent(
   }
   const contextUsage = reduceContextUsage(get().contextUsage, event);
   if (contextUsage !== get().contextUsage) set({ contextUsage });
+  const contextMessageFields = contextUsage.updatedDuringRun ? {
+    activeContextTokens: contextUsage.snapshot.tokens,
+    activeContextEstimated: contextUsage.snapshot.estimated,
+  } : {};
   if (event.type === "steer_claimed") {
     if (event.itemId && event.delta.trim()) {
       set({
@@ -141,8 +145,7 @@ export function applyChatEvent(
           ? ""
           : last.content,
       model: event.model || last.model,
-      activeContextTokens:
-        event.activeContextTokens || last.activeContextTokens,
+      ...contextMessageFields,
     };
     set({ messages });
     return;
@@ -182,8 +185,7 @@ export function applyChatEvent(
         ...last,
         usage: event.usage,
         model: event.model || last.model,
-        activeContextTokens:
-          event.activeContextTokens || last.activeContextTokens,
+        ...contextMessageFields,
       };
       set({ messages });
     }

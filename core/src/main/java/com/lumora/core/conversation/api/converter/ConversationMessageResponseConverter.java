@@ -37,6 +37,7 @@ public class ConversationMessageResponseConverter {
                         message.isCacheMetricsAvailable()
                 ),
                 message.getActiveContextTokens(),
+                message.isActiveContextEstimated(),
                 message.getDurationMs(),
                 message.getWorkLogJson(),
                 message.getCreatedAt()

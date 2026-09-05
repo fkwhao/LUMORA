@@ -7,6 +7,7 @@ import httpx
 
 from app.context.estimator import TokenEstimator
 from app.context.planner import summary_output_tokens
+from app.context.usage import ContextUsageSnapshot
 from app.dto.request.chat_completion_request import ChatMessageRequest
 from app.dto.response.chat_completion_response import (
     ChatCompletionResponse,
@@ -285,12 +286,19 @@ class OpenAICompatibleProvider:
                             parsed_usage.prompt_tokens
                             or estimated_active_context_tokens
                         ),
+                        metadata=ContextUsageSnapshot(
+                            parsed_usage.prompt_tokens or estimated_active_context_tokens,
+                            estimated=parsed_usage.prompt_tokens <= 0,
+                        ).as_metadata(),
                     )
         if not usage_received:
             yield RunEvent(
                 type="usage",
                 model=resolved_model,
                 active_context_tokens=estimated_active_context_tokens,
+                metadata=ContextUsageSnapshot(
+                    estimated_active_context_tokens,
+                ).as_metadata(),
             )
         yield RunEvent(
             type="completed",
@@ -563,6 +571,10 @@ class OpenAICompatibleProvider:
                 model=resolved_model,
                 usage=usage,
                 tool_calls=calls,
+                context_usage=ContextUsageSnapshot(
+                    usage.prompt_tokens,
+                    estimated=not authoritative_usage_received,
+                ),
             ),
         )
 

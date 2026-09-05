@@ -328,7 +328,10 @@ async def _assert_stream_normalizes_only_web_search_active_context() -> None:
         {"role": "assistant", "content": "previous answer"},
         {"role": "user", "content": "搜索 LUMORA"},
     ]) + TokenEstimator().estimate_tools(())
-    assert completed.usage.prompt_tokens == expected_prompt
+    assert completed.context_usage is not None
+    assert completed.context_usage.tokens == expected_prompt
+    assert completed.context_usage.estimated is True
+    assert completed.usage.prompt_tokens == raw_usage["promptTokens"]
     assert completed.usage.total_tokens == raw_usage["totalTokens"]
     assert completed.usage.input_tokens == raw_usage["inputTokens"]
     assert completed.usage.cache_read_tokens == raw_usage["cacheReadTokens"]
@@ -424,6 +427,9 @@ async def _assert_stream_keeps_cloud_prompt_usage_without_actual_web_search() ->
 
     assert events[-1].turn is not None
     assert events[-1].turn.usage.prompt_tokens == 32_000
+    assert events[-1].turn.context_usage is not None
+    assert events[-1].turn.context_usage.tokens == 32_000
+    assert events[-1].turn.context_usage.estimated is False
     assert events[-1].turn.provider_state is not None
     assert (
         events[-1].turn.provider_state["_lumoraCloudContext"]["activeTokens"]
@@ -551,7 +557,10 @@ async def _assert_web_search_reuses_persisted_cloud_context_anchor() -> None:
         {"role": "assistant", "content": ordinary.content},
         {"role": "user", "content": "Search this now"},
     ])
-    assert searched.usage.prompt_tokens == expected_prompt
+    assert searched.context_usage is not None
+    assert searched.context_usage.tokens == expected_prompt
+    assert searched.context_usage.estimated is True
+    assert searched.usage.prompt_tokens == 60_000
     assert searched.usage.total_tokens == 60_100
     assert searched.usage.input_tokens == 20_000
     assert searched.usage.cache_read_tokens == 40_000

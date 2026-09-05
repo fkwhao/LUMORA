@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from app.context.usage import ContextUsageSnapshot
 from app.dto.response.chat_completion_response import (
     ChatCompletionResponse,
     TokenUsageResponse,
@@ -31,6 +32,17 @@ class ProviderTurn:
     usage: TokenUsageResponse
     tool_calls: tuple[ProviderToolCall, ...]
     provider_state: dict[str, Any] | None = None
+    context_usage: ContextUsageSnapshot | None = None
+
+    def context_snapshot(self, fallback_tokens: int = 0) -> ContextUsageSnapshot:
+        if self.context_usage is not None:
+            return self.context_usage if self.context_usage.tokens > 0 else (
+                ContextUsageSnapshot(fallback_tokens)
+            )
+        return ContextUsageSnapshot(
+            self.usage.prompt_tokens or fallback_tokens,
+            estimated=self.usage.prompt_tokens <= 0,
+        )
 
 
 @dataclass(frozen=True, slots=True)

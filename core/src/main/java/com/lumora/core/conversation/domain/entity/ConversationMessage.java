@@ -57,6 +57,8 @@ public class ConversationMessage {
     private boolean cacheMetricsAvailable;
     @TableField("active_context_tokens")
     private int activeContextTokens;
+    @TableField("active_context_estimated")
+    private boolean activeContextEstimated = true;
     @TableField("duration_ms")
     private long durationMs;
     @TableField("work_log_json")
@@ -273,6 +275,14 @@ public class ConversationMessage {
 
     public void setActiveContextTokens(int activeContextTokens) {
         this.activeContextTokens = Math.max(0, activeContextTokens);
+    }
+
+    public boolean isActiveContextEstimated() {
+        return activeContextEstimated;
+    }
+
+    public void setActiveContextEstimated(boolean activeContextEstimated) {
+        this.activeContextEstimated = activeContextEstimated;
     }
 
     public long getDurationMs() {
