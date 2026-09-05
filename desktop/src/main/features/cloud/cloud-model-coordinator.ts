@@ -49,8 +49,10 @@ export class CloudModelCoordinator {
     const preferences = this.preferences.load();
     if (auth.authenticated && preferences.modelSource === "CLOUD_MANAGED") {
       const models = await this.listAllowedCloudModels();
-      const selected = selectCloudModel(models, preferences.selectedCloudModelCode);
-      await this.configureManagedModel(selected);
+      if (models.length > 0) {
+        const selected = selectCloudModel(models, preferences.selectedCloudModelCode);
+        await this.configureManagedModel(selected);
+      }
     }
     return this.getState();
   }
@@ -60,8 +62,10 @@ export class CloudModelCoordinator {
     const preferences = this.preferences.load();
     if (preferences.modelSource === "CLOUD_MANAGED") {
       const models = await this.listAllowedCloudModels();
-      const selected = selectCloudModel(models, preferences.selectedCloudModelCode);
-      await this.configureManagedModel(selected);
+      if (models.length > 0) {
+        const selected = selectCloudModel(models, preferences.selectedCloudModelCode);
+        await this.configureManagedModel(selected);
+      }
     }
     return this.getState();
   }

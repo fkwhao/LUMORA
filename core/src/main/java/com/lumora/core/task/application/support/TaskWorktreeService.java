@@ -514,6 +514,7 @@ public class TaskWorktreeService {
         TaskWorktree lease = requireReviewable(taskId);
         requireManagedTemporary(lease, "应用");
         rejectIgnoredEffects(lease);
+        if (refreshChangedReview(lease)) return TaskWorktreeResponse.from(lease);
         if (hasOtherActiveLocal(taskId, lease.getRepositoryRoot())) {
             throw new IllegalStateException(
                     "Local 工作区仍有任务正在写入，请等待其进入安全状态"
@@ -586,6 +587,7 @@ public class TaskWorktreeService {
     ) {
         TaskWorktree lease = requireReviewable(taskId);
         rejectIgnoredEffects(lease);
+        if (refreshChangedReview(lease)) return TaskWorktreeResponse.from(lease);
         String branchName = requireBranchName(requestedBranchName);
         Path effective = worktreeRoot(lease);
         requireDirectory(effective, "任务 Worktree 不存在");
@@ -639,7 +641,7 @@ public class TaskWorktreeService {
                 != WorktreeState.CLEANUP_PENDING)) {
             throw new IllegalStateException("当前没有可放弃的临时修改");
         }
-        cleanup(lease, "用户已放弃修改，临时 Worktree 已清理");
+        cleanup(lease, "用户已放弃修改，临时 Worktree 已清理", true);
         return TaskWorktreeResponse.from(lease);
     }
 
@@ -1023,7 +1025,25 @@ public class TaskWorktreeService {
         }
     }
 
+    private boolean refreshChangedReview(TaskWorktree lease) {
+        Snapshot current = git.snapshot(worktreeRoot(lease));
+        if (current.tree().equals(lease.getResultTree())) return false;
+        lease.setResultTree(current.tree());
+        keepResultTree(lease, current.tree());
+        if (lease.isAutoApplyWhenClean()) {
+            lease.setAutoApplyWhenClean(false);
+            lease.setSettingsRevision(lease.getSettingsRevision() + 1L);
+        }
+        updateState(lease, WorktreeState.WAITING_REVIEW,
+                "Worktree 内容已变化，已保留修改并更新差异；请审阅后再次操作");
+        return true;
+    }
+
     private void cleanup(TaskWorktree lease, String reason) {
+        cleanup(lease, reason, false);
+    }
+
+    private void cleanup(TaskWorktree lease, String reason, boolean discard) {
         if (!lease.isManagedByLumora()) {
             updateState(
                     lease,
@@ -1036,6 +1056,14 @@ public class TaskWorktreeService {
             Path physicalRoot = worktreeRoot(lease);
             if (Files.exists(physicalRoot)) {
                 validateRemovalTarget(lease, physicalRoot);
+                if (!discard) {
+                    if (refreshChangedReview(lease)) return;
+                    if (!git.ignoredUntracked(physicalRoot, 100).isEmpty()) {
+                        updateState(lease, WorktreeState.WAITING_REVIEW,
+                                "清理前发现被 Git 忽略的文件，已保留 Worktree");
+                        return;
+                    }
+                }
                 git.removeWorktree(
                         normalized(lease.getRepositoryRoot()),
                         physicalRoot

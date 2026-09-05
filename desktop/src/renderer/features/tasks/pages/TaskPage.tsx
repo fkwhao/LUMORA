@@ -772,22 +772,29 @@ export const TaskPage = memo(function TaskPage({
             ? cloudModels.map((model) => model.code)
             : [settings.model, ...settings.models.map((model) => model.modelId)],
         );
-        const nextModel = cloudManaged
-          ? selectedCloudModel(catalog!, settings.model)
-          : task?.selectedModel && configuredModels.has(task.selectedModel)
-              ? task.selectedModel
-              : localPreference?.model && configuredModels.has(localPreference.model)
-                ? localPreference.model
-                : settings.model;
+        const nextModel = task?.selectedModel && configuredModels.has(task.selectedModel)
+          ? task.selectedModel
+          : localPreference?.model && configuredModels.has(localPreference.model)
+            ? localPreference.model
+            : cloudManaged
+              ? selectedCloudModel(catalog!, settings.model)
+              : settings.model;
         setModelSettings(settings);
         setCloudModelCatalog(catalog);
         setSelectedModel(nextModel);
+        const savedModel = task?.selectedModel || localPreference?.model;
+        if (cloudManaged && savedModel && !configuredModels.has(savedModel)) {
+          const replacement = cloudModels.find((model) => model.code === nextModel)?.displayName;
+          notify(replacement
+            ? `此任务保存的模型 ${savedModel} 当前不可用，已切换到 ${replacement}。`
+            : "此任务保存的模型当前不可用，请在云账号中检查套餐或切换模型来源。", "info");
+        }
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [cloudApi, modelApi, task?.taskId]);
+  }, [cloudApi, modelApi, notify, task?.taskId]);
 
   const cloudManaged = cloudModelCatalog?.state.modelSource === "CLOUD_MANAGED";
 

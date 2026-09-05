@@ -98,6 +98,14 @@ export function CloudAccountPage({ api, notify }: CloudAccountPageProps) {
       notify("已登录 LUMORA Cloud", "success");
     } catch (loginError) {
       setError(toMessage(loginError));
+      // Authentication may have succeeded before model synchronization failed.
+      try {
+        const current = await api.getState();
+        setState(current);
+        if (current.auth.authenticated) setPassword("");
+      } catch {
+        // Keep the original error when the state cannot be read.
+      }
     } finally {
       setBusy(undefined);
     }

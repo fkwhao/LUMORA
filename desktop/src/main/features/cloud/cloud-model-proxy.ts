@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { once } from "node:events";
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 
 import { CloudApiError, type CloudSessionClient } from "./cloud-session-client";
@@ -10,6 +11,7 @@ export class CloudModelProxy {
   private readonly localToken = randomBytes(32).toString("base64url");
   private server?: http.Server;
   private origin?: string;
+  private readonly requests = new Set<AbortController>();
 
   constructor(private readonly session: CloudSessionClient) {}
 
@@ -38,13 +40,27 @@ export class CloudModelProxy {
     this.server = undefined;
     this.origin = undefined;
     if (!server) return;
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    for (const controller of this.requests) controller.abort();
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      server.closeAllConnections();
+    });
   }
 
   private async handle(
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> {
+    const controller = new AbortController();
+    const { signal } = controller;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    const cancel = () => controller.abort();
+    const close = () => { if (!response.writableFinished) cancel(); };
+    const cancelReader = () => { void reader?.cancel().catch(() => undefined); };
+    this.requests.add(controller);
+    request.once("aborted", cancel);
+    response.once("close", close);
+    signal.addEventListener("abort", cancelReader, { once: true });
     try {
       if (!this.authorized(request)) {
         this.jsonError(response, 401, "LOCAL_PROXY_UNAUTHORIZED", "本地模型代理认证失败");
@@ -56,6 +72,7 @@ export class CloudModelProxy {
         return;
       }
       const body = await readBody(request);
+      signal.throwIfAborted();
       const headers = new Headers({
         Accept: request.headers.accept ?? "application/json",
         "Content-Type": "application/json",
@@ -63,8 +80,12 @@ export class CloudModelProxy {
       });
       const cloudResponse = await this.session.authenticatedFetch(
         `/api/app/model/v1${path}`,
-        { method: "POST", headers, body },
+        { method: "POST", headers, body, signal },
       );
+      if (signal.aborted) {
+        await cloudResponse.body?.cancel().catch(() => undefined);
+        signal.throwIfAborted();
+      }
       response.statusCode = cloudResponse.status;
       copyHeader(cloudResponse, response, "content-type");
       copyHeader(cloudResponse, response, "cache-control");
@@ -75,16 +96,18 @@ export class CloudModelProxy {
         response.end();
         return;
       }
-      const reader = cloudResponse.body.getReader();
+      reader = cloudResponse.body.getReader();
       while (true) {
         const { done, value } = await reader.read();
+        signal.throwIfAborted();
         if (done) break;
         if (!response.write(Buffer.from(value))) {
-          await new Promise<void>((resolve) => response.once("drain", resolve));
+          await once(response, "drain", { signal });
         }
       }
       response.end();
     } catch (error) {
+      if (signal.aborted || response.destroyed) return;
       if (response.headersSent) {
         response.destroy(error instanceof Error ? error : undefined);
         return;
@@ -96,6 +119,13 @@ export class CloudModelProxy {
         error instanceof CloudApiError ? error.code ?? "CLOUD_REQUEST_FAILED" : "CLOUD_UNAVAILABLE",
         error instanceof Error ? error.message : "云端模型服务暂不可用",
       );
+    } finally {
+      controller.abort();
+      reader?.releaseLock();
+      request.off("aborted", cancel);
+      response.off("close", close);
+      signal.removeEventListener("abort", cancelReader);
+      this.requests.delete(controller);
     }
   }
 

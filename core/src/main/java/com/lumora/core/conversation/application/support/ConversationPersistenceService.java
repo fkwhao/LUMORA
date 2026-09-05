@@ -299,8 +299,8 @@ public class ConversationPersistenceService {
         if (history.isEmpty()) {
             throw new IllegalArgumentException("当前会话没有可压缩的消息");
         }
-        ConversationContextSummary summary = contextSummaryService.latest(
-                conversation.getConversationId()
+        ConversationContextSummary summary = compatibleSummary(
+                conversation.getConversationId(), history
         );
         List<ChatMessage> messages = history.stream()
                 .filter(message -> summary == null
@@ -498,8 +498,8 @@ public class ConversationPersistenceService {
                         "当前会话缺少用户消息"
                 ));
         ConversationMessage parent = history.get(history.size() - 1);
-        ConversationContextSummary summary = contextSummaryService.latest(
-                conversation.getConversationId()
+        ConversationContextSummary summary = compatibleSummary(
+                conversation.getConversationId(), history
         );
         List<ConversationMessage> uncompactedHistory = summary == null
                 ? history.stream().filter(this::isModelVisible).toList()
@@ -522,6 +522,7 @@ public class ConversationPersistenceService {
                         .toList()
         );
         modelMessages.add(new ChatMessage("user", CONTINUATION_INSTRUCTION));
+        retainPdfReferences(history, modelMessages);
         String projectScopeId = memoryService.resolveProjectScopeId(
                 workspacePath
         );
@@ -867,9 +868,7 @@ public class ConversationPersistenceService {
             ConversationMessage currentUserMessage,
             String workspacePath
     ) {
-        ConversationContextSummary summary = contextSummaryService.latest(
-                conversationId
-        );
+        ConversationContextSummary summary = compatibleSummary(conversationId, history);
         List<ConversationMessage> uncompactedHistory = summary == null
                 ? history.stream().filter(this::isModelVisible).toList()
                 : history.stream()
@@ -894,6 +893,7 @@ public class ConversationPersistenceService {
                         .toList()
         );
         modelMessages.addAll(toModelMessages(currentUserMessage));
+        retainPdfReferences(history, modelMessages);
         String projectScopeId = memoryService.resolveProjectScopeId(
                 workspacePath
         );
@@ -1111,6 +1111,52 @@ public class ConversationPersistenceService {
             }
         });
         touchConversation(conversation, taskId, clock.instant());
+    }
+
+    private ConversationContextSummary compatibleSummary(
+            String conversationId, List<ConversationMessage> history
+    ) {
+        ConversationContextSummary summary = contextSummaryService.latest(conversationId);
+        if (summary == null) return null;
+        // The boundary message identifies the immutable ancestor path summarized.
+        // An edit, revert or branch switch that removes it cannot reuse that summary.
+        return history.stream().anyMatch(message ->
+                message.getSequence() == summary.getThroughSequence())
+                ? summary : null;
+    }
+
+    private void retainPdfReferences(
+            List<ConversationMessage> history, List<ChatMessage> modelMessages
+    ) {
+        java.util.Set<String> included = modelMessages.stream()
+                .flatMap(message -> message.getAttachments().stream())
+                .map(MessageAttachment::attachmentId)
+                .collect(java.util.stream.Collectors.toSet());
+        List<MessageAttachment> references = history.stream()
+                .filter(this::isModelVisible)
+                .flatMap(message -> MessageAttachmentJson.decode(
+                        message.getAttachmentsJson()).stream())
+                .filter(attachment -> attachment.kind() == MessageAttachment.Kind.FILE
+                        && "application/pdf".equalsIgnoreCase(attachment.mimeType()))
+                .filter(attachment -> included.add(attachment.attachmentId()))
+                .filter(attachment -> {
+                    try {
+                        java.nio.file.Path path = java.nio.file.Path.of(attachment.path());
+                        return java.nio.file.Files.isRegularFile(path)
+                                && java.nio.file.Files.isReadable(path);
+                    } catch (RuntimeException error) {
+                        return false;
+                    }
+                })
+                .toList();
+        // Keep a metadata manifest for the active branch, independent of text compaction.
+        for (int offset = 0; offset < references.size(); offset += MessageAttachment.MAX_ATTACHMENTS) {
+            modelMessages.add(offset / MessageAttachment.MAX_ATTACHMENTS,
+                    new ChatMessage("user", "当前分支此前上传的 PDF 附件引用，可继续按附件 ID 查询。",
+                            null, null, List.of(), null,
+                            references.subList(offset, Math.min(references.size(),
+                                    offset + MessageAttachment.MAX_ATTACHMENTS))));
+        }
     }
 
     private List<ChatMessage> toModelMessages(ConversationMessage message) {

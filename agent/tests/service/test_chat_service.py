@@ -4,6 +4,9 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, ClassVar
 
+import pytest
+from app.skill.catalog import SkillCatalog
+
 from app.context.planner import ContextPlan
 from app.dto.request.chat_completion_request import ChatCompletionRequest
 from app.dto.request.model_list_request import ModelListRequest
@@ -20,6 +23,17 @@ from app.service.chat_service import (
     _stream_with_background_events,
     _with_prelude_usage,
 )
+
+@pytest.fixture(autouse=True)
+def isolated_skill_catalog(tmp_path: Path, monkeypatch: Any) -> None:
+    # These MCP/PDF contracts start without skills, independently of the developer's profile.
+    catalog = SkillCatalog(
+        user_root=tmp_path / "user-skills",
+        builtin_root=tmp_path / "builtin-skills",
+        settings_path=tmp_path / "skill-settings.json",
+    )
+    monkeypatch.setattr("app.service.chat_service.SkillCatalog", lambda: catalog)
+
 
 _SESSION_CONTROL_TOOLS = (
     "delegate_task",
@@ -661,6 +675,29 @@ def test_mcp_server_name_activates_related_request(monkeypatch: Any) -> None:
         "mcp__remote__echo",
         *_SESSION_CONTROL_TOOLS,
     )
+
+
+def test_explicit_skill_catalog_exposes_skill_tools_without_workspace(tmp_path: Path) -> None:
+    root = tmp_path / "configured-skills"
+    root.mkdir()
+    (root / "review.md").write_text(
+        "---\nname: local-review\ndescription: Review local code\n---\nRead the supplied code.",
+        encoding="utf-8",
+    )
+    harness = CapturingHarness()
+    service = ChatService(
+        ModelListProvider(),  # type: ignore[arg-type]
+        PromptBuilder(),
+        agent_harness=harness,  # type: ignore[arg-type]
+        skill_catalog=SkillCatalog(user_root=root, builtin_root=tmp_path / "empty",
+                                   settings_path=tmp_path / "settings.json"),
+    )
+    asyncio.run(_drain(service.stream(_mcp_request("解释一下装饰器"))))
+    names = [tool["function"]["name"] for tool in harness.prompt.tools]
+    assert "load_skill" in names
+    assert "read_skill_resource" in names
+    assert not any(name.startswith("mcp__") for name in names)
+    assert "local-review" in harness.prompt.system_prompt
 
 
 def test_conceptual_mcp_question_does_not_connect_generic_server(
