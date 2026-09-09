@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="desktop/src/renderer/assets/lumora-logo.png" width="104" alt="LUMORA Logo">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="desktop/src/renderer/assets/lumora-logo-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="desktop/src/renderer/assets/lumora-logo.png">
+    <img src="desktop/src/renderer/assets/lumora-logo.png" width="104" alt="LUMORA Logo">
+  </picture>
 </p>
 
 <h1 align="center">LUMORA</h1>
