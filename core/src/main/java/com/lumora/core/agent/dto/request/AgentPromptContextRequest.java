@@ -13,6 +13,7 @@ public class AgentPromptContextRequest {
 
     private final String workspacePath;
     private final List<String> projectInstructions;
+    private final List<AgentPromptInstructionInputRequest> projectInstructionInputs;
     private final List<String> availableTools;
     private final String memorySummary;
     private final List<AgentMemoryContextRequest> memoryCandidates;
@@ -156,8 +157,42 @@ public class AgentPromptContextRequest {
             AgentExecutionBudgetRequest executionBudget,
             List<Map<String, Object>> workflowSnapshots
     ) {
+        this(
+                workspacePath,
+                projectInstructions,
+                availableTools,
+                memorySummary,
+                permissionMode,
+                taskId,
+                conversationSummary,
+                memoryCandidates,
+                mcpServers,
+                agentSessions,
+                executionBudget,
+                workflowSnapshots,
+                List.of()
+        );
+    }
+
+    public AgentPromptContextRequest(
+            String workspacePath,
+            List<String> projectInstructions,
+            List<String> availableTools,
+            String memorySummary,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<AgentMemoryContextRequest> memoryCandidates,
+            List<AgentMcpServerRequest> mcpServers,
+            List<AgentSessionSnapshotRequest> agentSessions,
+            AgentExecutionBudgetRequest executionBudget,
+            List<Map<String, Object>> workflowSnapshots,
+            List<AgentPromptInstructionInputRequest> projectInstructionInputs
+    ) {
         this.workspacePath = workspacePath;
         this.projectInstructions = List.copyOf(projectInstructions);
+        this.projectInstructionInputs = projectInstructionInputs == null
+                ? List.of() : List.copyOf(projectInstructionInputs);
         this.availableTools = List.copyOf(availableTools);
         this.memorySummary = memorySummary;
         this.memoryCandidates = List.copyOf(memoryCandidates);
@@ -306,12 +341,48 @@ public class AgentPromptContextRequest {
         );
     }
 
+    public static AgentPromptContextRequest forWorkspace(
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<AgentMemoryContextRequest> memoryCandidates,
+            List<AgentMcpServerRequest> mcpServers,
+            List<AgentSessionSnapshotRequest> agentSessions,
+            List<Map<String, Object>> workflowSnapshots,
+            List<AgentPromptInstructionInputRequest> projectInstructionInputs
+    ) {
+        AgentPromptContextRequest base = forWorkspace(
+                memorySummary, workspacePath, permissionMode
+        );
+        return new AgentPromptContextRequest(
+                base.workspacePath,
+                base.projectInstructions,
+                base.availableTools,
+                memorySummary,
+                permissionMode,
+                taskId,
+                conversationSummary,
+                memoryCandidates,
+                mcpServers,
+                agentSessions,
+                AgentExecutionBudgetRequest.defaults(),
+                workflowSnapshots,
+                projectInstructionInputs
+        );
+    }
+
     public String getWorkspacePath() {
         return workspacePath;
     }
 
     public List<String> getProjectInstructions() {
         return projectInstructions;
+    }
+
+    public List<AgentPromptInstructionInputRequest> getProjectInstructionInputs() {
+        return projectInstructionInputs;
     }
 
     public List<String> getAvailableTools() {

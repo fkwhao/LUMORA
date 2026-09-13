@@ -68,20 +68,65 @@ score = relevance * 0.50
 
 ## 5. Prompt 优先级
 
-Provider 请求中的有效优先级为：
+Prompt 的消息顺序不是语义优先级。每个片段保留来源、authority、binding、scope 和
+retention 元数据，并按以下规则解释：
 
 ```text
-System Rules + Project Instructions（可信 system）
-  → User Memory（非权威 user context）
-  → Project Memory（非权威 user context）
-  → Conversation Memory（非权威 user context）
-  → Conversation Summary（非权威恢复上下文）
-  → Current User Request
+安全边界与权限运行时硬约束
+  > Core 强制规则
+  > Project 强制规则
+  > 当前 User Task
+  > Memory / History Reference
 ```
 
-Project Instructions 与系统规则处于可信指令层；所有动态 Memory 都明确标记为参考事实，不能覆盖
-系统或项目规则。当前用户请求仍位于消息末尾。旧客户端只发送 `memorySummary` 时仍走兼容分支；
-存在结构化候选时不再重复注入旧摘要。
+Core 或 Project 的默认行为可以由允许范围内的更具体要求覆盖；高层强制规则不能被低层
+规则覆盖。Memory 和历史摘要始终只是参考上下文，不能授权工具或覆盖系统、项目规则。
+当前重新读取到的文件和工具事实优先于过时的 Memory 或历史摘要。相同层级的强制规则
+发生冲突时不静默选择，应该保留冲突并要求澄清。
+
+确定性裁决只作用于带有 `conflictKey` 的结构化规则。Resolver 先按当前请求的活动作用域
+过滤不适用的片段，再按精确作用域拆分独立冲突组，最后按 `binding > authority > scope
+specificity` 排序。当前项目规则只使用 `workspace` 作用域，不自动推断目录级适用范围；不同
+工作区、任务或无关作用域的同名规则不会互相覆盖。同级不同内容无法裁决时，HTTP 普通请求返回
+`PROMPT_CONFLICT`，流式请求发送带有相同错误码的终止事件。未结构化的 Markdown 和
+自然语言仍依赖 Core Prompt 的显式优先级说明，不猜测其语义冲突。当前用户消息以
+`USER_TASK` 元数据保留在裁决审计面，但不复制到 Provider 消息；真实用户意图也不会被
+运行时工作区事件覆盖。
+
+Core 模板由 `CorePromptRuleRegistry` 和成对的受控
+`<!-- lumora-rule-start: lumora.* -->` / `<!-- lumora-rule-end -->` 标记共同定义
+原子默认规则。只有注册表明确允许覆盖且模板标记的默认行为才有 `conflictKey`；未标记的基础
+内容保持为普通 Core 片段，Core 安全和权限边界作为 `HARD` 片段注入，不能被项目规则覆盖。
+因而一个项目规则命中
+`lumora.execution.requested_change` 时，只会压制这一条默认规则，不会丢弃整个
+`20_execution.md`。
+
+工作区 Markdown 默认作为无 `conflictKey` 的完整可信文本保留。需要把其中的规则纳入
+确定性裁决时，在 `.lumora/prompt-policy.yaml`（或兼容的 JSON）中使用显式的
+`managedSources` 和原子 `rules`：
+
+```yaml
+managedSources:
+  - AGENTS.md
+rules:
+  - ruleId: project.framework
+    sourceRef: AGENTS.md
+    content: 项目要求使用 unittest
+    conflictKey: lumora.execution.requested_change
+```
+
+列入 `managedSources` 的来源不再注入整份原文，只注入策略列出的规则；未列入的来源
+保持兼容。这样结构化内容只有一个模型可见来源。若未管理来源的原文中逐字包含相同规则，
+Loader 会以 `PromptConfigurationError` 拒绝配置；规则 ID、来源、引用和字段重复或无效
+也会拒绝，每条规则必须提供稳定且唯一的 `ruleId`。当前项目策略的 scope 只能是
+`workspace`；策略不能声明 authority、binding 或 trust，Python `PromptPolicy` 负责派生。
+确定性裁决不分析任意 Markdown 的自然语言相似度。
+
+`PromptConflictError` 的诊断只保留冲突键、作用域、来源列表和来源引用列表，供服务端日志和测试
+使用；客户端仍只看到通用的 `PROMPT_CONFLICT`，不会收到内部规则正文。
+
+这里的 `retention` 只用于上下文压缩策略，与 authority 无关。旧客户端只发送
+`memorySummary` 时仍走兼容分支；存在结构化候选时不再重复注入旧摘要。
 
 ## 6. 用户控制
 

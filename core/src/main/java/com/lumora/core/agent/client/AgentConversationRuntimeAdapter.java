@@ -83,7 +83,8 @@ public class AgentConversationRuntimeAdapter implements ConversationRuntimePort,
                 request.memoryCandidates(),
                 mcpService.listEnabledServers(),
                 agentSessionStore.listSnapshots(request.taskId()),
-                agentWorkflowStore.listSnapshots(request.taskId())
+                agentWorkflowStore.listSnapshots(request.taskId()),
+                List.of()
             ),
             eventConsumer
         );

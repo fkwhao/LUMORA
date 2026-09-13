@@ -1,10 +1,26 @@
 # 回复要求
 
+<!-- lumora-rule-start: lumora.response.markdown -->
 - 使用清晰的 Markdown，格式服务于阅读，不做过度排版。
+<!-- lumora-rule-end -->
+<!-- lumora-rule-start: lumora.response.terminology -->
 - 技术内容使用准确名称；非技术说明优先使用普通用户能理解的表达。
+<!-- lumora-rule-end -->
+<!-- lumora-rule-start: lumora.response.status -->
 - 不把计划、尝试或推测描述成已经完成的事实。
+<!-- lumora-rule-end -->
+<!-- lumora-rule-start: lumora.response.summary -->
 - 完成修改后说明最重要的变化、验证结果和仍然存在的限制。
+<!-- lumora-rule-end -->
+<!-- lumora-rule-start: lumora.response.unregistered_tools -->
 - 未注册工具时，明确说明只能提供分析或文本结果，不能假装已经操作本机环境。
+<!-- lumora-rule-end -->
+<!-- lumora-rule-start: lumora.response.citations -->
 - 当最终回答直接采用联网搜索、本地文件、PDF 附件或 Artifact 中的事实时，在对应文字后紧邻添加 `[1]`、`[2]` 形式的引用标记；同一来源始终复用同一编号，不为常识或自己的分析添加引用。
+<!-- lumora-rule-end -->
+<!-- lumora-rule-start: lumora.response.citation_definitions -->
 - 引用编号按最终回答中第一次出现的顺序连续排列，并在回答末尾追加标准 Markdown 引用定义。网页使用 `[1]: https://example.com/page "来源标题"`；工作区文件使用 `[2]: lumora-file:src/path/file.ts#L10-L18 "file.ts"`；PDF 附件使用 `[3]: lumora-attachment:attachment-id#P2-P4 "附件名"`；Artifact 使用 `[4]: lumora-artifact:artifact-id "运行结果"`。
+<!-- lumora-rule-end -->
+<!-- lumora-rule-start: lumora.response.citation_sources -->
 - 引用定义必须来自本轮实际读取或搜索得到的来源，不得编造 URL、路径、附件 ID、Artifact ID、行号或页码。定义只承担界面导航，不需要另写“参考资料”标题或重复来源列表。
+<!-- lumora-rule-end -->

@@ -8,6 +8,7 @@ import com.lumora.core.agent.dto.request.AgentMemoryContextRequest;
 import com.lumora.core.agent.dto.request.AgentMessageAttachmentRequest;
 import com.lumora.core.agent.dto.request.AgentMcpServerRequest;
 import com.lumora.core.agent.dto.request.AgentPromptContextRequest;
+import com.lumora.core.agent.dto.request.AgentPromptInstructionInputRequest;
 import com.lumora.core.agent.dto.request.AgentSessionSnapshotRequest;
 import com.lumora.core.agent.dto.response.AgentChatCompletionResponse;
 import com.lumora.core.agent.dto.response.AgentContextCompactionResponse;
@@ -189,6 +190,29 @@ public class AgentDtoMapper {
             List<AgentSessionSnapshot> agentSessions,
             List<Map<String, Object>> workflowSnapshots
     ) {
+        return toChatRequest(
+                messages, connection, reasoningEffort, memorySummary,
+                workspacePath, permissionMode, taskId, conversationSummary,
+                memoryCandidates, mcpServers, agentSessions,
+                workflowSnapshots, List.of()
+        );
+    }
+
+    public AgentChatCompletionRequest toChatRequest(
+            List<ChatMessage> messages,
+            ModelConnection connection,
+            String reasoningEffort,
+            String memorySummary,
+            String workspacePath,
+            String permissionMode,
+            String taskId,
+            String conversationSummary,
+            List<MemoryContextItem> memoryCandidates,
+            List<McpServerRuntimeConfiguration> mcpServers,
+            List<AgentSessionSnapshot> agentSessions,
+            List<Map<String, Object>> workflowSnapshots,
+            List<AgentPromptInstructionInputRequest> projectInstructionInputs
+    ) {
         List<AgentChatMessageRequest> requestMessages = messages.stream()
                 .map(message -> new AgentChatMessageRequest(
                         message.getRole(),
@@ -224,7 +248,8 @@ public class AgentDtoMapper {
                         agentSessions.stream()
                                 .map(AgentSessionSnapshotRequest::new)
                                 .toList(),
-                        workflowSnapshots
+                        workflowSnapshots,
+                        projectInstructionInputs
                 ),
                 normalizeOptionalText(reasoningEffort)
         );

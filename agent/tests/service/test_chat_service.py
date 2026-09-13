@@ -14,9 +14,11 @@ from app.dto.response.chat_completion_response import (
     TokenUsageResponse,
 )
 from app.harness.run_event import RunEvent, RunUsage
+from app.mcp.lazy_tools import MCP_TOOL_SEARCH_NAME
 from app.mcp.model import McpServerConfig, McpToolDefinition
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.prompt.prompt_builder import PromptBuilder
+from app.prompt.prompt_resolver import PromptConflictError
 from app.service.chat_service import (
     ChatService,
     _stream_with_background_events,
@@ -80,6 +82,20 @@ def test_list_models_does_not_require_chat_output_settings() -> None:
     assert models == ["example-model"]
     assert provider.settings is not None
     assert provider.settings.max_output_tokens is None
+
+
+def test_complete_does_not_wrap_prompt_conflict_as_provider_error() -> None:
+    class ConflictBuilder:
+        def build(self, _context: Any) -> Any:
+            raise PromptConflictError("key='lumora.execution'")
+
+    service = ChatService(
+        ModelListProvider(),  # type: ignore[arg-type]
+        ConflictBuilder(),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(PromptConflictError):
+        asyncio.run(service.complete(_mcp_request("继续执行")))
 
 
 class CapturingHarness:
@@ -542,7 +558,7 @@ def test_remote_mcp_is_available_without_workspace(monkeypatch: Any) -> None:
         tool["function"]["name"] for tool in harness.prompt.tools
     }
     assert len(FakeMcpClient.instances) == 1
-    assert FakeMcpClient.instances[0].closed is False
+    assert FakeMcpClient.instances[0].closed is True
 
 
 def test_pdf_tools_are_exposed_without_workspace_for_attached_pdf(
@@ -615,6 +631,98 @@ def test_mcp_session_is_reused_across_turns_and_closed_on_shutdown(
     asyncio.run(run_two_turns())
 
     assert FakeMcpClient.instances[0].closed is True
+
+
+def test_loaded_mcp_exposure_is_reused_across_follow_up_requests(
+    monkeypatch: Any,
+) -> None:
+    FakeMcpClient.instances.clear()
+    monkeypatch.setattr("app.service.chat_service.McpClient", FakeMcpClient)
+    harness = CapturingHarness()
+    service = ChatService(
+        ModelListProvider(),  # type: ignore[arg-type]
+        PromptBuilder(),
+        agent_harness=harness,  # type: ignore[arg-type]
+    )
+    request = _mcp_request("调用 MCP 工具 echo")
+    request.prompt_context.task_id = "task-warm-mcp"
+    follow_up = _mcp_request("继续处理")
+    follow_up.prompt_context.task_id = "task-warm-mcp"
+
+    async def run_two_turns() -> None:
+        await _drain(service.stream(request, "warm-1"))
+        assert "mcp__remote__echo" not in {
+            tool["function"]["name"] for tool in harness.prompt.tools
+        }
+        assert harness.registry is not None
+        assert harness.tool_context is not None
+        await harness.registry.execute(
+            MCP_TOOL_SEARCH_NAME,
+            harness.tool_context,
+            {"query": "select:mcp__remote__echo"},
+        )
+
+        await _drain(service.stream(follow_up, "warm-2"))
+        assert "mcp__remote__echo" in {
+            tool["function"]["name"] for tool in harness.prompt.tools
+        }
+        await service.close()
+
+    asyncio.run(run_two_turns())
+
+
+def test_projectless_mcp_exposure_is_not_reused_across_requests(
+    monkeypatch: Any,
+) -> None:
+    FakeMcpClient.instances.clear()
+    monkeypatch.setattr("app.service.chat_service.McpClient", FakeMcpClient)
+    harness = CapturingHarness()
+    service = ChatService(
+        ModelListProvider(),  # type: ignore[arg-type]
+        PromptBuilder(),
+        agent_harness=harness,  # type: ignore[arg-type]
+    )
+    request = _mcp_request("调用 MCP 工具 echo")
+    follow_up = _mcp_request("继续处理")
+
+    async def run_two_turns() -> None:
+        await _drain(service.stream(request, "projectless-1"))
+        assert harness.registry is not None
+        assert harness.tool_context is not None
+        await harness.registry.execute(
+            MCP_TOOL_SEARCH_NAME,
+            harness.tool_context,
+            {"query": "select:mcp__remote__echo"},
+        )
+
+        await _drain(service.stream(follow_up, "projectless-2"))
+        assert "mcp__remote__echo" not in {
+            tool["function"]["name"] for tool in harness.prompt.tools
+        }
+        await service.close()
+
+    asyncio.run(run_two_turns())
+
+
+def test_mcp_server_signature_is_hashed_without_exposing_credentials() -> None:
+    server = McpServerConfig(
+        server_id="remote",
+        name="Remote",
+        url="https://mcp.example/mcp",
+        credential="credential-secret",
+        environment={"TOKEN": "environment-secret"},
+    )
+
+    signature = ChatService._mcp_server_signature(server)
+    changed_signature = ChatService._mcp_server_signature(
+        replace(server, url="https://mcp.example/changed")
+    )
+
+    assert len(signature) == 64
+    assert int(signature, 16) >= 0
+    assert "credential-secret" not in signature
+    assert "environment-secret" not in signature
+    assert signature != changed_signature
 
 
 def test_mcp_server_is_not_connected_for_ordinary_request(

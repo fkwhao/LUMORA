@@ -10,6 +10,7 @@ public class AgentMemoryContextRequest {
     private final String scope;
     private final String type;
     private final String content;
+    private final String sourceReference;
     private final double importance;
     private final double confidence;
     private final int usageCount;
@@ -21,6 +22,7 @@ public class AgentMemoryContextRequest {
         this.scope = item.scopeType().name();
         this.type = item.memoryType().name();
         this.content = item.content();
+        this.sourceReference = item.sourceReference();
         this.importance = item.importance();
         this.confidence = item.confidence();
         this.usageCount = item.usageCount();
@@ -32,6 +34,7 @@ public class AgentMemoryContextRequest {
     public String getScope() { return scope; }
     public String getType() { return type; }
     public String getContent() { return content; }
+    public String getSourceReference() { return sourceReference; }
     public double getImportance() { return importance; }
     public double getConfidence() { return confidence; }
     public int getUsageCount() { return usageCount; }

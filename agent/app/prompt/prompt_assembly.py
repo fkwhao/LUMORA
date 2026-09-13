@@ -1,12 +1,14 @@
 from dataclasses import dataclass
 from typing import Any
 
+from app.prompt.prompt_resolver import PromptResolution
 from app.prompt.prompt_segment import PromptSegment, PromptTarget
 
 
 @dataclass(frozen=True, slots=True)
 class PromptAssembly:
     segments: tuple[PromptSegment, ...]
+    resolution: PromptResolution | None = None
 
     @property
     def system_messages(self) -> tuple[dict[str, str], ...]:
@@ -33,6 +35,14 @@ class PromptAssembly:
             for segment in self.segments
             if segment.target == PromptTarget.TOOLS
             and isinstance(segment.content, dict)
+        )
+
+    @property
+    def resolution_segments(self) -> tuple[PromptSegment, ...]:
+        return tuple(
+            segment
+            for segment in self.segments
+            if segment.target == PromptTarget.RESOLUTION
         )
 
     @property

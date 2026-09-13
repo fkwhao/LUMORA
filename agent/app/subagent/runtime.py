@@ -19,7 +19,20 @@ from app.permission.config_store import PermissionConfigStore
 from app.permission.engine import PermissionEngine
 from app.permission.model import PermissionPolicy
 from app.prompt.prompt_builder import PromptBuilder
-from app.prompt.prompt_context import PromptContext
+from app.prompt.prompt_context import ProjectInstructionInput, PromptContext
+from app.prompt.prompt_metadata import (
+    PromptAuthority,
+    PromptBinding,
+    PromptKind,
+    PromptSource,
+)
+from app.prompt.prompt_segment import (
+    PromptCachePolicy,
+    PromptPriority,
+    PromptSegment,
+    PromptTarget,
+    PromptTrustLevel,
+)
 from app.skill.catalog import SkillSummary
 from app.tool.base import (
     ToolCategory,
@@ -108,6 +121,8 @@ class SubagentRuntime:
         max_delegation_depth: int = _DEFAULT_MAX_DELEGATION_DEPTH,
         max_active_agents: int = _DEFAULT_MAX_ACTIVE_AGENTS,
         execution_budget: ExecutionBudgetLedger | None = None,
+        project_instruction_inputs: tuple[ProjectInstructionInput, ...] = (),
+        project_instruction_segments: tuple[PromptSegment, ...] = (),
     ) -> None:
         self._harness = harness
         self._settings = settings
@@ -115,6 +130,7 @@ class SubagentRuntime:
         self._source_registry = source_registry
         self._prompt_builder = prompt_builder
         self._project_instructions = project_instructions
+        self._project_instruction_segments = project_instruction_segments
         self._permission_engine = permission_engine
         self._approval_broker = approval_broker
         self._permission_config_store = permission_config_store
@@ -123,6 +139,7 @@ class SubagentRuntime:
         self._max_delegation_depth = max(1, max_delegation_depth)
         self._max_active_agents = max(1, max_active_agents)
         self._execution_budget = execution_budget
+        self._project_instruction_inputs = project_instruction_inputs
         self._allowed_tool_names: tuple[str, ...] | None = None
         self._mcp_tool_names: tuple[str, ...] = ()
         self._available_skills: tuple[SkillSummary, ...] = ()
@@ -278,7 +295,11 @@ class SubagentRuntime:
                 },
             ))
             child_registry = self._registry_for_context(context)
-            child_prompt = self._build_prompt(context, child_registry)
+            child_prompt = self._build_prompt(
+                context,
+                child_registry,
+                current_user_task=prompt,
+            )
             child_context = replace(
                 context,
                 session_id=session_id,
@@ -303,6 +324,7 @@ class SubagentRuntime:
                     context,
                     child_registry,
                     conversation_summary=summary,
+                    current_user_task=prompt,
                 ),
                 None,
                 (
@@ -452,6 +474,7 @@ class SubagentRuntime:
         registry: ToolRegistry,
         *,
         conversation_summary: str | None = None,
+        current_user_task: str | None = None,
     ):
         names = registry.names()
         boundary = (
@@ -462,11 +485,30 @@ class SubagentRuntime:
             "深度允许且确实有收益时继续委派。返回可供父 Agent 直接使用的自包含结果，并明确"
             "完成内容、验证结果、关键文件位置和任何未解决问题。"
         )
+        boundary_segment = PromptSegment(
+            key="runtime.subagent.boundary",
+            target=PromptTarget.SYSTEM,
+            content=boundary,
+            trust_level=PromptTrustLevel.TRUSTED,
+            priority=PromptPriority.REQUIRED,
+            cache_policy=PromptCachePolicy.TASK,
+            source=PromptSource.RUNTIME,
+            authority=PromptAuthority.RUNTIME,
+            binding=PromptBinding.REQUIRED,
+            kind=PromptKind.INSTRUCTION,
+            scope="task",
+            source_ref="subagent.boundary",
+        )
         return self._prompt_builder.build(PromptContext(
             workspace_path=(
                 str(context.workspace_path) if context.workspace_scoped else None
             ),
-            project_instructions=(*self._project_instructions, boundary),
+            task_id=context.task_id,
+            current_user_task=current_user_task,
+            project_instructions=self._project_instructions,
+            project_instruction_inputs=self._project_instruction_inputs,
+            project_instruction_segments=self._project_instruction_segments,
+            runtime_segments=(boundary_segment,),
             available_tools=names,
             mcp_tool_names=tuple(
                 name for name in self._mcp_tool_names if name in names

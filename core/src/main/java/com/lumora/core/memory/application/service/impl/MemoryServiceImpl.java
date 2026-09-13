@@ -377,6 +377,7 @@ public class MemoryServiceImpl implements MemoryService {
                 .map(item -> new MemoryContextItem(
                         item.getMemoryId(), item.getScopeType(),
                         item.getMemoryType(), item.getContent(),
+                        item.getSourceReference(),
                         item.getImportance(), item.getConfidence(),
                         item.getUsageCount(), item.getLastUsedAt(),
                         item.getUpdatedAt()

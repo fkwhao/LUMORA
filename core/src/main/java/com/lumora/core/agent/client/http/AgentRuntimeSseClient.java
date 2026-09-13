@@ -58,8 +58,20 @@ public class AgentRuntimeSseClient {
                     .body(request)
                     .exchange((httpRequest, response) -> {
                         if (!response.getStatusCode().is2xxSuccessful()) {
+                            String responseBody;
+                            try {
+                                responseBody = response.getBody() == null
+                                        ? ""
+                                        : new String(
+                                                response.getBody().readAllBytes(),
+                                                StandardCharsets.UTF_8
+                                        );
+                            } catch (IOException ignored) {
+                                responseBody = "";
+                            }
                             throw exceptionMapper.fromStatus(
-                                    response.getStatusCode()
+                                    response.getStatusCode(),
+                                    responseBody
                             );
                         }
                         readEvents(response.getBody(), eventConsumer);

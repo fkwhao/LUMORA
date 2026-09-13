@@ -125,6 +125,11 @@ class AgentLoopRunner:
             *prompt.context_messages,
             *[message.as_provider_message() for message in messages],
         ]
+        # Prompt 上下文和运行时事实可能为了兼容 Provider 被渲染为 user 消息，
+        # 但它们不属于用户意图。
+        latest_real_user_request = _latest_real_user_request(
+            [message.as_provider_message() for message in messages]
+        )
         cumulative_usage = empty_token_usage()
         active_context_tokens = 0
         resolved_model = settings.model
@@ -197,10 +202,10 @@ class AgentLoopRunner:
                     workspace_revision,
                     external_changes,
                 )
-                request_messages.append({
-                    "role": "system",
-                    "content": workspace_notice,
-                })
+                has_controlled_prompt_path = (
+                    self._prompt_supplier is not None
+                    and tool_context.reminder_store is not None
+                )
                 if tool_context.reminder_store is not None:
                     tool_context.reminder_store.upsert(
                         "workspace.external_changes",
@@ -209,7 +214,7 @@ class AgentLoopRunner:
                             external_changes,
                         ),
                     )
-                    if self._prompt_supplier is not None:
+                    if has_controlled_prompt_path:
                         prompt, request_messages = _refresh_prompt(
                             prompt,
                             request_messages,
@@ -224,6 +229,14 @@ class AgentLoopRunner:
                         reminder_revision = (
                             tool_context.reminder_store.revision
                         )
+                if self._prompt_supplier is None:
+                    # 兼容尚未接入 Prompt supplier 和 Reminder Store 的调用方。
+                    # 正常路径由 PromptBuilder 恰好渲染一次 Reminder，不能再追加
+                    # 重复的 user 消息。
+                    request_messages.append({
+                        "role": "user",
+                        "content": f"# 运行时工作区事实\n{workspace_notice}",
+                    })
                 yield RunEvent(
                     type="progress_message",
                     title="已同步其他任务的工作区修改",
@@ -252,6 +265,7 @@ class AgentLoopRunner:
                         "content": steer.content,
                     }
                     request_messages.append(steer_message)
+                    latest_real_user_request = steer.content
                     yield RunEvent(
                         type="steer_claimed",
                         item_id=steer.input_id,
@@ -567,6 +581,7 @@ class AgentLoopRunner:
                             "content": steer.content,
                         }
                         request_messages.append(steer_message)
+                        latest_real_user_request = steer.content
                         yield RunEvent(
                             type="steer_claimed",
                             item_id=steer.input_id,
@@ -603,7 +618,6 @@ class AgentLoopRunner:
             pending_tool_messages: list[dict[str, Any]] = []
             tool_results: list[str] = []
             prompt_refresh_requested = False
-            latest_user_request = _latest_user_request(request_messages)
             scheduler = ToolCallScheduler(
                 tool_executor,
                 self._result_processor,
@@ -615,7 +629,7 @@ class AgentLoopRunner:
                 resolved_model,
                 settings,
                 permission_policy,
-                latest_user_request,
+                latest_real_user_request,
                 turn.content[-10_000:],
                 run_control,
             ):
@@ -890,7 +904,7 @@ def _tool_iteration_fingerprint(
     return digest.hexdigest()
 
 
-def _latest_user_request(messages: list[dict[str, Any]]) -> str:
+def _latest_real_user_request(messages: list[dict[str, Any]]) -> str:
     for message in reversed(messages):
         if message.get("role") != "user":
             continue

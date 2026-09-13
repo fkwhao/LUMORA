@@ -13,6 +13,7 @@ class MemorySelection:
     project_memory: tuple[str, ...] = ()
     conversation_memory: tuple[str, ...] = ()
     memory_ids: tuple[str, ...] = ()
+    provenance: tuple[tuple[str, str, str | None], ...] = ()
 
 
 class MemoryRetriever:
@@ -71,6 +72,10 @@ class MemoryRetriever:
             project_memory=grouped["PROJECT"],
             conversation_memory=grouped["CONVERSATION"],
             memory_ids=tuple(item.memory_id for item in selected),
+            provenance=tuple(
+                (item.scope, item.memory_id, item.source_reference)
+                for item in selected
+            ),
         )
 
     def _score(

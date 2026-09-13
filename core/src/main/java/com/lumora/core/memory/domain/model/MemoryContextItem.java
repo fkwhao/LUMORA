@@ -11,10 +11,36 @@ public record MemoryContextItem(
         MemoryScopeType scopeType,
         MemoryType memoryType,
         String content,
+        String sourceReference,
         double importance,
         double confidence,
         int usageCount,
         Instant lastUsedAt,
         Instant updatedAt
 ) {
+    /** Backward-compatible constructor for callers without provenance data. */
+    public MemoryContextItem(
+            String memoryId,
+            MemoryScopeType scopeType,
+            MemoryType memoryType,
+            String content,
+            double importance,
+            double confidence,
+            int usageCount,
+            Instant lastUsedAt,
+            Instant updatedAt
+    ) {
+        this(
+                memoryId,
+                scopeType,
+                memoryType,
+                content,
+                null,
+                importance,
+                confidence,
+                usageCount,
+                lastUsedAt,
+                updatedAt
+        );
+    }
 }

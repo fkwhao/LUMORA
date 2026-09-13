@@ -1,0 +1,14 @@
+# 复制到目标工作区的 .lumora/prompt-policy.yaml 后按项目实际规则修改。
+# managedSources 中列出的 AGENTS.md/CLAUDE.md 不会再以整份原文注入；
+# 只有下面明确列出的原子规则对模型可见。
+# lumora.* 必须引用可覆盖的 Core 默认规则；项目自定义冲突使用 project.*。
+# 当前项目策略只支持工作区级 scope，不支持目录级 scope。
+managedSources:
+  - AGENTS.md
+
+rules:
+  - ruleId: project.framework
+    sourceRef: AGENTS.md
+    content: 项目要求使用 unittest
+    conflictKey: lumora.execution.requested_change
+    scope: workspace

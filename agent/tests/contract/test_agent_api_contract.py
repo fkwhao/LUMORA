@@ -1,13 +1,18 @@
 from pathlib import Path
 from typing import get_args
 
+import pytest
 import yaml
 
 from app.config.settings import AgentSettings
-from app.dto.request.chat_completion_request import ExecutionBudgetRequest
+from app.dto.request.chat_completion_request import (
+    ExecutionBudgetRequest,
+    ProjectInstructionInputRequest,
+)
 from app.dto.response.chat_stream_event_response import ChatStreamEventResponse
 from app.harness.run_event import RunEventType
 from app.main import create_app
+from app.prompt.prompt_errors import PromptConfigurationError
 from app.service.planner_service import PlannerService
 
 
@@ -34,6 +39,7 @@ def test_prompt_context_contract_contains_only_runtime_facts() -> None:
     assert set(properties) == {
         "workspacePath",
         "projectInstructions",
+        "projectInstructionInputs",
         "availableTools",
         "memorySummary",
         "memoryCandidates",
@@ -62,6 +68,51 @@ def test_prompt_context_contract_contains_only_runtime_facts() -> None:
     assert memory_schema["properties"]["scope"]["enum"] == [
         "USER", "PROJECT", "CONVERSATION"
     ]
+    project_input = contract["components"]["schemas"]["ProjectInstructionInput"]
+    assert set(project_input["properties"]) == {
+        "content", "sourceRef", "conflictKey", "scope"
+    }
+    assert project_input["allOf"] == [{
+        "if": {"required": ["conflictKey"]},
+        "then": {"required": ["sourceRef"]},
+    }]
+    assert project_input["properties"]["sourceRef"]["minLength"] == 1
+
+
+def test_project_instruction_request_rejects_unsupported_scope_and_missing_ref() -> None:
+    with pytest.raises(ValueError):
+        ProjectInstructionInputRequest(
+            content="项目规则",
+            conflictKey="project.rule",
+            sourceRef="AGENTS.md#rule",
+            scope="workspace:/src",
+        )
+    with pytest.raises(ValueError, match="sourceRef"):
+        ProjectInstructionInputRequest(
+            content="项目规则",
+            conflictKey="project.rule",
+        )
+
+
+def test_app_creation_fails_fast_on_invalid_core_prompt_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class InvalidPromptBuilder:
+        def validate_configuration(self) -> None:
+            raise PromptConfigurationError("Core Prompt 配置无效")
+
+    monkeypatch.setattr("app.main.PromptBuilder", InvalidPromptBuilder)
+
+    with pytest.raises(PromptConfigurationError, match="Core Prompt"):
+        create_app(
+            AgentSettings(
+                host="127.0.0.1",
+                port=45101,
+                startup_token="a" * 64,
+                protocol_version="1",
+            ),
+            PlannerService(),
+        )
 
 
 def test_memory_extraction_contract_supports_lifecycle_and_project_rules() -> None:

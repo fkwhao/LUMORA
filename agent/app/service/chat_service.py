@@ -1,6 +1,9 @@
 import asyncio
+import hashlib
+import json
 import logging
 import uuid
+from collections import OrderedDict
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
@@ -38,7 +41,9 @@ from app.mcp.exposure_policy import (
     should_expose_capability_tools,
 )
 from app.mcp.lazy_tools import (
+    DEFAULT_MCP_TOOL_IDLE_ROUNDS,
     MCP_TOOL_SEARCH_NAME,
+    McpDeferredToolState,
     McpDeferredToolStore,
 )
 from app.mcp.session_pool import McpSessionLease, McpSessionPool
@@ -57,7 +62,9 @@ from app.permission.model import (
 )
 from app.prompt.project_instruction_loader import ProjectInstructionLoader
 from app.prompt.prompt_builder import PromptBuilder
-from app.prompt.prompt_context import PromptContext
+from app.prompt.prompt_context import ProjectInstructionInput, PromptContext
+from app.prompt.prompt_errors import PromptConfigurationError
+from app.prompt.prompt_resolver import PromptConflictError
 from app.prompt.runtime_reminder import RuntimeReminderStore
 from app.provider.token_usage import add_token_usage, empty_token_usage
 from app.service.mcp_service import to_mcp_config
@@ -70,6 +77,7 @@ from app.tool.default_registry import create_default_tool_registry
 from app.tool.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
+_MAX_MCP_DEFERRED_STATES = 64
 
 
 class ChatService:
@@ -90,6 +98,7 @@ class ChatService:
         run_controls: RunControlRegistry | None = None,
         mcp_session_pool: McpSessionPool | None = None,
         max_parallel_tool_calls: int = 10,
+        mcp_tool_idle_rounds: int = DEFAULT_MCP_TOOL_IDLE_ROUNDS,
     ) -> None:
         self._provider = provider
         self._prompt_builder = prompt_builder
@@ -110,6 +119,12 @@ class ChatService:
         self._run_controls = run_controls or RunControlRegistry()
         self._mcp_session_pool = mcp_session_pool or McpSessionPool()
         self._max_parallel_tool_calls = max_parallel_tool_calls
+        if mcp_tool_idle_rounds < 1:
+            raise ValueError("mcp_tool_idle_rounds 必须大于 0")
+        self._mcp_tool_idle_rounds = mcp_tool_idle_rounds
+        self._mcp_deferred_states: OrderedDict[
+            str, McpDeferredToolState
+        ] = OrderedDict()
 
     async def pause_run(self, run_id: str) -> bool:
         return await self._run_controls.pause(run_id)
@@ -133,6 +148,7 @@ class ChatService:
 
     async def close(self) -> None:
         await self._mcp_session_pool.close()
+        self._mcp_deferred_states.clear()
 
     async def list_models(self, request: ModelListRequest) -> list[str]:
         connection = request
@@ -172,14 +188,16 @@ class ChatService:
         request: ChatCompletionRequest,
     ) -> ChatCompletionResponse:
         settings = self._connection(request)
-        prompt = self._prompt_builder.build(self._prompt_context(request))
         try:
+            prompt = self._prompt_builder.build(self._prompt_context(request))
             return await self._provider.complete(
                 settings,
                 prompt,
                 request.messages,
                 request.reasoning_effort,
             )
+        except (PromptConflictError, PromptConfigurationError):
+            raise
         except (httpx.HTTPError, TypeError, ValueError) as error:
             # Provider 响应可能包含敏感内容，HTTP 边界只返回稳定错误。
             raise ModelProviderError(
@@ -247,9 +265,14 @@ class ChatService:
                 reasoning_effort=request.reasoning_effort,
                 source_registry=runtime_registry,
                 prompt_builder=self._prompt_builder,
-                project_instructions=(
-                    tuple(request.prompt_context.project_instructions)
-                    + self._project_instruction_loader.load(
+                project_instructions=tuple(
+                    request.prompt_context.project_instructions
+                ),
+                project_instruction_inputs=self._project_instruction_inputs(
+                    request
+                ),
+                project_instruction_segments=(
+                    self._project_instruction_loader.load_segments(
                         request.prompt_context.workspace_path
                     )
                 ),
@@ -457,6 +480,8 @@ class ChatService:
                 session_manager,
             ):
                 yield _with_prelude_usage(event, prelude_usage)
+        except (PromptConflictError, PromptConfigurationError):
+            raise
         except (httpx.HTTPError, OSError, TypeError, ValueError) as error:
             logger.warning(
                 "Model stream failed correlation_id=%s provider=%s "
@@ -565,7 +590,7 @@ class ChatService:
             context.memory_candidates,
             current_request,
         )
-        file_instructions = self._project_instruction_loader.load(
+        file_instruction_segments = self._project_instruction_loader.load_segments(
             context.workspace_path
         )
         registry = tool_registry or self._tool_registry
@@ -636,9 +661,11 @@ class ChatService:
             system_reminders.extend(mcp_deferred_tools.reminders())
         return PromptContext(
             workspace_path=context.workspace_path,
-            project_instructions=(
-                tuple(context.project_instructions) + file_instructions
-            ),
+            task_id=context.task_id,
+            current_user_task=current_request,
+            project_instructions=tuple(context.project_instructions),
+            project_instruction_inputs=self._project_instruction_inputs(request),
+            project_instruction_segments=file_instruction_segments,
             available_tools=allowed_names,
             mcp_tool_names=tuple(
                 name for name in allowed_names if name in mcp_names
@@ -652,12 +679,27 @@ class ChatService:
             project_memory=selection.project_memory,
             conversation_memory=selection.conversation_memory,
             selected_memory_ids=selection.memory_ids,
+            memory_provenance=selection.provenance,
             conversation_summary=(
                 conversation_summary
                 if conversation_summary is not None
                 else context.conversation_summary
             ),
             available_skills=skills,
+        )
+
+    @staticmethod
+    def _project_instruction_inputs(
+        request: ChatCompletionRequest,
+    ) -> tuple[ProjectInstructionInput, ...]:
+        return tuple(
+            ProjectInstructionInput(
+                content=item.content,
+                source_ref=item.source_ref,
+                conflict_key=item.conflict_key,
+                scope=item.scope,
+            )
+            for item in request.prompt_context.project_instruction_inputs
         )
 
     async def _prepare_mcp_registry(
@@ -694,21 +736,33 @@ class ChatService:
         expose_capabilities = should_expose_capability_tools(
             self._current_user_request(request)
         )
-        deferred_tools = McpDeferredToolStore()
         errors: list[tuple[str, str]] = []
         leases: list[McpSessionLease] = []
-        task_scope = (
-            request.prompt_context.task_id
-            or request.prompt_context.workspace_path
-            or "unscoped"
+        task_scope = self._mcp_task_scope(request)
+        if task_scope is None:
+            # Projectless requests have no stable owner.  Keep their warm state
+            # local to this request instead of sharing it through one global
+            # ``unscoped`` bucket.
+            deferred_state = McpDeferredToolState()
+        else:
+            deferred_state = self._mcp_deferred_states.pop(task_scope, None)
+            if deferred_state is None:
+                deferred_state = McpDeferredToolState()
+            self._mcp_deferred_states[task_scope] = deferred_state
+            while len(self._mcp_deferred_states) > _MAX_MCP_DEFERRED_STATES:
+                self._mcp_deferred_states.popitem(last=False)
+        deferred_tools = McpDeferredToolStore(
+            idle_rounds=self._mcp_tool_idle_rounds,
+            state=deferred_state,
         )
 
         async def connect(server):
             try:
                 lease = await self._mcp_session_pool.acquire(
-                    task_scope,
+                    task_scope or "",
                     to_mcp_config(server),
                     McpClient,
+                    reuse=task_scope is not None,
                 )
                 return server, lease, None
             except (
@@ -750,6 +804,9 @@ class ChatService:
                                 tool,
                                 server_name=server.name,
                                 remote_name=definition.name,
+                                server_signature=self._mcp_server_signature(
+                                    server
+                                ),
                             )
                             existing_names.add(tool.name)
                         except ValueError as definition_error:
@@ -790,15 +847,69 @@ class ChatService:
             registry,
             leases,
             errors,
-            deferred_tools if deferred_tools.has_pending() else None,
+            deferred_tools
+            if deferred_tools.has_pending() or deferred_state.loaded_names
+            else None,
         )
+
+    @staticmethod
+    def _mcp_task_scope(request: ChatCompletionRequest) -> str | None:
+        return (
+            request.prompt_context.task_id
+            or request.prompt_context.workspace_path
+            or None
+        )
+
+    @staticmethod
+    def _mcp_server_signature(server: object) -> str:
+        environment = getattr(server, "environment", {}) or {}
+        payload = {
+            "serverId": getattr(server, "server_id", ""),
+            "name": getattr(server, "name", ""),
+            "url": getattr(server, "url", ""),
+            "transport": getattr(server, "transport", ""),
+            "command": getattr(server, "command", ""),
+            "arguments": list(getattr(server, "arguments", ()) or ()),
+            "workingDirectory": getattr(server, "working_directory", ""),
+            "authType": getattr(server, "auth_type", ""),
+            "headerName": getattr(server, "header_name", ""),
+            "credential": getattr(server, "credential", ""),
+            "environment": dict(sorted(environment.items())),
+        }
+        serialized = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
     def _selected_mcp_servers(self, request: ChatCompletionRequest) -> list:
         current_request = self._current_user_request(request)
-        return [
+        explicitly_selected = [
             server
             for server in request.prompt_context.mcp_servers
             if server.enabled and should_connect_server(current_request, server)
+        ]
+        if explicitly_selected:
+            return explicitly_selected
+
+        task_scope = self._mcp_task_scope(request)
+        if task_scope is None:
+            return []
+        state = self._mcp_deferred_states.get(task_scope)
+        if state is None or not state.active_server_signatures:
+            return []
+        self._mcp_deferred_states.move_to_end(task_scope)
+        return [
+            server
+            for server in request.prompt_context.mcp_servers
+            if (
+                server.enabled
+                and self._mcp_server_signature(server)
+                in state.active_server_signatures
+            )
         ]
 
     @staticmethod

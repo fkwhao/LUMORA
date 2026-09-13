@@ -310,6 +310,7 @@ LUMORA 采用与现代 Agent Harness 一致的分层装配方式，而不是把�
 稳定规则片段
   + 当前工作区和项目规则
   + 本次运行实际可用的能力
+  → Prompt 元数据归一化与冲突裁决
   → PromptBuilder
   → Provider 请求
 ```
@@ -319,6 +320,75 @@ DeepSeek、OpenAI 兼容模型和后续 Managed Provider 可以共用。当前�
 指令和能力列表在请求时动态注入；API Key、启动令牌和其他凭据永远不进入 Prompt。
 记忆提取等专用任务使用 `prompt/templates` 下的独立模板并由 `PromptLoader` 读取，
 Service 不再内嵌另一套长提示词。
+
+Prompt 片段同时保留 `source`、`authority`、`binding`、`kind`、`scope` 和
+`sourceRef`。其中 `authority` 表示语义上的来源层级，`binding` 区分硬约束、强制要求、
+默认行为和参考信息，`priority`/`retention` 只表示上下文压缩时的保留策略，不能用于
+指令覆盖判断。`PromptConflictResolver` 只裁决带有明确 `conflictKey` 的结构化规则；
+没有结构化键的自由文本按来源标签和核心 Prompt 中声明的优先级交给模型理解，不用
+不确定的自然语言猜测静默覆盖。相同层级的强制规则无法裁决时必须显式报冲突。
+
+来源策略由 Python 的 `PromptPolicy` 统一派生并做上限校验：Memory/History 固定为
+`CONTEXT/REFERENCE`，工作区文件和上游项目规则最高为 `PROJECT/REQUIRED`，只有静态
+Core 片段能产生 `CORE`，`SECURITY/HARD` 只允许专用安全运行时来源。调用方可以为展示
+用途降级元数据，但不能通过 DTO 或 Prompt 内容提升来源等级。Resolver 还会根据当前请求
+的活动 workspace/task scope 过滤不适用规则，再在相同作用域中按
+`binding > authority > scope specificity` 裁决。当前项目规则只使用精确的 `workspace` 作用域，
+不支持未经目标资源证明的目录级作用域。
+`SECURITY_RUNTIME` 片段必须由安全运行时工厂创建，普通 Prompt 组装路径不能直接声明该来源。
+当前用户任务保留为 `USER_TASK` 的裁决元数据片段，但使用 `resolution` 目标，不会在
+Provider 请求中重复一遍用户消息。
+
+安全和权限仍由运行时硬边界负责，Prompt 元数据不能授予工具权限。工作区的
+`AGENTS.md`、`CLAUDE.md` 等文件由 Python 的项目指令 Loader 直接读取并标记为
+`WORKSPACE_FILE/PROJECT`。来源只能提升到策略允许的 authority/binding 上限；Memory、
+History 和项目策略文件不能自行声明更高权限。Java Core 传递自身产生的结构化项目规则
+时使用 `projectInstructionInputs`，只包含内容、`sourceRef`、`conflictKey` 和 `scope`；
+authority 与 binding 由 Python 策略派生。旧的 `projectInstructions` 字段继续兼容，但
+没有结构化冲突键。
+
+Core 模板不会再把整份 Markdown 文件绑定到一个冲突键。`CorePromptRuleRegistry` 维护稳定的
+Core 规则清单，并校验模板 marker、所属文件、binding 和可覆盖性。模板只在明确允许参与覆盖的
+默认规则前放置受控标记，例如：
+
+```markdown
+<!-- lumora-rule-start: lumora.collaboration.language -->
+- 默认使用用户当前使用的语言交流，表达自然、直接且易于核对。
+<!-- lumora-rule-end -->
+```
+
+`PromptLoader` 只拆分这种成对显式标记包裹的原子规则；同一文件中未标记的身份、说明和其他
+基础内容仍作为无 `conflictKey` 的普通 Core 片段注入。工具安全文件作为完整的 `CORE/HARD`
+片段注入，不参与项目覆盖注册。Core 原子规则键由注册表和模板共同校验且必须全局唯一，项目策略中的
+`ruleId` 也必须稳定且唯一，项目规则
+只能压制命中的单条默认规则，不能删除同文件的其他片段。不要对任意 Markdown 做自然
+语言相似度比较。
+
+需要让工作区文件中的某条规则参与确定性裁决时，可在
+`.lumora/prompt-policy.yaml` 中声明一个原子结构化规则（旧版 JSON 文件仍兼容；完整示例
+见 `agent/config/prompt-policy.example.yaml`）：
+
+```yaml
+managedSources:
+  - AGENTS.md
+rules:
+  - ruleId: project.framework
+    sourceRef: AGENTS.md
+    content: 项目要求使用 unittest
+    conflictKey: lumora.execution.requested_change
+```
+
+被 `managedSources` 列出的 `AGENTS.md`/`CLAUDE.md` 不再以原文注入，策略中的每条
+`content` 是它唯一的模型可见来源。未列入 `managedSources` 的文件继续按原有兼容行为
+作为无冲突键的完整可信项目文本注入；若策略规则正文又逐字出现在该原文中，则配置直接
+报错，要求将来源纳入 managedSources 或删除重复规则。策略中的 `ruleId`、来源引用、
+内容和冲突键必须明确、唯一且引用实际存在的项目指令文件；项目策略当前只允许
+`scope: workspace`，策略不能声明
+`authority`、`binding` 或 `trust`，这些元数据仍由 Python `PromptPolicy` 派生。
+
+同级结构化规则无法裁决时，`PromptConflictError` 只在服务端日志和测试中保留
+`conflictKey`、`scope`、`sources` 与 `sourceRefs`，HTTP 和 SSE 边界继续只返回稳定的
+`PROMPT_CONFLICT`，不返回冲突规则正文。
 
 工具定义不复制到 System Prompt，也不注册尚未实现的“虚拟工具”。每个实际能力由
 Python Harness 的 Tool Registry 提供名称、用途、输入 JSON Schema、风险属性、
@@ -337,8 +407,8 @@ Python Harness 的 Tool Registry 提供名称、用途、输入 JSON Schema、�
 `default_registry.py` 只按稳定顺序装配；`tool_runtime.py` 保留旧导入兼容入口。破坏性属性
 同时用于审计、界面表达和执行前权限审批，不能只依赖 Prompt 或标记本身阻止危险操作。
 
-Java 发给 Python 的 PromptContext 只包含 `workspacePath`、`projectInstructions`、
-`availableTools`、兼容旧调用的 `memorySummary`、结构化 `memoryCandidates`、任务 ID、
+Java 发给 Python 的 PromptContext 只包含 `workspacePath`、兼容旧调用的
+`projectInstructions`、结构化的 `projectInstructionInputs`、`availableTools`、兼容旧调用的 `memorySummary`、结构化 `memoryCandidates`、任务 ID、
 会话摘要和权限事实。稳定行为规则只存在于 Python 静态 Prompt；工具
 Schema 只由 Python Tool Registry 生成。跨进程接口不再提供 `systemReminders` 或
 `toolDefinitions` 这类可注入稳定规则、复制 Schema 的旁路。

@@ -25,19 +25,25 @@ class McpSessionLease:
     def __init__(
         self,
         pool: "McpSessionPool",
-        key: str,
+        key: str | None,
         session: McpSession,
+        *,
+        close_on_release: bool = False,
     ) -> None:
         self.session = session
         self._pool = pool
         self._key = key
+        self._close_on_release = close_on_release
         self._released = False
 
     async def release(self) -> None:
         if self._released:
             return
         self._released = True
-        await self._pool.release(self._key)
+        if self._close_on_release:
+            await self.session.client.close()
+        elif self._key is not None:
+            await self._pool.release(self._key)
 
 
 class McpSessionPool:
@@ -54,7 +60,18 @@ class McpSessionPool:
         task_scope: str,
         config: McpServerConfig,
         client_factory: Callable[[McpServerConfig], McpClient] = McpClient,
+        *,
+        reuse: bool = True,
     ) -> McpSessionLease:
+        if not reuse:
+            session = await _connect_session(config, client_factory)
+            return McpSessionLease(
+                self,
+                None,
+                session,
+                close_on_release=True,
+            )
+
         key = _session_key(task_scope, config)
         async with self._lock:
             cached = self._entries.get(key)

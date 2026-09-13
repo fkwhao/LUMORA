@@ -16,6 +16,12 @@ from app.model.model_connection_settings import ModelConnectionSettings
 from app.prompt.project_instruction_loader import ProjectInstructionLoader
 from app.prompt.prompt_assembly import PromptAssembly
 from app.prompt.prompt_loader import PromptLoader
+from app.prompt.prompt_metadata import (
+    PromptAuthority,
+    PromptBinding,
+    PromptKind,
+    PromptSource,
+)
 from app.prompt.prompt_segment import (
     PromptCachePolicy,
     PromptPriority,
@@ -70,6 +76,12 @@ class MemoryExtractionService:
                 trust_level=PromptTrustLevel.TRUSTED,
                 priority=PromptPriority.REQUIRED,
                 cache_policy=PromptCachePolicy.STATIC,
+                source=PromptSource.STATIC_SYSTEM,
+                authority=PromptAuthority.CORE,
+                binding=PromptBinding.HARD,
+                kind=PromptKind.INSTRUCTION,
+                scope="global",
+                source_ref="memory_extraction",
             ),
         ))
         payload = {

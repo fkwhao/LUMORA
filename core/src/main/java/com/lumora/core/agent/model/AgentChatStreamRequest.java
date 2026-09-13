@@ -1,5 +1,6 @@
 package com.lumora.core.agent.model;
 
+import com.lumora.core.agent.dto.request.AgentPromptInstructionInputRequest;
 import com.lumora.core.conversation.domain.model.AgentSessionSnapshot;
 import com.lumora.core.conversation.domain.model.ChatMessage;
 import com.lumora.core.mcp.domain.model.McpServerRuntimeConfiguration;
@@ -25,7 +26,8 @@ public record AgentChatStreamRequest(
         List<MemoryContextItem> memoryCandidates,
         List<McpServerRuntimeConfiguration> mcpServers,
         List<AgentSessionSnapshot> agentSessions,
-        List<Map<String, Object>> workflowSnapshots
+        List<Map<String, Object>> workflowSnapshots,
+        List<AgentPromptInstructionInputRequest> projectInstructionInputs
 ) {
     public AgentChatStreamRequest(
             List<ChatMessage> messages,
@@ -42,7 +44,7 @@ public record AgentChatStreamRequest(
     ) {
         this(messages, connection, correlationId, reasoningEffort,
                 memorySummary, workspacePath, permissionMode, taskId,
-                conversationSummary, memoryCandidates, mcpServers, List.of(), List.of());
+                conversationSummary, memoryCandidates, mcpServers, List.of(), List.of(), List.of());
     }
 
     public AgentChatStreamRequest(
@@ -62,7 +64,7 @@ public record AgentChatStreamRequest(
         this(messages, connection, correlationId, reasoningEffort,
                 memorySummary, workspacePath, permissionMode, taskId,
                 conversationSummary, memoryCandidates, mcpServers,
-                agentSessions, List.of());
+                agentSessions, List.of(), List.of());
     }
 
     public AgentChatStreamRequest {
@@ -74,5 +76,7 @@ public record AgentChatStreamRequest(
                 ? List.of() : List.copyOf(agentSessions);
         workflowSnapshots = workflowSnapshots == null
                 ? List.of() : List.copyOf(workflowSnapshots);
+        projectInstructionInputs = projectInstructionInputs == null
+                ? List.of() : List.copyOf(projectInstructionInputs);
     }
 }

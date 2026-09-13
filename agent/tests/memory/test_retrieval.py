@@ -14,12 +14,14 @@ def memory(
     usage_count: int = 0,
     age_days: int = 0,
     last_used_age_days: int | None = None,
+    source_reference: str | None = None,
 ) -> MemoryContextRequest:
     return MemoryContextRequest.model_validate({
         "memoryId": memory_id,
         "scope": scope,
         "type": "FACT" if scope != "USER" else "PREFERENCE",
         "content": content,
+        "sourceReference": source_reference,
         "importance": importance,
         "confidence": confidence,
         "usageCount": usage_count,
@@ -60,6 +62,24 @@ def test_selects_relevant_memories_and_preserves_layers() -> None:
     )
     assert selected.conversation_memory == ("当前正在优化 Memory 检索",)
     assert "irrelevant" not in selected.memory_ids
+
+
+def test_selection_retains_memory_source_provenance() -> None:
+    selected = MemoryRetriever().select(
+        [memory(
+            "project-1",
+            "PROJECT",
+            "项目使用 SQLite",
+            importance=0.9,
+            source_reference="conversation:42",
+        )],
+        "项目 SQLite",
+        datetime(2026, 8, 6, tzinfo=timezone.utc),
+    )
+
+    assert selected.provenance == (
+        ("PROJECT", "project-1", "conversation:42"),
+    )
 
 
 def test_stable_user_preference_can_be_injected_without_keyword_overlap() -> None:

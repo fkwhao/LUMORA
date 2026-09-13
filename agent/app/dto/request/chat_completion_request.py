@@ -192,11 +192,52 @@ class MemoryContextRequest(BaseModel):
     scope: Literal["USER", "PROJECT", "CONVERSATION"]
     type: Literal["PREFERENCE", "FACT", "DECISION", "CONSTRAINT", "SUMMARY"]
     content: str = Field(min_length=1, max_length=4_000)
+    source_reference: str | None = Field(
+        default=None,
+        alias="sourceReference",
+        max_length=2_000,
+    )
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     usage_count: int = Field(default=0, alias="usageCount", ge=0)
     last_used_time: datetime | None = Field(default=None, alias="lastUsedTime")
     updated_time: datetime = Field(alias="updatedTime")
+
+
+class ProjectInstructionInputRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    content: str = Field(min_length=1, max_length=32_000)
+    source_ref: str | None = Field(
+        default=None,
+        alias="sourceRef",
+        max_length=500,
+    )
+    conflict_key: str | None = Field(
+        default=None,
+        alias="conflictKey",
+        max_length=200,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    )
+    scope: Literal["workspace"] = "workspace"
+
+    @model_validator(mode="after")
+    def validate_provenance_fields(self) -> "ProjectInstructionInputRequest":
+        self.content = self.content.strip()
+        self.scope = self.scope.strip()
+        if not self.content:
+            raise ValueError("结构化项目规则内容不能为空")
+        if not self.scope:
+            raise ValueError("结构化项目规则 scope 不能为空")
+        if self.source_ref is not None:
+            self.source_ref = self.source_ref.strip() or None
+        if self.conflict_key is not None:
+            self.conflict_key = self.conflict_key.strip()
+            if not self.source_ref:
+                raise ValueError(
+                    "设置 conflictKey 时 sourceRef 不能为空"
+                )
+        return self
 
 
 class McpServerRequest(BaseModel):
@@ -351,6 +392,11 @@ class PromptContextRequest(BaseModel):
     project_instructions: list[str] = Field(
         default_factory=list,
         alias="projectInstructions",
+        max_length=100,
+    )
+    project_instruction_inputs: list[ProjectInstructionInputRequest] = Field(
+        default_factory=list,
+        alias="projectInstructionInputs",
         max_length=100,
     )
     available_tools: list[str] = Field(

@@ -14,6 +14,7 @@ from app.dto.response.chat_completion_response import (
     TokenUsageResponse,
 )
 from app.execution.tool_result_processor import ToolResultProcessor
+from app.execution.workspace_changes import WorkspaceChangeLedger
 from app.harness.agent_loop import AgentLoopRunner
 from app.harness.contracts import (
     ProviderToolCall,
@@ -23,8 +24,17 @@ from app.harness.contracts import (
 from app.harness.run_control import RunControlRegistry
 from app.harness.run_event import RunEvent
 from app.model.model_connection_settings import ModelConnectionSettings
+from app.permission.config_store import PermissionConfigStore
+from app.permission.model import PermissionMode, PermissionPolicy
+from app.permission.reviewer import (
+    ApprovalReviewDecision,
+    ApprovalReviewResult,
+)
 from app.prompt.prompt_assembly import PromptAssembly
-from app.tool.base import ToolContext, ToolResult, function_tool
+from app.prompt.prompt_builder import PromptBuilder
+from app.prompt.prompt_context import PromptContext
+from app.prompt.runtime_reminder import RuntimeReminderStore
+from app.tool.base import ToolCategory, ToolContext, ToolResult, function_tool
 from app.tool.registry import ToolRegistry
 
 
@@ -169,6 +179,141 @@ def test_agent_loop_bounds_the_parallel_tool_pool() -> None:
 
 def test_agent_loop_pause_drains_started_parallel_calls_without_replenishing() -> None:
     asyncio.run(_assert_parallel_pause_stops_pool_replenishment())
+
+
+def test_agent_loop_injects_workspace_notice_once_and_preserves_user_request(
+    tmp_path: Path,
+) -> None:
+    asyncio.run(_assert_workspace_notice_is_controlled(tmp_path))
+
+
+async def _assert_workspace_notice_is_controlled(tmp_path: Path) -> None:
+    reminders = RuntimeReminderStore()
+    changes = WorkspaceChangeLedger()
+    provider_messages: list[list[dict[str, object]]] = []
+    review_requests = []
+    turns = iter((
+        ProviderTurn(
+            content="准备运行命令。",
+            reasoning="",
+            model="test-model",
+            usage=TokenUsageResponse(
+                promptTokens=10,
+                completionTokens=3,
+                totalTokens=13,
+            ),
+            tool_calls=(ProviderToolCall(
+                "call-shell",
+                "shell_like",
+                '{"command":"unknown-project-command"}',
+            ),),
+        ),
+        ProviderTurn(
+            content="已完成。",
+            reasoning="",
+            model="test-model",
+            usage=TokenUsageResponse(
+                promptTokens=20,
+                completionTokens=2,
+                totalTokens=22,
+            ),
+            tool_calls=(),
+        ),
+    ))
+
+    async def complete_turn(_settings, messages, _tools, _effort):
+        provider_messages.append([dict(message) for message in messages])
+        return next(turns)
+
+    async def execute(_context, _input):
+        return ToolResult("命令完成")
+
+    class CapturingReviewer:
+        async def review(self, _settings, request):
+            review_requests.append(request)
+            return ApprovalReviewResult(
+                ApprovalReviewDecision.ALLOW_ONCE,
+                "测试允许",
+                "LOW",
+            )
+
+    registry = ToolRegistry((function_tool(
+        name="shell_like",
+        description="测试 Shell 工具",
+        input_schema={
+            "type": "object",
+            "properties": {"command": {"type": "string"}},
+            "required": ["command"],
+            "additionalProperties": False,
+        },
+        execute=execute,
+        category=ToolCategory.SHELL,
+    ),), workspace_changes=changes)
+    context = ToolContext(
+        workspace_path=tmp_path,
+        task_id="task-main",
+        correlation_id="run-main",
+        reminder_store=reminders,
+    )
+    changes.begin_run(tmp_path, "run-main")
+    changes.record(
+        workspace_path=tmp_path,
+        repository_root=None,
+        task_id="task-other",
+        run_id="run-other",
+        agent_id="worker",
+        changes=({
+            "path": "src/example.py",
+            "beforeHash": "before",
+            "afterHash": "after",
+        },),
+    )
+
+    builder = PromptBuilder()
+
+    def prompt_supplier(_summary):
+        return builder.build(PromptContext(
+            system_reminders=reminders.snapshot(),
+        ))
+
+    initial_prompt = builder.build()
+    events = [
+        event
+        async for event in AgentLoopRunner(
+            complete_turn,
+            prompt_supplier=prompt_supplier,
+            approval_reviewer=CapturingReviewer(),
+        ).stream(
+            _settings(),
+            initial_prompt,
+            [ChatMessageRequest(role="user", content="原始用户任务")],
+            None,
+            registry,
+            context,
+            permission_policy=PermissionPolicy(
+                mode=PermissionMode.AUTO_APPROVE,
+            ),
+            permission_config_store=PermissionConfigStore(
+                tmp_path / "permission-home"
+            ),
+        )
+    ]
+
+    assert len(provider_messages) == 2
+    for messages in provider_messages:
+        workspace_messages = [
+            message
+            for message in messages
+            if "工作区检测到" in str(message.get("content", ""))
+        ]
+        assert len(workspace_messages) == 1
+        assert all(
+            "# 运行时工作区事实" not in str(message.get("content", ""))
+            for message in messages
+        )
+    assert len(review_requests) == 1
+    assert review_requests[0].user_request == "原始用户任务"
+    assert events[-1].type == "completed"
 
 
 async def _assert_safe_sibling_tools_overlap_and_commit_in_order() -> None:

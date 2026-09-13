@@ -15,6 +15,7 @@ import java.util.function.Supplier;
  */
 @Component
 public class AgentClientExceptionMapper {
+    private static final String PROMPT_CONFLICT = "PROMPT_CONFLICT";
 
     public void executeVoid(Runnable request) {
         try {
@@ -42,7 +43,11 @@ public class AgentClientExceptionMapper {
 
     public AgentRuntimeException map(RestClientException error) {
         if (error instanceof HttpStatusCodeException statusError) {
-            return fromStatus(statusError.getStatusCode(), statusError);
+            return fromStatus(
+                    statusError.getStatusCode(),
+                    statusError.getResponseBodyAsString(),
+                    statusError
+            );
         }
         if (error instanceof ResourceAccessException) {
             return new AgentRuntimeException(
@@ -54,11 +59,19 @@ public class AgentClientExceptionMapper {
     }
 
     public AgentRuntimeException fromStatus(HttpStatusCode statusCode) {
-        return fromStatus(statusCode, null);
+        return fromStatus(statusCode, "", null);
+    }
+
+    public AgentRuntimeException fromStatus(
+            HttpStatusCode statusCode,
+            String responseBody
+    ) {
+        return fromStatus(statusCode, responseBody, null);
     }
 
     private AgentRuntimeException fromStatus(
             HttpStatusCode statusCode,
+            String responseBody,
             Throwable cause
     ) {
         String message;
@@ -66,6 +79,12 @@ public class AgentClientExceptionMapper {
             message = "Python Agent 认证失败";
         } else if (statusCode == HttpStatus.PRECONDITION_FAILED) {
             message = "Python Agent 协议版本不兼容";
+        } else if (statusCode == HttpStatus.CONFLICT
+                && isPromptConflict(responseBody)) {
+            message = "Prompt 存在同级冲突，请澄清后重试";
+            return cause == null
+                    ? new AgentRuntimeException(PROMPT_CONFLICT, message)
+                    : new AgentRuntimeException(PROMPT_CONFLICT, message, cause);
         } else if (statusCode == HttpStatus.CONFLICT) {
             message = "请先在设置中配置模型 API";
         } else if (statusCode == HttpStatus.BAD_GATEWAY) {
@@ -78,5 +97,13 @@ public class AgentClientExceptionMapper {
         return cause == null
                 ? new AgentRuntimeException(message)
                 : new AgentRuntimeException(message, cause);
+    }
+
+    private boolean isPromptConflict(String responseBody) {
+        if (responseBody == null || responseBody.isBlank()) {
+            return false;
+        }
+        return responseBody.replaceAll("\\s+", "")
+                .contains("\"code\":\"" + PROMPT_CONFLICT + "\"");
     }
 }

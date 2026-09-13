@@ -225,7 +225,8 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
                 request.workspacePath(), request.permissionMode(),
                 request.taskId(), request.conversationSummary(),
                 request.memoryCandidates(), request.mcpServers(),
-                request.agentSessions(), request.workflowSnapshots()
+                request.agentSessions(), request.workflowSnapshots(),
+                request.projectInstructionInputs()
             ),
             eventConsumer
         );

@@ -1,6 +1,6 @@
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from app.mcp.model import McpDeferredToolSummary
@@ -23,7 +23,11 @@ _DEFAULT_SEARCH_LIMIT = 5
 _MAX_SEARCH_LIMIT = 20
 _MAX_REMINDER_TOOLS = 80
 _MAX_DESCRIPTION_CHARS = 600
-DEFAULT_MCP_TOOL_IDLE_ROUNDS = 2
+# Keep a selected MCP tool warm across a few internal model rounds.  The
+# state is task-scoped, so this also avoids forcing a fresh search on every
+# follow-up user message while still allowing genuinely idle tools to leave
+# the model-visible registry.
+DEFAULT_MCP_TOOL_IDLE_ROUNDS = 6
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,12 +35,26 @@ class _DeferredEntry:
     tool: Tool
     server_name: str
     remote_name: str
+    server_signature: str
 
 
 @dataclass(slots=True)
 class _ActiveEntry:
     loaded_turn: int
     last_used_turn: int
+    server_signature: str
+
+
+@dataclass(slots=True)
+class McpDeferredToolState:
+    """Task-scoped exposure state without retaining runtime tool bindings."""
+
+    loaded_names: set[str] = field(default_factory=set)
+    loaded_server_signatures: dict[str, str] = field(default_factory=dict)
+    active_server_signatures: set[str] = field(default_factory=set)
+    last_used_turns: dict[str, int] = field(default_factory=dict)
+    clock: int = 0
+    request_started: bool = False
 
 
 class McpDeferredToolStore:
@@ -46,6 +64,7 @@ class McpDeferredToolStore:
         self,
         *,
         idle_rounds: int = DEFAULT_MCP_TOOL_IDLE_ROUNDS,
+        state: McpDeferredToolState | None = None,
     ) -> None:
         if idle_rounds < 1:
             raise ValueError("MCP 工具 idle_rounds 必须大于 0")
@@ -53,7 +72,13 @@ class McpDeferredToolStore:
         self._active: dict[str, _ActiveEntry] = {}
         self._registry: ToolRegistry | None = None
         self._reminder_store: RuntimeReminderStore | None = None
-        self._current_turn = 0
+        self._state = state or McpDeferredToolState()
+        if self._state.request_started:
+            self._request_turn_base = self._state.clock + 1
+        else:
+            self._request_turn_base = self._state.clock
+            self._state.request_started = True
+        self._current_turn = self._request_turn_base
         self._revision = 0
         self._idle_rounds = idle_rounds
 
@@ -63,6 +88,7 @@ class McpDeferredToolStore:
         *,
         server_name: str,
         remote_name: str,
+        server_signature: str = "",
     ) -> bool:
         """Add one MCP wrapper to the deferred catalog."""
         if tool.name in self._entries:
@@ -71,6 +97,7 @@ class McpDeferredToolStore:
             tool=tool,
             server_name=server_name,
             remote_name=remote_name,
+            server_signature=server_signature,
         )
         self._revision += 1
         self._sync_reminder()
@@ -78,6 +105,7 @@ class McpDeferredToolStore:
 
     def bind_registry(self, registry: "ToolRegistry") -> None:
         self._registry = registry
+        self._restore_loaded_tools()
 
     def bind_reminder_store(self, store: RuntimeReminderStore) -> None:
         """Publish the deferred-tool index through the shared Reminder Store."""
@@ -93,7 +121,9 @@ class McpDeferredToolStore:
         return any(name not in self._active for name in self._entries)
 
     def begin_turn(self, turn: int) -> None:
-        self._current_turn = max(self._current_turn, turn)
+        absolute_turn = self._request_turn_base + max(0, turn)
+        self._current_turn = max(self._current_turn, absolute_turn)
+        self._state.clock = max(self._state.clock, self._current_turn)
 
     def mark_used(self, name: str, turn: int | None = None) -> None:
         """Refresh the idle TTL for an already loaded MCP tool."""
@@ -101,8 +131,13 @@ class McpDeferredToolStore:
         if active is None:
             return
         current_turn = self._current_turn if turn is None else turn
-        self._current_turn = max(self._current_turn, current_turn)
-        active.last_used_turn = max(active.last_used_turn, current_turn)
+        if turn is not None:
+            self.begin_turn(turn)
+        else:
+            self._state.clock = max(self._state.clock, current_turn)
+            self._current_turn = max(self._current_turn, current_turn)
+        active.last_used_turn = max(active.last_used_turn, self._current_turn)
+        self._state.last_used_turns[name] = active.last_used_turn
 
     def expire_unused(self, turn: int | None = None) -> tuple[str, ...]:
         """Unload tools that have been idle for the configured number of rounds."""
@@ -179,7 +214,6 @@ class McpDeferredToolStore:
             payload = {
                 "query": query,
                 "loadedTools": [tool.name for tool in loaded],
-                "tools": [tool.to_model_definition() for tool in loaded],
                 "message": (
                     "已加载匹配的 MCP 工具；下一轮模型请求会收到完整 Schema。"
                     if loaded
@@ -243,7 +277,14 @@ class McpDeferredToolStore:
             self._active[entry.tool.name] = _ActiveEntry(
                 loaded_turn=self._current_turn,
                 last_used_turn=self._current_turn,
+                server_signature=entry.server_signature,
             )
+            self._state.loaded_names.add(entry.tool.name)
+            self._state.loaded_server_signatures[entry.tool.name] = (
+                entry.server_signature
+            )
+            self._state.active_server_signatures.add(entry.server_signature)
+            self._state.last_used_turns[entry.tool.name] = self._current_turn
             loaded.append(entry.tool)
         if loaded:
             self._revision += 1
@@ -252,6 +293,14 @@ class McpDeferredToolStore:
 
     def _unload(self, name: str) -> None:
         self._active.pop(name, None)
+        self._state.loaded_names.discard(name)
+        server_signature = self._state.loaded_server_signatures.pop(name, "")
+        self._state.last_used_turns.pop(name, None)
+        if not any(
+            entry.server_signature == server_signature
+            for entry in self._active.values()
+        ):
+            self._state.active_server_signatures.discard(server_signature)
         if self._registry is not None and name in self._registry.names():
             self._registry.unregister(name)
         self._revision += 1
@@ -268,6 +317,49 @@ class McpDeferredToolStore:
             )
         else:
             self._reminder_store.remove("mcp.deferred_tools")
+
+    def _restore_loaded_tools(self) -> None:
+        """Rebind warm tools to this request's registry when still valid."""
+        if self._registry is None:
+            return
+        registered_names = set(self._registry.names())
+        current_server_signatures = {
+            entry.server_signature for entry in self._entries.values()
+        }
+        self._state.active_server_signatures.intersection_update(
+            current_server_signatures
+        )
+        for name in tuple(self._state.loaded_names):
+            entry = self._entries.get(name)
+            loaded_server_signature = self._state.loaded_server_signatures.get(
+                name,
+                entry.server_signature if entry is not None else "",
+            )
+            last_used_turn = self._state.last_used_turns.get(
+                name,
+                self._current_turn,
+            )
+            if (
+                entry is None
+                or loaded_server_signature != entry.server_signature
+                or self._current_turn - last_used_turn >= self._idle_rounds
+            ):
+                self._state.loaded_names.discard(name)
+                self._state.loaded_server_signatures.pop(name, None)
+                self._state.last_used_turns.pop(name, None)
+                continue
+            if name not in registered_names:
+                self._registry.register(entry.tool)
+                registered_names.add(name)
+            self._active[name] = _ActiveEntry(
+                loaded_turn=self._current_turn,
+                last_used_turn=last_used_turn,
+                server_signature=entry.server_signature,
+            )
+            self._state.active_server_signatures.add(entry.server_signature)
+        self._state.active_server_signatures = {
+            entry.server_signature for entry in self._active.values()
+        }
 
     def _match(self, query: str, limit: int) -> tuple[_DeferredEntry, ...]:
         normalized = query.strip()

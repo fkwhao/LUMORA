@@ -58,9 +58,11 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title=SERVICE_TITLE, version=SERVICE_VERSION)
     provider: ModelProviderPort = RoutingModelProvider()
+    prompt_builder = PromptBuilder()
+    prompt_builder.validate_configuration()
     resolved_chat_service = chat_service or ChatService(
         provider,
-        PromptBuilder(),
+        prompt_builder,
         max_parallel_tool_calls=settings.max_parallel_tool_calls,
     )
     resolved_memory_extraction_service = (

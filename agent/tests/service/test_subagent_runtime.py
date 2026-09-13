@@ -441,7 +441,7 @@ def test_subagent_uses_isolated_messages_and_emits_observable_lifecycle(
     }.issubset(harness.registry.names())
     assert "write_file" in str(harness.prompt.tools)
     assert "shell_command" in str(harness.prompt.tools)
-    assert "实际暴露的工具表" in harness.prompt.system_prompt
+    assert "实际注册的工具" in harness.prompt.system_prompt
     assert "mode=one_shot" in harness.prompt.system_prompt
     assert "mode=continuable" in harness.prompt.system_prompt
     compacted_prompt = harness.prompt_supplier("子 Agent 历史摘要")

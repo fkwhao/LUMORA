@@ -231,6 +231,26 @@ class HttpAgentRuntimeClientTest {
     }
 
     @Test
+    void preservesPromptConflictCodeFromAgent() {
+        server.expect(requestTo(
+                        "http://127.0.0.1:45101/api/v1/tasks/plan"
+                ))
+                .andRespond(withStatus(
+                        org.springframework.http.HttpStatus.CONFLICT
+                ).body("""
+                        {"code":"PROMPT_CONFLICT","message":"冲突"}
+                        """));
+
+        AgentRuntimeException error = assertThrows(
+                AgentRuntimeException.class,
+                () -> client.planTask("task-123", "goal", "correlation-123")
+        );
+
+        assertEquals("PROMPT_CONFLICT", error.getCode());
+        assertEquals("Prompt 存在同级冲突，请澄清后重试", error.getMessage());
+    }
+
+    @Test
     void mapsConnectionFailure() {
         server.expect(requestTo(
                         "http://127.0.0.1:45101/api/v1/tasks/plan"

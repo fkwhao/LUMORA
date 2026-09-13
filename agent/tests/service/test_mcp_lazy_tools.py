@@ -7,7 +7,11 @@ from app.dto.request.chat_completion_request import ChatMessageRequest
 from app.dto.response.chat_completion_response import TokenUsageResponse
 from app.harness.agent_loop import AgentLoopRunner
 from app.harness.contracts import ProviderToolCall, ProviderTurn
-from app.mcp.lazy_tools import MCP_TOOL_SEARCH_NAME, McpDeferredToolStore
+from app.mcp.lazy_tools import (
+    MCP_TOOL_SEARCH_NAME,
+    McpDeferredToolState,
+    McpDeferredToolStore,
+)
 from app.mcp.model import McpServerConfig, McpToolDefinition
 from app.mcp.tool_adapter import create_mcp_tool
 from app.model.model_connection_settings import ModelConnectionSettings
@@ -75,7 +79,7 @@ def test_deferred_mcp_tool_is_not_registered_until_search() -> None:
 
     payload = json.loads(result.content)
     assert payload["loadedTools"] == ["mcp__remote__echo"]
-    assert payload["tools"][0]["function"]["name"] == "mcp__remote__echo"
+    assert "tools" not in payload
     assert registry.names() == (
         MCP_TOOL_SEARCH_NAME,
         "mcp__remote__echo",
@@ -98,6 +102,7 @@ def test_loaded_mcp_tool_expires_and_can_be_searched_again() -> None:
         {"query": "select:mcp__remote__echo"},
     ))
     assert "mcp__remote__echo" in registry.names()
+
     assert store.expire_unused(1) == ()
     assert "mcp__remote__echo" in registry.names()
 
@@ -111,6 +116,38 @@ def test_loaded_mcp_tool_expires_and_can_be_searched_again() -> None:
         {"query": "select:mcp__remote__echo"},
     ))
     assert "mcp__remote__echo" in registry.names()
+
+
+def test_loaded_mcp_tools_are_rebound_for_a_follow_up_request() -> None:
+    state = McpDeferredToolState()
+    first_store = McpDeferredToolStore(state=state)
+    first_store.add(
+        _mcp_tool(),
+        server_name="Remote",
+        remote_name="echo",
+    )
+    first_registry = ToolRegistry()
+    first_store.bind_registry(first_registry)
+    first_registry.register(first_store.create_search_tool())
+
+    asyncio.run(first_registry.execute(
+        MCP_TOOL_SEARCH_NAME,
+        ToolContext(Path.cwd()),
+        {"query": "select:mcp__remote__echo"},
+    ))
+
+    second_store = McpDeferredToolStore(state=state)
+    second_store.add(
+        _mcp_tool(),
+        server_name="Remote",
+        remote_name="echo",
+    )
+    second_registry = ToolRegistry()
+    second_store.bind_registry(second_registry)
+
+    assert second_store.loaded_names() == ("mcp__remote__echo",)
+    assert "mcp__remote__echo" in second_registry.names()
+    assert second_store.reminders() == ()
 
 
 def test_runtime_reminder_store_notifies_only_real_changes() -> None:

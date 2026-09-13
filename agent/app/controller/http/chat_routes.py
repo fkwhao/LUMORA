@@ -12,7 +12,11 @@ from app.constants.api_paths import (
     CHAT_RUN_PAUSE_ROUTE,
     CHAT_RUN_STEERS_ROUTE,
 )
-from app.constants.error_codes import INVALID_REQUEST, MODEL_PROVIDER_ERROR
+from app.constants.error_codes import (
+    INVALID_REQUEST,
+    MODEL_PROVIDER_ERROR,
+    PROMPT_CONFLICT,
+)
 from app.constants.http_contract import (
     AUTHORIZATION_HEADER,
     CORRELATION_ID_HEADER,
@@ -26,6 +30,8 @@ from app.dto.request.steer_request import SteerRequest
 from app.dto.response.chat_completion_response import ChatCompletionResponse
 from app.dto.response.context_compaction_response import ContextCompactionResponse
 from app.exception.provider_errors import ModelProviderError
+from app.prompt.prompt_errors import PromptConfigurationError
+from app.prompt.prompt_resolver import PromptConflictError
 from app.service.chat_service import ChatService
 
 
@@ -150,6 +156,22 @@ class ChatRoutes:
         )
         try:
             return await self._chat_service.complete(request)
+        except PromptConflictError as error:
+            raise AgentHttpError(
+                status.HTTP_409_CONFLICT,
+                PROMPT_CONFLICT,
+                "Prompt 存在同级冲突，请澄清后重试",
+                False,
+                authenticated_id,
+            ) from error
+        except PromptConfigurationError as error:
+            raise AgentHttpError(
+                status.HTTP_400_BAD_REQUEST,
+                INVALID_REQUEST,
+                str(error),
+                False,
+                authenticated_id,
+            ) from error
         except ValueError as error:
             raise AgentHttpError(
                 status.HTTP_400_BAD_REQUEST,
@@ -179,6 +201,22 @@ class ChatRoutes:
         )
         try:
             return await self._chat_service.compact(request)
+        except PromptConflictError as error:
+            raise AgentHttpError(
+                status.HTTP_409_CONFLICT,
+                PROMPT_CONFLICT,
+                "Prompt 存在同级冲突，请澄清后重试",
+                False,
+                authenticated_id,
+            ) from error
+        except PromptConfigurationError as error:
+            raise AgentHttpError(
+                status.HTTP_400_BAD_REQUEST,
+                INVALID_REQUEST,
+                str(error),
+                False,
+                authenticated_id,
+            ) from error
         except ValueError as error:
             raise AgentHttpError(
                 status.HTTP_400_BAD_REQUEST,
@@ -222,6 +260,26 @@ class ChatRoutes:
                 response = ChatStreamEventMapper.to_response(event)
                 data = response.model_dump_json(by_alias=True)
                 yield f"event: {event.type}\ndata: {data}\n\n"
+        except PromptConflictError:
+            data = json.dumps(
+                {
+                    "type": "failed",
+                    "errorMessage": "Prompt 存在同级冲突，请澄清后重试",
+                    "metadata": {"errorCode": PROMPT_CONFLICT},
+                },
+                ensure_ascii=False,
+            )
+            yield f"event: failed\ndata: {data}\n\n"
+        except PromptConfigurationError as error:
+            data = json.dumps(
+                {
+                    "type": "failed",
+                    "errorMessage": str(error),
+                    "metadata": {"errorCode": INVALID_REQUEST},
+                },
+                ensure_ascii=False,
+            )
+            yield f"event: failed\ndata: {data}\n\n"
         except ModelProviderError:
             data = json.dumps(
                 {
