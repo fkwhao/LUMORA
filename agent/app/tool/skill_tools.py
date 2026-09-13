@@ -39,6 +39,18 @@ def skill_tools(catalog: SkillCatalog | None = None):
         instruction_chunk = definition.instructions[offset:end]
         has_more = end < instruction_length
         summary = definition.summary
+        if context.reminder_store is not None:
+            reminder_key = f"skill.loading.{summary.name}"
+            if has_more:
+                context.reminder_store.upsert(
+                    reminder_key,
+                    (
+                        f"Skill {summary.name} 尚未加载完整：已读取 {end}/"
+                        f"{instruction_length} 字符；下一轮必须继续调用 load_skill。"
+                    ),
+                )
+            else:
+                context.reminder_store.remove(reminder_key)
         resource_lines = (
             "\n可按需读取的附属资源：\n" + "\n".join(
                 f"- {resource}" for resource in definition.resources

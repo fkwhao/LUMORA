@@ -6,6 +6,7 @@ import pytest
 
 from app.execution import workspace_changes
 from app.execution.workspace_changes import WorkspaceChangeLedger
+from app.prompt.runtime_reminder import RuntimeReminderStore
 from app.tool.base import ToolContext, ToolInput, ToolResult, function_tool
 from app.tool.registry import ToolRegistry, WorkspacePartialEffectError
 from app.tool.resource_locks import (
@@ -108,6 +109,45 @@ def test_non_git_event_retains_bounded_before_and_after_content(
     assert events[0].after_blob == ""
 
 
+def test_workspace_write_publishes_a_runtime_reminder(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "changed.txt"
+
+    async def write_file(
+        _context: ToolContext,
+        _input: ToolInput,
+    ) -> ToolResult:
+        target.write_text("changed\n", encoding="utf-8")
+        return ToolResult("written")
+
+    registry = ToolRegistry((function_tool(
+        name="workspace_write",
+        description="write workspace",
+        input_schema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+        execute=write_file,
+        resource_accesses=lambda _context, _input: (
+            ResourceAccess(file_resource_key(target), ResourceAccessMode.WRITE),
+        ),
+    ),))
+    reminders = RuntimeReminderStore()
+    context = ToolContext(
+        workspace_path=tmp_path,
+        task_id="task-write-reminder",
+        correlation_id="run-write-reminder",
+        reminder_store=reminders,
+    )
+
+    result = asyncio.run(registry.execute("workspace_write", context, {}))
+
+    assert result.is_error is False
+    assert any("changed.txt" in item for item in reminders.snapshot())
+
+
 @pytest.mark.parametrize("cancelled", [False, True])
 def test_failed_or_cancelled_tool_records_partial_effect(
     tmp_path: Path,
@@ -139,10 +179,12 @@ def test_failed_or_cancelled_tool_records_partial_effect(
             ),
         ),
     ),))
+    reminders = RuntimeReminderStore()
     context = ToolContext(
         workspace_path=tmp_path,
         task_id="task-a",
         correlation_id="run-a",
+        reminder_store=reminders,
     )
 
     with pytest.raises(WorkspacePartialEffectError) as captured:
@@ -152,6 +194,7 @@ def test_failed_or_cancelled_tool_records_partial_effect(
     assert metadata["failureKind"] == "partial_effect_review_required"
     assert metadata["toolExecutionState"] == "partial_effect"
     assert metadata["workspaceChanges"][0]["path"] == "partial.txt"
+    assert any("partial.txt" in item for item in reminders.snapshot())
     assert metadata["workspaceChanges"][0]["operation"] == "ADDED"
 
 

@@ -471,6 +471,11 @@ class SubagentRuntime:
             mcp_tool_names=tuple(
                 name for name in self._mcp_tool_names if name in names
             ),
+            system_reminders=(
+                context.reminder_store.snapshot()
+                if context.reminder_store is not None
+                else ()
+            ),
             tool_definitions=registry.model_definitions(names),
             available_skills=self._available_skills,
             conversation_summary=conversation_summary,

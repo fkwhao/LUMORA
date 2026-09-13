@@ -12,6 +12,7 @@ from app.harness.contracts import PromptSupplier
 from app.harness.ports.model_provider import ModelProviderPort
 from app.harness.run_control import RunControl, await_or_pause
 from app.harness.run_event import RunEvent, RunUsage
+from app.mcp.lazy_tools import McpDeferredToolStore
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.permission.broker import ApprovalBroker
 from app.permission.config_store import PermissionConfigStore
@@ -113,6 +114,7 @@ class AgentHarness:
         prompt_supplier: PromptSupplier,
         conversation_summary: str | None,
         run_control: RunControl | None = None,
+        mcp_deferred_tools: McpDeferredToolStore | None = None,
     ) -> AsyncIterator[RunEvent]:
         carried_usage: RunUsage | None = None
         if tool_context is None or not prompt.tools:
@@ -235,6 +237,7 @@ class AgentHarness:
             permission_config_store,
             conversation_summary,
             run_control,
+            mcp_deferred_tools,
         ):
             yield _with_carried_usage(event, carried_usage)
 

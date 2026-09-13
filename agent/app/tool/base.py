@@ -6,6 +6,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from app.prompt.runtime_reminder import RuntimeReminderStore
 from app.tool.resource_locks import ResourceAccess, ResourceObservationStore
 
 if TYPE_CHECKING:
@@ -58,6 +59,10 @@ class ToolContext:
         repr=False,
     )
     background_event: Callable[[Any], Awaitable[None]] | None = field(
+        default=None,
+        repr=False,
+    )
+    reminder_store: RuntimeReminderStore | None = field(
         default=None,
         repr=False,
     )

@@ -3,6 +3,7 @@ from pathlib import Path
 
 from app.prompt.prompt_builder import PromptBuilder
 from app.prompt.prompt_context import PromptContext
+from app.prompt.runtime_reminder import RuntimeReminderStore
 from app.skill.catalog import SkillCatalog
 from app.tool.base import ToolContext
 from app.tool.skill_tools import skill_tools
@@ -80,12 +81,18 @@ def test_load_skill_requires_all_chunks_before_execution(tmp_path: Path) -> None
         settings_path=tmp_path / "settings.json",
     )
     tool = skill_tools(catalog)[0]
-    context = ToolContext(workspace_path=tmp_path, workspace_scoped=False)
+    reminders = RuntimeReminderStore()
+    context = ToolContext(
+        workspace_path=tmp_path,
+        workspace_scoped=False,
+        reminder_store=reminders,
+    )
 
     first = asyncio.run(tool.execute(context, {"name": "long-sop"}))
     assert first.metadata["complete"] is False
     assert first.metadata["nextOffset"] == 30_000
     assert "加载完整前不要开始执行" in first.content
+    assert "long-sop" in reminders.snapshot()[0]
 
     final = asyncio.run(tool.execute(
         context,
@@ -94,6 +101,7 @@ def test_load_skill_requires_all_chunks_before_execution(tmp_path: Path) -> None
     assert final.metadata["complete"] is True
     assert final.metadata["nextOffset"] is None
     assert "执行 SOP" in final.content
+    assert reminders.snapshot() == ()
 
 
 def test_read_skill_resource_returns_bounded_chunks(tmp_path: Path) -> None:

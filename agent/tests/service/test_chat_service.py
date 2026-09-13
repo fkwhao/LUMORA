@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
-from app.skill.catalog import SkillCatalog
 
 from app.context.planner import ContextPlan
 from app.dto.request.chat_completion_request import ChatCompletionRequest
@@ -23,6 +22,8 @@ from app.service.chat_service import (
     _stream_with_background_events,
     _with_prelude_usage,
 )
+from app.skill.catalog import SkillCatalog
+
 
 @pytest.fixture(autouse=True)
 def isolated_skill_catalog(tmp_path: Path, monkeypatch: Any) -> None:
@@ -523,17 +524,23 @@ def test_remote_mcp_is_available_without_workspace(monkeypatch: Any) -> None:
     asyncio.run(_drain(service.stream(request, "correlation")))
 
     assert harness.registry.names() == (
-        "mcp__remote__echo",
+        "mcp_tool_search",
         *_SESSION_CONTROL_TOOLS,
     )
     assert harness.tool_context is not None
     assert harness.tool_context.workspace_scoped is False
-    assert [tool["function"]["name"] for tool in harness.prompt.tools] == [
-        "mcp__remote__echo",
+    assert {
+        tool["function"]["name"] for tool in harness.prompt.tools
+    } == {
+        "mcp_tool_search",
         *_SESSION_CONTROL_TOOLS,
-    ]
+    }
     assert "  - delegate_task" in harness.prompt.system_prompt
-    assert "已连接 1 个可选 MCP 工具" in harness.prompt.system_prompt
+    assert "MCP 工具延迟发现" in harness.prompt.system_prompt
+    assert "mcp__remote__echo" in str(harness.prompt.context_messages)
+    assert "mcp__remote__echo" not in {
+        tool["function"]["name"] for tool in harness.prompt.tools
+    }
     assert len(FakeMcpClient.instances) == 1
     assert FakeMcpClient.instances[0].closed is False
 
@@ -651,14 +658,14 @@ def test_mcp_capability_catalogs_are_exposed_for_explicit_feature_request(
 
     asyncio.run(_drain(service.stream(_mcp_request("列出 MCP 的 Resources 和 Prompts"))))
 
-    assert harness.registry.names() == (
-        "mcp__remote__echo",
+    assert set(harness.registry.names()) == {
+        "mcp_tool_search",
         "mcpmeta__remote__resource_catalog",
         "mcpmeta__remote__resource_read",
         "mcpmeta__remote__prompt_catalog",
         "mcpmeta__remote__prompt_get",
         *_SESSION_CONTROL_TOOLS,
-    )
+    }
 
 
 def test_mcp_server_name_activates_related_request(monkeypatch: Any) -> None:
@@ -677,7 +684,7 @@ def test_mcp_server_name_activates_related_request(monkeypatch: Any) -> None:
     asyncio.run(_drain(service.stream(request)))
 
     assert harness.registry.names() == (
-        "mcp__remote__echo",
+        "mcp_tool_search",
         *_SESSION_CONTROL_TOOLS,
     )
 

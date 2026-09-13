@@ -37,6 +37,10 @@ from app.mcp.exposure_policy import (
     should_connect_server,
     should_expose_capability_tools,
 )
+from app.mcp.lazy_tools import (
+    MCP_TOOL_SEARCH_NAME,
+    McpDeferredToolStore,
+)
 from app.mcp.session_pool import McpSessionLease, McpSessionPool
 from app.mcp.tool_adapter import create_mcp_tool
 from app.memory.retrieval import MemoryRetriever
@@ -54,6 +58,7 @@ from app.permission.model import (
 from app.prompt.project_instruction_loader import ProjectInstructionLoader
 from app.prompt.prompt_builder import PromptBuilder
 from app.prompt.prompt_context import PromptContext
+from app.prompt.runtime_reminder import RuntimeReminderStore
 from app.provider.token_usage import add_token_usage, empty_token_usage
 from app.service.mcp_service import to_mcp_config
 from app.skill.catalog import SkillCatalog
@@ -194,6 +199,8 @@ class ChatService:
         run_control = self._run_controls.register(run_id)
         runtime_registry = self._tool_registry
         mcp_leases: list[McpSessionLease] = []
+        mcp_deferred_tools: McpDeferredToolStore | None = None
+        runtime_reminders = RuntimeReminderStore()
         prelude_usage = empty_token_usage()
         budget_request = request.prompt_context.execution_budget
         execution_budget = ExecutionBudgetLedger(ExecutionBudgetLimits(
@@ -210,7 +217,7 @@ class ChatService:
                     delta="正在复用或连接任务所需的 MCP 服务",
                     metadata={"category": "runtime_preparation"},
                 )
-            runtime_registry, mcp_leases, mcp_errors = (
+            runtime_registry, mcp_leases, mcp_errors, mcp_deferred_tools = (
                 await self._prepare_mcp_registry(request)
             )
             settings = self._connection(request)
@@ -228,6 +235,12 @@ class ChatService:
                     permission_policy,
                 )
             runtime_registry = runtime_registry.copy()
+            if mcp_deferred_tools is not None:
+                mcp_deferred_tools.bind_registry(runtime_registry)
+                mcp_deferred_tools.bind_reminder_store(runtime_reminders)
+                runtime_registry.register(
+                    mcp_deferred_tools.create_search_tool()
+                )
             subagent_runtime = SubagentRuntime(
                 harness=self._resolve_agent_harness(),
                 settings=settings,
@@ -268,6 +281,8 @@ class ChatService:
             prompt_context = self._prompt_context(
                 request,
                 tool_registry=runtime_registry,
+                mcp_deferred_tools=mcp_deferred_tools,
+                runtime_reminders=runtime_reminders,
             )
             subagent_runtime.bind_allowed_tools(
                 prompt_context.available_tools,
@@ -368,6 +383,8 @@ class ChatService:
                             request,
                             plan.summary,
                             runtime_registry,
+                            mcp_deferred_tools,
+                            runtime_reminders,
                         )
                     )
                     yield RunEvent(
@@ -404,6 +421,7 @@ class ChatService:
                 attachments=self._tool_attachments(request),
                 background_event=background_events.put,
                 execution_budget=execution_budget,
+                reminder_store=runtime_reminders,
             )
             workflow_manager.restore_durable(tool_context)
             workflow_manager.restore_from_messages(request.messages, tool_context)
@@ -421,10 +439,17 @@ class ChatService:
                 self._approval_broker,
                 self._permission_config_store,
                 lambda summary: self._prompt_builder.build(
-                    self._prompt_context(request, summary, runtime_registry)
+                    self._prompt_context(
+                        request,
+                        summary,
+                        runtime_registry,
+                        mcp_deferred_tools,
+                        runtime_reminders,
+                    )
                 ),
                 active_summary,
                 run_control,
+                mcp_deferred_tools,
             )
             async for event in _stream_with_background_events(
                 stream,
@@ -531,6 +556,8 @@ class ChatService:
         request: ChatCompletionRequest,
         conversation_summary: str | None = None,
         tool_registry: ToolRegistry | None = None,
+        mcp_deferred_tools: McpDeferredToolStore | None = None,
+        runtime_reminders: RuntimeReminderStore | None = None,
     ) -> PromptContext:
         context = request.prompt_context
         current_request = self._current_user_request(request)
@@ -559,6 +586,7 @@ class ChatService:
                 "list_workflows",
                 "run_workflow",
                 "retry_workflow_node",
+                MCP_TOOL_SEARCH_NAME,
             )
             if name in registered_names
         )
@@ -601,6 +629,11 @@ class ChatService:
                 *request_local_names,
                 *mcp_names,
             )))
+        system_reminders: list[str] = []
+        if runtime_reminders is not None:
+            system_reminders.extend(runtime_reminders.snapshot())
+        elif mcp_deferred_tools is not None:
+            system_reminders.extend(mcp_deferred_tools.reminders())
         return PromptContext(
             workspace_path=context.workspace_path,
             project_instructions=(
@@ -610,6 +643,7 @@ class ChatService:
             mcp_tool_names=tuple(
                 name for name in allowed_names if name in mcp_names
             ),
+            system_reminders=tuple(system_reminders),
             tool_definitions=registry.model_definitions(allowed_names),
             memory_summary=(
                 None if context.memory_candidates else context.memory_summary
@@ -633,10 +667,11 @@ class ChatService:
         ToolRegistry,
         list[McpSessionLease],
         list[tuple[str, str]],
+        McpDeferredToolStore | None,
     ]:
         servers = self._selected_mcp_servers(request)
         if not servers:
-            return self._tool_registry, [], []
+            return self._tool_registry, [], [], None
 
         if request.prompt_context.workspace_path:
             registry = self._tool_registry.copy()
@@ -659,6 +694,7 @@ class ChatService:
         expose_capabilities = should_expose_capability_tools(
             self._current_user_request(request)
         )
+        deferred_tools = McpDeferredToolStore()
         errors: list[tuple[str, str]] = []
         leases: list[McpSessionLease] = []
         task_scope = (
@@ -700,12 +736,22 @@ class ChatService:
                 if error is None and lease is not None:
                     session = lease.session
                     client = session.client
-                    server_tools = []
+                    existing_names = set(registry.names())
                     for definition in session.tools:
                         try:
-                            server_tools.append(
-                                create_mcp_tool(client, definition)
+                            tool = create_mcp_tool(client, definition)
+                            if tool.name in existing_names:
+                                errors.append((
+                                    server.name,
+                                    f"MCP 工具名称冲突，已跳过：{tool.name}",
+                                ))
+                                continue
+                            deferred_tools.add(
+                                tool,
+                                server_name=server.name,
+                                remote_name=definition.name,
                             )
+                            existing_names.add(tool.name)
                         except ValueError as definition_error:
                             errors.append((
                                 server.name,
@@ -715,36 +761,37 @@ class ChatService:
                                 ),
                             ))
                     if expose_capabilities:
-                        server_tools.extend(
-                            create_mcp_capability_tools(client)
-                        )
-                    existing_names = set(registry.names())
-                    for tool in server_tools:
-                        if tool.name in existing_names:
-                            errors.append((
-                                server.name,
-                                f"MCP 工具名称冲突，已跳过：{tool.name}",
-                            ))
-                            continue
-                        try:
-                            registry.register(tool)
-                        except ValueError as registration_error:
-                            errors.append((
-                                server.name,
-                                (
-                                    f"MCP 工具 {tool.name} 注册失败："
-                                    f"{registration_error}"
-                                ),
-                            ))
-                            continue
-                        existing_names.add(tool.name)
+                        for tool in create_mcp_capability_tools(client):
+                            if tool.name in existing_names:
+                                errors.append((
+                                    server.name,
+                                    f"MCP 工具名称冲突，已跳过：{tool.name}",
+                                ))
+                                continue
+                            try:
+                                registry.register(tool)
+                            except ValueError as registration_error:
+                                errors.append((
+                                    server.name,
+                                    (
+                                        f"MCP 工具 {tool.name} 注册失败："
+                                        f"{registration_error}"
+                                    ),
+                                ))
+                                continue
+                            existing_names.add(tool.name)
         except BaseException:
             await asyncio.gather(
                 *(lease.release() for lease in leases),
                 return_exceptions=True,
             )
             raise
-        return registry, leases, errors
+        return (
+            registry,
+            leases,
+            errors,
+            deferred_tools if deferred_tools.has_pending() else None,
+        )
 
     def _selected_mcp_servers(self, request: ChatCompletionRequest) -> list:
         current_request = self._current_user_request(request)

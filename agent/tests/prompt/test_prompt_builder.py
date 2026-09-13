@@ -59,6 +59,52 @@ class PromptBuilderTest(unittest.TestCase):
         self.assertIn("连接只表示能力可用，不表示本轮需要调用", prompt)
         self.assertNotIn("  - mcp__remote__echo", prompt)
 
+    def test_system_reminder_is_a_dynamic_context_message(self) -> None:
+        assembly = PromptBuilder().build(PromptContext(
+            system_reminders=(
+                "当前有尚未加载的 MCP 工具：mcp__remote__echo。",
+            ),
+        ))
+
+        reminder = next(
+            segment
+            for segment in assembly.segments
+            if segment.key == "runtime.system_reminder"
+        )
+        self.assertEqual(reminder.target, PromptTarget.MESSAGES)
+        self.assertEqual(reminder.role, "user")
+        self.assertEqual(
+            reminder.trust_level,
+            PromptTrustLevel.USER_CONTEXT,
+        )
+        self.assertIn("[System Reminder · Harness 动态提醒]", reminder.content)
+        self.assertIn("mcp__remote__echo", assembly.context_messages[0]["content"])
+
+    def test_mcp_tool_search_guidance_requires_registered_search_tool(self) -> None:
+        without_search = PromptBuilder().build(PromptContext(
+            available_tools=("mcp__remote__echo",),
+            tool_definitions=({
+                "type": "function",
+                "function": {
+                    "name": "mcp__remote__echo",
+                    "parameters": {"type": "object"},
+                },
+            },),
+        ))
+        with_search = PromptBuilder().build(PromptContext(
+            available_tools=("mcp_tool_search",),
+            tool_definitions=({
+                "type": "function",
+                "function": {
+                    "name": "mcp_tool_search",
+                    "parameters": {"type": "object"},
+                },
+            },),
+        ))
+
+        self.assertNotIn("MCP 工具延迟发现", without_search.system_prompt)
+        self.assertIn("MCP 工具延迟发现", with_search.system_prompt)
+
     def test_delegate_guidance_is_tied_to_tool_visibility(self) -> None:
         with_delegate = PromptBuilder().build(PromptContext(
             available_tools=("read_file", "delegate_task"),

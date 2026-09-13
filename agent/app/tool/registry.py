@@ -80,6 +80,13 @@ class ToolRegistry:
         except KeyError as error:
             raise ValueError(f"未注册的工具：{name}") from error
 
+    def unregister(self, name: str) -> Tool:
+        """Remove a request-scoped tool and return its definition."""
+        try:
+            return self._tools.pop(name)
+        except KeyError as error:
+            raise ValueError(f"未注册的工具：{name}") from error
+
     def names(self) -> tuple[str, ...]:
         return tuple(self._tools)
 
@@ -384,16 +391,22 @@ class ToolRegistry:
                                 "workspaceChangeSetComplete", True
                             ) is False
                         ):
+                            partial_metadata = {
+                                **change_metadata,
+                                "failureKind": (
+                                    "partial_effect_review_required"
+                                ),
+                                "retryable": False,
+                                "toolExecutionState": "partial_effect",
+                            }
+                            _publish_workspace_reminder(
+                                runtime_context,
+                                name,
+                                partial_metadata,
+                            )
                             raise WorkspacePartialEffectError(
                                 execution_cancelled,
-                                {
-                                    **change_metadata,
-                                    "failureKind": (
-                                        "partial_effect_review_required"
-                                    ),
-                                    "retryable": False,
-                                    "toolExecutionState": "partial_effect",
-                                },
+                                partial_metadata,
                             ) from execution_cancelled
                         raise execution_cancelled
                     if execution_error is not None:
@@ -403,16 +416,22 @@ class ToolRegistry:
                                 "workspaceChangeSetComplete", True
                             ) is False
                         ):
+                            partial_metadata = {
+                                **change_metadata,
+                                "failureKind": (
+                                    "partial_effect_review_required"
+                                ),
+                                "retryable": False,
+                                "toolExecutionState": "partial_effect",
+                            }
+                            _publish_workspace_reminder(
+                                runtime_context,
+                                name,
+                                partial_metadata,
+                            )
                             raise WorkspacePartialEffectError(
                                 execution_error,
-                                {
-                                    **change_metadata,
-                                    "failureKind": (
-                                        "partial_effect_review_required"
-                                    ),
-                                    "retryable": False,
-                                    "toolExecutionState": "partial_effect",
-                                },
+                                partial_metadata,
                             ) from execution_error
                         raise execution_error
                     assert result is not None
@@ -447,7 +466,37 @@ class ToolRegistry:
             metadata["workflowId"] = runtime_context.workflow_id
         if runtime_context.workflow_node_id:
             metadata["workflowNodeId"] = runtime_context.workflow_node_id
+        _publish_workspace_reminder(runtime_context, name, metadata)
         return replace(result, metadata=metadata)
+
+
+def _publish_workspace_reminder(
+    context: ToolContext,
+    tool_name: str,
+    metadata: Mapping[str, Any],
+) -> None:
+    if context.reminder_store is None:
+        return
+    workspace_change_count = metadata.get("workspaceChangeCount", 0)
+    if not isinstance(workspace_change_count, int) or workspace_change_count <= 0:
+        return
+    raw_changes = metadata.get("workspaceChanges", ())
+    changed_paths = tuple(
+        str(change.get("path") or "")
+        for change in raw_changes
+        if isinstance(change, Mapping) and str(change.get("path") or "")
+    )
+    visible_paths = ", ".join(changed_paths[:8])
+    if len(changed_paths) > 8:
+        visible_paths += f" 等 {len(changed_paths)} 个路径"
+    context.reminder_store.upsert(
+        "workspace.last_change",
+        (
+            f"工作区刚被工具 {tool_name} 修改了 {workspace_change_count} 项内容"
+            + (f"（{visible_paths}）" if visible_paths else "")
+            + "；继续写入前先重新读取相关文件。"
+        ),
+    )
 
 
 def _validate_schema(

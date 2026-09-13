@@ -34,6 +34,7 @@ from app.harness.provider_event_mapper import (
 )
 from app.harness.run_control import RunControl, await_or_pause
 from app.harness.run_event import RunEvent, RunUsage
+from app.mcp.lazy_tools import MCP_TOOL_SEARCH_NAME, McpDeferredToolStore
 from app.model.model_connection_settings import ModelConnectionSettings
 from app.permission.broker import ApprovalBroker
 from app.permission.config_store import PermissionConfigStore
@@ -111,6 +112,7 @@ class AgentLoopRunner:
         permission_config_store: PermissionConfigStore | None = None,
         conversation_summary: str | None = None,
         run_control: RunControl | None = None,
+        mcp_deferred_tools: McpDeferredToolStore | None = None,
     ) -> AsyncIterator[RunEvent]:
         permission_policy = permission_policy or PermissionPolicy()
         permission_engine = permission_engine or PermissionEngine()
@@ -130,6 +132,16 @@ class AgentLoopRunner:
         blocked_call_signatures: set[str] = set()
         previous_tool_fingerprint = ""
         identical_tool_iterations = 0
+        mcp_revision = (
+            mcp_deferred_tools.revision
+            if mcp_deferred_tools is not None
+            else None
+        )
+        reminder_revision = (
+            tool_context.reminder_store.revision
+            if tool_context.reminder_store is not None
+            else None
+        )
         tool_executor = ToolCallExecutor(
             registry,
             permission_engine,
@@ -146,6 +158,33 @@ class AgentLoopRunner:
             if _pause_requested(run_control):
                 yield _paused_event(resolved_model)
                 return
+            if mcp_deferred_tools is not None:
+                mcp_deferred_tools.begin_turn(_iteration)
+            current_mcp_revision = (
+                mcp_deferred_tools.revision
+                if mcp_deferred_tools is not None
+                else None
+            )
+            current_reminder_revision = (
+                tool_context.reminder_store.revision
+                if tool_context.reminder_store is not None
+                else None
+            )
+            if (
+                self._prompt_supplier is not None
+                and (
+                    current_mcp_revision != mcp_revision
+                    or current_reminder_revision != reminder_revision
+                )
+            ):
+                prompt, request_messages = _refresh_prompt(
+                    prompt,
+                    request_messages,
+                    self._prompt_supplier,
+                    active_summary,
+                )
+                mcp_revision = current_mcp_revision
+                reminder_revision = current_reminder_revision
             workspace_revision, external_changes = (
                 registry.consume_workspace_updates(tool_context)
             )
@@ -154,13 +193,37 @@ class AgentLoopRunner:
                 workspace_revision=workspace_revision,
             )
             if external_changes:
+                workspace_notice = _workspace_update_notice(
+                    workspace_revision,
+                    external_changes,
+                )
                 request_messages.append({
                     "role": "system",
-                    "content": _workspace_update_notice(
-                        workspace_revision,
-                        external_changes,
-                    ),
+                    "content": workspace_notice,
                 })
+                if tool_context.reminder_store is not None:
+                    tool_context.reminder_store.upsert(
+                        "workspace.external_changes",
+                        _workspace_state_reminder(
+                            workspace_revision,
+                            external_changes,
+                        ),
+                    )
+                    if self._prompt_supplier is not None:
+                        prompt, request_messages = _refresh_prompt(
+                            prompt,
+                            request_messages,
+                            self._prompt_supplier,
+                            active_summary,
+                        )
+                        mcp_revision = (
+                            mcp_deferred_tools.revision
+                            if mcp_deferred_tools is not None
+                            else None
+                        )
+                        reminder_revision = (
+                            tool_context.reminder_store.revision
+                        )
                 yield RunEvent(
                     type="progress_message",
                     title="已同步其他任务的工作区修改",
@@ -539,6 +602,7 @@ class AgentLoopRunner:
             request_messages.append(assistant_message)
             pending_tool_messages: list[dict[str, Any]] = []
             tool_results: list[str] = []
+            prompt_refresh_requested = False
             latest_user_request = _latest_user_request(request_messages)
             scheduler = ToolCallScheduler(
                 tool_executor,
@@ -582,6 +646,13 @@ class AgentLoopRunner:
                     continue
                 if isinstance(item, ToolCallCompleted):
                     tool_results.append(item.result_text)
+                    if item.call.name == MCP_TOOL_SEARCH_NAME:
+                        prompt_refresh_requested = True
+                    if mcp_deferred_tools is not None:
+                        mcp_deferred_tools.mark_used(
+                            item.call.name,
+                            _iteration,
+                        )
                     tool_message = {
                         "role": "tool",
                         "tool_call_id": item.call.call_id,
@@ -604,6 +675,32 @@ class AgentLoopRunner:
                 yield _paused_event(resolved_model)
                 return
 
+            if mcp_deferred_tools is not None:
+                mcp_deferred_tools.expire_unused(_iteration)
+            current_mcp_revision = (
+                mcp_deferred_tools.revision
+                if mcp_deferred_tools is not None
+                else None
+            )
+            current_reminder_revision = (
+                tool_context.reminder_store.revision
+                if tool_context.reminder_store is not None
+                else None
+            )
+            if (
+                current_mcp_revision != mcp_revision
+                or current_reminder_revision != reminder_revision
+            ):
+                prompt_refresh_requested = True
+            if prompt_refresh_requested and self._prompt_supplier is not None:
+                prompt, request_messages = _refresh_prompt(
+                    prompt,
+                    request_messages,
+                    self._prompt_supplier,
+                    active_summary,
+                )
+                mcp_revision = current_mcp_revision
+                reminder_revision = current_reminder_revision
             active_tokens = self._token_estimator.estimate_hybrid(
                 active_context_tokens,
                 pending_tool_messages,
@@ -725,6 +822,22 @@ class AgentLoopRunner:
         )
 
 
+def _refresh_prompt(
+    prompt: PromptAssembly,
+    request_messages: list[dict[str, Any]],
+    prompt_supplier: PromptSupplier,
+    conversation_summary: str | None,
+) -> tuple[PromptAssembly, list[dict[str, Any]]]:
+    prefix_count = len(prompt.system_messages) + len(prompt.context_messages)
+    retained_messages = request_messages[prefix_count:]
+    refreshed_prompt = prompt_supplier(conversation_summary)
+    return refreshed_prompt, [
+        *refreshed_prompt.system_messages,
+        *refreshed_prompt.context_messages,
+        *retained_messages,
+    ]
+
+
 def _to_run_usage(usage: TokenUsageResponse) -> RunUsage:
     return RunUsage(
         prompt_tokens=usage.prompt_tokens,
@@ -807,6 +920,16 @@ def _workspace_update_notice(
         "不要盲目重放旧的完整文件内容。"
     )
     return "\n".join(lines)
+
+
+def _workspace_state_reminder(
+    revision: int,
+    changes: tuple[dict[str, Any], ...],
+) -> str:
+    return (
+        f"工作区检测到 {len(changes)} 项外部修改，当前 revision 为 {revision}；"
+        "下一次涉及写入前必须重新读取相关文件，避免基于旧内容覆盖并行任务的修改。"
+    )
 
 
 def _pause_requested(run_control: RunControl | None) -> bool:

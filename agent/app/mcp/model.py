@@ -43,6 +43,15 @@ class McpToolDefinition:
 
 
 @dataclass(frozen=True, slots=True)
+class McpDeferredToolSummary:
+    """模型尚未发现的 MCP 工具索引项。"""
+
+    name: str
+    server_name: str
+    description: str
+
+
+@dataclass(frozen=True, slots=True)
 class McpResourceDefinition:
     uri: str
     name: str
