@@ -9,6 +9,7 @@ import com.lumora.core.shared.infrastructure.git.GitWorkspaceOperations;
 import com.lumora.core.shared.infrastructure.git.GitWorkspaceOperations.MergeResult;
 import com.lumora.core.shared.infrastructure.git.GitWorkspaceOperations.Snapshot;
 import com.lumora.core.task.api.dto.response.TaskWorktreeResponse;
+import com.lumora.core.task.domain.entity.AgentTask;
 import com.lumora.core.task.domain.entity.TaskWorktree;
 import com.lumora.core.task.domain.model.TaskWorkspaceMode;
 import com.lumora.core.task.domain.model.WorktreeState;
@@ -56,6 +57,8 @@ public class TaskWorktreeService {
             WorktreeState.WAITING_REVIEW, WorktreeState.APPLYING,
             WorktreeState.CONFLICTED, WorktreeState.CLEANUP_PENDING
     );
+    private static final int WORKTREE_DIRECTORY_SLUG_LIMIT = 48;
+    private static final int WORKTREE_DIRECTORY_HASH_LENGTH = 12;
 
     private final TaskWorktreeMapper worktreeMapper;
     private final TaskMapper taskMapper;
@@ -734,8 +737,8 @@ public class TaskWorktreeService {
                 LOGGER.info("Removed clean orphan worktree {}", candidate);
                 return;
             }
-            String taskId = candidate.getFileName().toString();
-            if (taskMapper.selectById(taskId) == null || head.isBlank()) {
+            String taskId = taskIdForOrphan(candidate);
+            if (taskId == null || head.isBlank()) {
                 LOGGER.warn(
                         "Preserving dirty orphan worktree without task association: {}",
                         candidate
@@ -1247,47 +1250,137 @@ public class TaskWorktreeService {
 
     private void deleteResultReference(TaskWorktree lease) {
         if (!lease.getRepositoryRoot().isBlank()) {
-            git.deleteReference(
-                    normalized(lease.getRepositoryRoot()),
-                    resultReference(lease.getTaskId())
+            Path repositoryRoot = normalized(lease.getRepositoryRoot());
+            git.deleteReference(repositoryRoot, resultReference(lease.getTaskId()));
+            deleteLegacyReference(
+                    repositoryRoot, legacyResultReference(lease.getTaskId())
             );
         }
     }
 
     private void deleteBaseReference(TaskWorktree lease) {
         if (!lease.getRepositoryRoot().isBlank()) {
-            git.deleteReference(
-                    normalized(lease.getRepositoryRoot()),
-                    baseReference(lease.getTaskId())
+            Path repositoryRoot = normalized(lease.getRepositoryRoot());
+            git.deleteReference(repositoryRoot, baseReference(lease.getTaskId()));
+            deleteLegacyReference(
+                    repositoryRoot, legacyBaseReference(lease.getTaskId())
             );
         }
     }
 
     private boolean usesSyntheticBase(TaskWorktree lease) {
-        return lease.getBaseCommit().equals(git.referenceTarget(
-                normalized(lease.getRepositoryRoot()),
-                baseReference(lease.getTaskId())
+        Path repositoryRoot = normalized(lease.getRepositoryRoot());
+        String baseCommit = lease.getBaseCommit();
+        return baseCommit.equals(git.referenceTarget(
+                repositoryRoot, baseReference(lease.getTaskId())
+        )) || baseCommit.equals(git.referenceTarget(
+                repositoryRoot, legacyBaseReference(lease.getTaskId())
         ));
     }
 
     private String resultReference(String taskId) {
         return "refs/lumora/worktrees/"
-                + taskId.replaceAll("[^A-Za-z0-9._-]", "-") + "/result";
+                + worktreeDirectoryKey(taskId) + "/result";
     }
 
     private String baseReference(String taskId) {
         return "refs/lumora/worktrees/"
-                + taskId.replaceAll("[^A-Za-z0-9._-]", "-") + "/base";
+                + worktreeDirectoryKey(taskId) + "/base";
+    }
+
+    private String legacyResultReference(String taskId) {
+        return "refs/lumora/worktrees/"
+                + legacyWorktreeKey(taskId) + "/result";
+    }
+
+    private String legacyBaseReference(String taskId) {
+        return "refs/lumora/worktrees/"
+                + legacyWorktreeKey(taskId) + "/base";
+    }
+
+    private String legacyWorktreeKey(String taskId) {
+        return (taskId == null ? "" : taskId)
+                .replaceAll("[^A-Za-z0-9._-]", "-");
+    }
+
+    private void deleteLegacyReference(
+            Path repositoryRoot,
+            String reference
+    ) {
+        if (!git.referenceTarget(repositoryRoot, reference).isBlank()) {
+            git.deleteReference(repositoryRoot, reference);
+        }
     }
 
     private Path destination(Path repositoryRoot, String taskId) {
-        String safeTaskId = taskId.replaceAll("[^A-Za-z0-9._-]", "-");
+        String directoryKey = worktreeDirectoryKey(taskId);
         Path result = managedRoot.resolve(repositoryHash(repositoryRoot))
-                .resolve(safeTaskId).toAbsolutePath().normalize();
+                .resolve(directoryKey).toAbsolutePath().normalize();
         if (!result.startsWith(managedRoot) || result.equals(managedRoot)) {
             throw new IllegalStateException("Worktree 路径超出托管目录");
         }
         return result;
+    }
+
+    /**
+     * Keeps managed Worktree directories readable without making the
+     * directory name a lossy or colliding representation of the task id.
+     * The hash is also what makes two different ids that sanitize to the same
+     * slug resolve to different directories.
+     */
+    private String worktreeDirectoryKey(String taskId) {
+        String raw = taskId == null ? "" : taskId;
+        String slug = raw.replaceAll("[^A-Za-z0-9._-]+", "-")
+                .replaceAll("^[.-]+|[.-]+$", "");
+        if (slug.isBlank()) {
+            slug = "task";
+        }
+        if (slug.length() > WORKTREE_DIRECTORY_SLUG_LIMIT) {
+            slug = slug.substring(0, WORKTREE_DIRECTORY_SLUG_LIMIT)
+                    .replaceAll("[.-]+$", "");
+        }
+        if (slug.isBlank()) {
+            slug = "task";
+        }
+        return slug + "-" + hashPrefix(raw, WORKTREE_DIRECTORY_HASH_LENGTH);
+    }
+
+    private String taskIdForOrphan(Path candidate) {
+        String directoryName = candidate.getFileName().toString();
+        AgentTask direct = taskMapper.selectById(directoryName);
+        if (direct != null) {
+            return valueOrEmpty(direct.getTaskId()).isBlank()
+                    ? directoryName : direct.getTaskId();
+        }
+        List<AgentTask> tasks = taskMapper.selectList(null);
+        if (tasks == null) return null;
+        for (AgentTask task : tasks) {
+            String taskId = task == null ? "" : valueOrEmpty(task.getTaskId());
+            if (!taskId.isBlank()
+                    && directoryName.equals(worktreeDirectoryKey(taskId))) {
+                return taskId;
+            }
+        }
+        return null;
+    }
+
+    private String hashPrefix(String value, int hexLength) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(
+                    value.getBytes(StandardCharsets.UTF_8)
+            );
+            StringBuilder result = new StringBuilder(hexLength);
+            for (int index = 0;
+                 index < digest.length && result.length() < hexLength;
+                 index += 1) {
+                result.append(String.format("%02x", digest[index]));
+            }
+            return result.substring(0, hexLength);
+        } catch (NoSuchAlgorithmException error) {
+            throw new IllegalStateException(
+                    "当前环境不支持 SHA-256", error
+            );
+        }
     }
 
     private String repositoryHash(Path repositoryRoot) {

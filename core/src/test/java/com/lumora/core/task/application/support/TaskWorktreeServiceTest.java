@@ -251,6 +251,43 @@ class TaskWorktreeServiceTest {
     }
 
     @Test
+    void usesReadableCollisionResistantDirectoryKeysForManagedWorktrees()
+            throws IOException, InterruptedException {
+        Path repository = createRepository();
+        Fixture fixture = fixture();
+        ConversationRun traversal = run("../../etc/passwd", repository);
+        ConversationRun collision = run("feature-a", repository);
+        ConversationRun collidingSlug = run("feature/a", repository);
+
+        selectWorktree(fixture, traversal);
+        selectWorktree(fixture, collision);
+        selectWorktree(fixture, collidingSlug);
+
+        Path traversalPath = Path.of(
+                fixture.service().acquireForRun(traversal)
+        );
+        Path collisionPath = Path.of(
+                fixture.service().acquireForRun(collision)
+        );
+        Path collidingSlugPath = Path.of(
+                fixture.service().acquireForRun(collidingSlug)
+        );
+        Path managedRoot = temporaryDirectory.resolve("managed")
+                .toAbsolutePath().normalize();
+
+        assertThat(traversalPath).startsWith(managedRoot);
+        assertThat(traversalPath.getFileName().toString())
+                .matches("[A-Za-z0-9][A-Za-z0-9._-]*-[0-9a-f]{12}");
+        assertThat(traversalPath.getFileName().toString())
+                .doesNotContain("..", "\\", "/");
+        assertThat(collisionPath).isNotEqualTo(collidingSlugPath);
+
+        fixture.service().onRunTerminal(traversal);
+        fixture.service().onRunTerminal(collision);
+        fixture.service().onRunTerminal(collidingSlug);
+    }
+
+    @Test
     void preservesIgnoredPhysicalEffectsInsteadOfCleaningTheWorktree()
             throws IOException, InterruptedException {
         Path repository = createRepository();
