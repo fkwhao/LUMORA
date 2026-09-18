@@ -1316,16 +1316,18 @@ globalStyle(".profile-activity-range small", {
 });
 globalStyle(".token-heatmap-scroll", {
   width: "100%",
+  minWidth: 0,
   paddingBottom: "2px",
-  overflowX: "auto",
-  scrollbarWidth: "thin",
-  scrollbarColor: "color-mix(in srgb, var(--muted) 24%, transparent) transparent",
+  overflow: "hidden",
 });
 globalStyle(".token-heatmap-calendar", {
-  minWidth: "760px",
+  width: "100%",
+  minWidth: 0,
 });
 globalStyle(".token-heatmap-months", {
   display: "grid",
+  width: "100%",
+  minWidth: 0,
   height: "15px",
   alignItems: "start",
   marginBottom: "7px",
@@ -1340,18 +1342,23 @@ globalStyle(".token-heatmap-months span", {
 globalStyle(".token-heatmap", {
   display: "grid",
   width: "100%",
+  minWidth: 0,
   alignItems: "start",
 });
 globalStyle(".token-heatmap-week", {
   display: "grid",
-  gridTemplateRows: "repeat(7, 12px)",
+  minWidth: 0,
+  gridTemplateRows: "repeat(7, minmax(0, auto))",
   gap: "4px",
   justifyItems: "center",
 });
 globalStyle(".token-heatmap-day", {
   display: "block",
-  width: "12px",
-  height: "12px",
+  width: "100%",
+  maxWidth: "12px",
+  height: "auto",
+  aspectRatio: "1",
+  minWidth: 0,
   borderRadius: "3px",
   background: "color-mix(in srgb, var(--ink) 7%, var(--surface))",
   transition: "filter 120ms ease, transform 120ms ease",

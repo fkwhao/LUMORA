@@ -8,6 +8,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { Label, ListBox, Select } from "@heroui/react";
 import { useEffect, useState } from "react";
 
 import type {
@@ -200,26 +201,75 @@ export function McpSettingsPage({
             </div>
             <div className="mcp-editor-grid">
               <label><span>名称</span><input value={draft.name} placeholder="例如：团队知识库" onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
-              <label>
+              <div className="mcp-field">
                 <span>Transport</span>
-                <select value={draft.transportType} onChange={(event) => updateTransportType(event.target.value as McpTransportType)}>
-                  <option value="streamable_http">Streamable HTTP</option>
-                  <option value="stdio">stdio（本机进程）</option>
-                </select>
-              </label>
+                <Select
+                  aria-label="Transport"
+                  selectedKey={draft.transportType}
+                  onSelectionChange={(nextValue) => {
+                    if (nextValue) updateTransportType(String(nextValue) as McpTransportType);
+                  }}
+                >
+                  <Select.Trigger className="mcp-select-trigger">
+                    <Select.Value />
+                    <Select.Indicator />
+                  </Select.Trigger>
+                  <Select.Popover className="mcp-select-popover" placement="bottom start">
+                    <ListBox>
+                      <ListBox.Item id="streamable_http" textValue="Streamable HTTP">
+                        <Label>Streamable HTTP</Label>
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                      <ListBox.Item id="stdio" textValue="stdio（本机进程）">
+                        <Label>stdio（本机进程）</Label>
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                    </ListBox>
+                  </Select.Popover>
+                </Select>
+              </div>
               {draft.transportType === "streamable_http" ? (
                 <>
                   <label><span>Server 地址</span><input value={draft.url || ""} placeholder="https://example.com/mcp" onChange={(event) => setDraft({ ...draft, url: event.target.value })} /></label>
-                  <label>
+                  <div className="mcp-field">
                     <span>静态认证</span>
-                    <select value={draft.authType} onChange={(event) => updateAuthType(event.target.value as McpAuthenticationType)}>
-                      <option value="none">无需认证</option>
-                      <option value="bearer">Bearer Token</option>
-                      <option value="api_key">API Key Header</option>
-                      <option value="custom_header">自定义 Header</option>
-                      <option value="oauth">OAuth（授权登录）</option>
-                    </select>
-                  </label>
+                    <Select
+                      aria-label="静态认证"
+                      selectedKey={draft.authType}
+                      onSelectionChange={(nextValue) => {
+                        if (nextValue) updateAuthType(String(nextValue) as McpAuthenticationType);
+                      }}
+                    >
+                      <Select.Trigger className="mcp-select-trigger">
+                        <Select.Value />
+                        <Select.Indicator />
+                      </Select.Trigger>
+                      <Select.Popover className="mcp-select-popover" placement="bottom start">
+                        <ListBox>
+                          <ListBox.Item id="none" textValue="无需认证">
+                            <Label>无需认证</Label>
+                            <ListBox.ItemIndicator />
+                          </ListBox.Item>
+                          <ListBox.Item id="bearer" textValue="Bearer Token">
+                            <Label>Bearer Token</Label>
+                            <ListBox.ItemIndicator />
+                          </ListBox.Item>
+                          <ListBox.Item id="api_key" textValue="API Key Header">
+                            <Label>API Key Header</Label>
+                            <ListBox.ItemIndicator />
+                          </ListBox.Item>
+                          <ListBox.Item id="custom_header" textValue="自定义 Header">
+                            <Label>自定义 Header</Label>
+                            <ListBox.ItemIndicator />
+                          </ListBox.Item>
+                          <ListBox.Item id="oauth" textValue="OAuth（授权登录）">
+                            <Label>OAuth（授权登录）</Label>
+                            <ListBox.ItemIndicator />
+                          </ListBox.Item>
+                        </ListBox>
+                      </Select.Popover>
+                    </Select>
+                  </div>
                   {(draft.authType === "api_key" || draft.authType === "custom_header") && (
                     <label><span>Header 名称</span><input value={draft.headerName || ""} placeholder={draft.authType === "api_key" ? "X-API-Key" : "X-Custom-Token"} onChange={(event) => setDraft({ ...draft, headerName: event.target.value })} /></label>
                   )}
@@ -269,22 +319,40 @@ export function McpSettingsPage({
                     </small>
                   </label>
                   {draft.environmentConfigured && (
-                    <label>
+                    <div className="mcp-field">
                       <span>已保存环境变量</span>
-                      <select
-                        value={draft.clearEnvironment ? "clear" : "keep"}
-                        onChange={(event) => setDraft({
-                          ...draft,
-                          clearEnvironment: event.target.value === "clear",
-                          environmentText: event.target.value === "clear"
-                            ? ""
-                            : draft.environmentText,
-                        })}
+                      <Select
+                        aria-label="已保存环境变量"
+                        selectedKey={draft.clearEnvironment ? "clear" : "keep"}
+                        onSelectionChange={(nextValue) => {
+                          if (!nextValue) return;
+                          setDraft({
+                            ...draft,
+                            clearEnvironment: String(nextValue) === "clear",
+                            environmentText: String(nextValue) === "clear"
+                              ? ""
+                              : draft.environmentText,
+                          });
+                        }}
                       >
-                        <option value="keep">保留</option>
-                        <option value="clear">清除</option>
-                      </select>
-                    </label>
+                        <Select.Trigger className="mcp-select-trigger">
+                          <Select.Value />
+                          <Select.Indicator />
+                        </Select.Trigger>
+                        <Select.Popover className="mcp-select-popover" placement="bottom start">
+                          <ListBox>
+                            <ListBox.Item id="keep" textValue="保留">
+                              <Label>保留</Label>
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                            <ListBox.Item id="clear" textValue="清除">
+                              <Label>清除</Label>
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                          </ListBox>
+                        </Select.Popover>
+                      </Select>
+                    </div>
                   )}
                 </>
               )}

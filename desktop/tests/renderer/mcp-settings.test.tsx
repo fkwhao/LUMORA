@@ -33,9 +33,11 @@ describe("MCP settings", () => {
     fireEvent.change(screen.getByLabelText("名称"), {
       target: { value: "Local tools" },
     });
-    fireEvent.change(screen.getByLabelText("Transport"), {
-      target: { value: "stdio" },
-    });
+    fireEvent.click(screen.getByLabelText("Transport"));
+    const stdioOption = screen.getByRole("option", { name: "stdio（本机进程）" });
+    fireEvent.pointerDown(stdioOption, { button: 0 });
+    fireEvent.pointerUp(stdioOption, { button: 0 });
+    fireEvent.click(stdioOption);
     fireEvent.change(screen.getByLabelText("启动命令"), {
       target: { value: "python.exe" },
     });
