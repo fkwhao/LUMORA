@@ -23,7 +23,11 @@ from app.provider.token_usage import add_token_usage, parse_anthropic_usage
 
 
 class AnthropicProvider(ProtocolProviderBase):
-    """Adapter for Anthropic's native Messages API."""
+    """Anthropic 原生 Messages API 的协议适配器。
+
+    负责处理 Anthropic 的 system/content block 结构、message_start、
+    content_block_delta、tool_use、服务端工具续接以及对应的 Token 用量。
+    """
 
     _MAX_SERVER_TOOL_CONTINUATIONS = 5
     _PARTIAL_USAGE_EMIT_INTERVAL = 32

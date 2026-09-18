@@ -28,7 +28,11 @@ from app.provider.token_usage import estimate_stream_usage, parse_chat_usage
 
 
 class OpenAICompatibleProvider:
-    """调用实现 OpenAI Chat Completions 契约的第三方模型服务。"""
+    """调用遵循 OpenAI Chat Completions 契约的第三方模型服务。
+
+    负责组装 /chat/completions 请求、解析 choices.delta 流式事件、工具调用
+    增量和 Token 用量，并将结果转换为项目内部的 ProviderTurn/RunEvent。
+    """
 
     _PARTIAL_USAGE_EMIT_INTERVAL = 32
 

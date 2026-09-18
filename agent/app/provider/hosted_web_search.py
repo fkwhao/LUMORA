@@ -7,6 +7,8 @@ from app.harness.contracts import ProviderWebSource
 
 @dataclass(frozen=True, slots=True)
 class ProviderWebSearch:
+    """Provider 返回的一次托管 Web Search 及其来源集合。"""
+
     item_id: str
     query: str = ""
     sources: tuple[ProviderWebSource, ...] = ()

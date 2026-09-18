@@ -57,7 +57,11 @@ _MEMORY_EXTRACTION_RESPONSE_SCHEMA = {
 
 
 class LumoraCloudProvider(ProtocolProviderBase):
-    """Official-plan adapter using LUMORA's provider-neutral protocol v1."""
+    """LUMORA Cloud 托管模型的客户端适配器。
+
+    它调用的是 LUMORA Cloud 的协议中立接口，而不是直接调用某个第三方模型
+    供应商；同时负责处理云端流式事件、云端搜索来源和云端专用的上下文状态。
+    """
 
     def __init__(
         self,

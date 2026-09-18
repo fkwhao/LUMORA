@@ -82,6 +82,8 @@ def responses_attachment_blocks(
 
 
 class _LoadedAttachment:
+    """表示已经读取并完成大小、类型和可用性检查的本地附件。"""
+
     def __init__(
         self,
         *,

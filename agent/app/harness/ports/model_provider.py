@@ -11,6 +11,8 @@ from app.prompt.prompt_assembly import PromptAssembly
 
 @runtime_checkable
 class CompletionProviderPort(Protocol):
+    """面向普通文本完成和上下文压缩的最小 Provider 接口。"""
+
     async def complete(
         self,
         settings: ModelConnectionSettings,
@@ -22,6 +24,8 @@ class CompletionProviderPort(Protocol):
 
 @runtime_checkable
 class AgentTurnProviderPort(Protocol):
+    """面向 Agent 回合的 Provider 接口，保留工具调用和流式事件。"""
+
     def stream_agent_turn(
         self,
         settings: ModelConnectionSettings,
@@ -52,6 +56,11 @@ class ModelProviderPort(
     AgentTurnProviderPort,
     Protocol,
 ):
+    """Agent Runtime 使用的完整模型 Provider 接口。
+
+    ChatService 和 AgentHarness 依赖这个协议，而不依赖某个具体厂商适配器。
+    """
+
     async def list_models(
         self,
         settings: ModelConnectionSettings,

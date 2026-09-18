@@ -21,7 +21,12 @@ from app.prompt.prompt_loader import PromptLoader
 
 
 class ProtocolProviderBase(ABC):
-    """Protocol-neutral completion, streaming, and compaction behavior."""
+    """不同模型协议之间可复用的完成、流式输出和上下文压缩逻辑。
+
+    具体 Provider 只需要实现某种协议对应的完整回合和流式回合；本基类负责
+    拼装统一的 Prompt、把 Provider 事件转换为 RunEvent，以及复用上下文压缩
+    和用量投影逻辑。
+    """
 
     def __init__(self, prompt_loader: PromptLoader | None = None) -> None:
         self._prompt_loader = prompt_loader or PromptLoader()

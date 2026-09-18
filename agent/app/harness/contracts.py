@@ -13,12 +13,16 @@ from app.prompt.prompt_assembly import PromptAssembly
 
 @dataclass(frozen=True, slots=True)
 class ProviderWebSource:
+    """Provider 返回的网页来源标题和 URL。"""
+
     title: str
     url: str
 
 
 @dataclass(frozen=True, slots=True)
 class ProviderToolCall:
+    """Provider 返回的一次结构化工具调用。"""
+
     call_id: str
     name: str
     arguments_json: str
@@ -26,6 +30,8 @@ class ProviderToolCall:
 
 @dataclass(frozen=True, slots=True)
 class ProviderTurn:
+    """一次完整的模型回合及其正文、工具调用、用量和协议状态。"""
+
     content: str
     reasoning: str
     model: str
@@ -47,6 +53,8 @@ class ProviderTurn:
 
 @dataclass(frozen=True, slots=True)
 class ProviderTurnEvent:
+    """Provider 在流式回合中产生的统一事件。"""
+
     type: Literal[
         "content_delta",
         "content_reset",

@@ -16,7 +16,12 @@ from app.provider.lumora_cloud_provider import LumoraCloudProvider
 
 
 class RoutingModelProvider:
-    """Selects a wire-protocol adapter from the connection's apiFormat."""
+    """根据连接配置中的 apiFormat 选择具体的模型协议适配器。
+
+    这是 Agent 进程内的对象分发器，不是 FastAPI 的 HTTP 路由器。上层只依赖
+    ModelProviderPort，本类再把调用转发给 Chat Completions、Responses、
+    Anthropic 或 LUMORA Cloud 对应的 Provider。
+    """
 
     def __init__(
         self,

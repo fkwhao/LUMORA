@@ -22,7 +22,11 @@ from app.provider.token_usage import estimate_stream_usage, parse_responses_usag
 
 
 class ResponsesProvider(ProtocolProviderBase):
-    """OpenAI Responses API adapter."""
+    """OpenAI Responses API 的协议适配器。
+
+    负责把统一消息和工具转换为 Responses API 的 input/output item，解析文本、
+    工具调用、托管搜索和用量相关的 SSE 事件。
+    """
 
     _PARTIAL_USAGE_EMIT_INTERVAL = 32
 

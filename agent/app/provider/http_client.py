@@ -11,7 +11,7 @@ _MODEL_HTTP_KEEPALIVE_EXPIRY_SECONDS = 120.0
 def create_model_http_client(
     factory: Callable[..., httpx.AsyncClient] = httpx.AsyncClient,
 ) -> httpx.AsyncClient:
-    """Create the process-lived model client without changing retry semantics."""
+    """创建进程级复用的模型 HTTP 客户端，并保持现有重试语义不变。"""
 
     return factory(
         timeout=_MODEL_HTTP_TIMEOUT_SECONDS,
