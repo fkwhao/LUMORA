@@ -1,4 +1,4 @@
-export type McpAuthenticationType = "none" | "bearer" | "api_key" | "custom_header";
+export type McpAuthenticationType = "none" | "bearer" | "api_key" | "custom_header" | "oauth";
 export type McpTransportType = "streamable_http" | "stdio";
 
 export interface McpServer {
@@ -15,6 +15,7 @@ export interface McpServer {
   authType: McpAuthenticationType;
   headerName?: string;
   credentialConfigured: boolean;
+  oauthAuthorized?: boolean;
 }
 
 export interface SaveMcpServerInput {
@@ -43,9 +44,18 @@ export interface McpConnectionTest {
   echoOutput?: string;
 }
 
+export interface McpOAuthStart {
+  flowId: string;
+  status: "pending" | "awaiting_authorization" | "completed" | "failed";
+  authorizationUrl?: string;
+  result?: McpConnectionTest;
+  error?: string;
+}
+
 export interface LumoraMcpApi {
   listServers(): Promise<McpServer[]>;
   saveServer(serverId: string, input: SaveMcpServerInput): Promise<McpServer>;
   deleteServer(serverId: string): Promise<void>;
   testServer(serverId: string): Promise<McpConnectionTest>;
+  authorizeServer(serverId: string): Promise<McpConnectionTest>;
 }

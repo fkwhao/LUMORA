@@ -125,7 +125,10 @@ export function McpSettingsPage({
     setError(undefined);
     setTestMessage(undefined);
     try {
-      const result = await api.testServer(serverId);
+      const server = servers.find((item) => item.serverId === serverId);
+      const result = server?.authType === "oauth"
+        ? await api.authorizeServer(serverId)
+        : await api.testServer(serverId);
       const capabilitySummary = [
         `Tools ${result.tools.length}`,
         `Resources ${result.resources.length + result.resourceTemplates.length}`,
@@ -149,8 +152,8 @@ export function McpSettingsPage({
       headerName: authType === "api_key"
         ? draft.headerName || "X-API-Key"
         : authType === "custom_header" ? draft.headerName : undefined,
-      credential: authType === "none" ? "" : draft.credential,
-      credentialConfigured: authType !== "none"
+      credential: authType === "none" || authType === "oauth" ? "" : draft.credential,
+      credentialConfigured: authType !== "none" && authType !== "oauth"
         && authType === draft.persistedAuthType
         && draft.persistedCredentialConfigured,
     });
@@ -214,12 +217,16 @@ export function McpSettingsPage({
                       <option value="bearer">Bearer Token</option>
                       <option value="api_key">API Key Header</option>
                       <option value="custom_header">自定义 Header</option>
+                      <option value="oauth">OAuth（授权登录）</option>
                     </select>
                   </label>
                   {(draft.authType === "api_key" || draft.authType === "custom_header") && (
                     <label><span>Header 名称</span><input value={draft.headerName || ""} placeholder={draft.authType === "api_key" ? "X-API-Key" : "X-Custom-Token"} onChange={(event) => setDraft({ ...draft, headerName: event.target.value })} /></label>
                   )}
-                  {draft.authType !== "none" && (
+                  {draft.authType === "oauth" && (
+                    <p className="mcp-field-wide"><small>OAuth 使用 MCP 标准授权码 + PKCE。保存后点击列表中的“授权并测试”，登录页会在 LUMORA 内置窗口中打开。</small></p>
+                  )}
+                  {draft.authType !== "none" && draft.authType !== "oauth" && (
                     <label className="mcp-field-wide">
                       <span>凭据</span>
                       <div className="mcp-secret-input"><KeyRound size={13} /><input type="password" autoComplete="off" value={draft.credential} placeholder={draft.credentialConfigured ? "已安全保存；留空保持不变" : "输入 Token 或 API Key"} onChange={(event) => setDraft({ ...draft, credential: event.target.value })} /></div>
@@ -294,7 +301,7 @@ export function McpSettingsPage({
               <span className={`mcp-status-dot${server.enabled ? " enabled" : ""}`} />
               <div><strong>{server.name}</strong><small>{serverSummary(server)}</small></div>
               <Switch aria-label={`启用 ${server.name}`} checked={server.enabled} disabled={busyId === server.serverId} onCheckedChange={() => void toggleServer(server)} />
-              <button type="button" disabled={busyId === server.serverId} onClick={() => void testServer(server.serverId)}><RefreshCw size={13} /> 测试</button>
+              <button type="button" disabled={busyId === server.serverId} onClick={() => void testServer(server.serverId)}><RefreshCw size={13} /> {server.authType === "oauth" ? "授权并测试" : "测试"}</button>
               <button className="icon-only" type="button" aria-label={`编辑 ${server.name}`} onClick={() => setDraft(fromServer(server))}><Pencil size={13} /></button>
               <button className="icon-only danger" type="button" aria-label={`删除 ${server.name}`} disabled={busyId === server.serverId} onClick={() => void deleteServer(server.serverId)}><Trash2 size={13} /></button>
             </article>
@@ -304,7 +311,7 @@ export function McpSettingsPage({
         {testMessage && <p className="mcp-test-result"><CircleCheck size={13} />{testMessage}</p>}
         {!api && <p className="mcp-settings-error">MCP 设置暂不可用，请从 Electron 桌面进程启动应用。</p>}
         {error && <p className="mcp-settings-error">{error}</p>}
-        <p className="mcp-settings-note">HTTP 支持静态 Header 凭据，本地 stdio 支持加密环境变量；OAuth 与 MCP Apps 留待后续版本。</p>
+        <p className="mcp-settings-note">HTTP 支持静态 Header 或 OAuth 授权，本地 stdio 支持加密环境变量；OAuth 登录在 LUMORA 内置窗口中完成。</p>
       </div>
     </section>
   );
@@ -360,6 +367,15 @@ function toInput(draft: McpDraft): SaveMcpServerInput {
       authType: "none",
     };
   }
+  if (draft.authType === "oauth") {
+    return {
+      name: draft.name,
+      enabled: draft.enabled,
+      transportType: "streamable_http",
+      url: draft.url,
+      authType: "oauth",
+    };
+  }
   return {
     name: draft.name,
     enabled: draft.enabled,
@@ -394,6 +410,7 @@ function parseEnvironment(text: string): Record<string, string> | undefined {
 
 function authLabel(server: McpServer): string {
   if (server.authType === "none") return "无认证";
+  if (server.authType === "oauth") return server.oauthAuthorized ? "OAuth · 已授权" : "OAuth";
   if (server.authType === "bearer") return server.credentialConfigured ? "Bearer · 已加密" : "Bearer";
   return `${server.headerName || "Header"}${server.credentialConfigured ? " · 已加密" : ""}`;
 }

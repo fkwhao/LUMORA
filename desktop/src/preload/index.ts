@@ -495,6 +495,8 @@ const api: LumoraApi = {
       ipcRenderer.invoke("mcp:delete-server", serverId),
     testServer: (serverId: string) =>
       ipcRenderer.invoke("mcp:test-server", serverId),
+    authorizeServer: (serverId: string) =>
+      ipcRenderer.invoke("mcp:authorize-server", serverId),
   },
   skill: {
     list: (workspacePath?: string) => ipcRenderer.invoke("skill:list", workspacePath),

@@ -1,10 +1,10 @@
 import { ipcMain } from "electron";
 import { win32 as windowsPath } from "node:path";
 
-import type { SaveMcpServerInput } from "../../../shared/mcp-contract";
+import type { McpOAuthStart, McpConnectionTest, SaveMcpServerInput } from "../../../shared/mcp-contract";
 import type { McpGateway } from "./mcp-gateway";
 
-const MCP_AUTH_TYPES = new Set(["none", "bearer", "api_key", "custom_header"]);
+const MCP_AUTH_TYPES = new Set(["none", "bearer", "api_key", "custom_header", "oauth"]);
 const MCP_TRANSPORT_TYPES = new Set(["streamable_http", "stdio"]);
 const RESERVED_AUTH_HEADERS = new Set([
   "accept", "authorization", "connection", "content-length", "content-type",
@@ -17,9 +17,15 @@ export const mcpIpcChannels = {
   saveServer: "mcp:save-server",
   deleteServer: "mcp:delete-server",
   testServer: "mcp:test-server",
+  authorizeServer: "mcp:authorize-server",
 } as const;
 
-export function registerMcpIpc(gateway: McpGateway): () => void {
+export type McpOAuthWindowOpener = (authorizationUrl: string) => Promise<boolean>;
+
+export function registerMcpIpc(
+  gateway: McpGateway,
+  openOAuthWindow: McpOAuthWindowOpener = async () => false,
+): () => void {
   ipcMain.handle(mcpIpcChannels.listServers, () => gateway.listServers());
   ipcMain.handle(mcpIpcChannels.saveServer, (_event, serverId: string, input: SaveMcpServerInput) =>
     gateway.saveServer(requireId(serverId), validateMcpServerInput(input)));
@@ -27,7 +33,35 @@ export function registerMcpIpc(gateway: McpGateway): () => void {
     gateway.deleteServer(requireId(serverId)));
   ipcMain.handle(mcpIpcChannels.testServer, (_event, serverId: string) =>
     gateway.testServer(requireId(serverId)));
+  ipcMain.handle(mcpIpcChannels.authorizeServer, async (_event, serverId: string) => {
+    const id = requireId(serverId);
+    const started = await gateway.startOAuth(id);
+    if (started.status === "completed" && started.result) return started.result;
+    if (started.status === "failed") throw new Error(started.error || "MCP OAuth 授权失败");
+    if (!started.authorizationUrl) throw new Error("MCP OAuth 未返回授权地址");
+    if (!(await openOAuthWindow(started.authorizationUrl))) {
+      throw new Error("MCP OAuth 授权窗口已关闭");
+    }
+    return waitForOAuthResult(gateway, id, started.flowId);
+  });
   return () => Object.values(mcpIpcChannels).forEach((channel) => ipcMain.removeHandler(channel));
+}
+
+async function waitForOAuthResult(
+  gateway: McpGateway,
+  serverId: string,
+  flowId: string,
+): Promise<McpConnectionTest> {
+  const deadline = Date.now() + 5 * 60_000;
+  while (Date.now() < deadline) {
+    const status: McpOAuthStart = await gateway.getOAuthStatus(serverId, flowId);
+    if (status.status === "completed" && status.result) return status.result;
+    if (status.status === "failed") {
+      throw new Error(status.error || "MCP OAuth 授权失败");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error("MCP OAuth 授权超时");
 }
 
 export function validateMcpServerInput(input: SaveMcpServerInput): SaveMcpServerInput {
@@ -60,6 +94,9 @@ export function validateMcpServerInput(input: SaveMcpServerInput): SaveMcpServer
   }
   const credential = input.credential?.trim() || undefined;
   if (credential && credential.length > 4096) throw new TypeError("静态凭据长度超过限制");
+  if (authType === "oauth" && (headerName || credential)) {
+    throw new TypeError("OAuth 不使用静态 Header 或凭据");
+  }
   return {
     name,
     enabled: input.enabled !== false,

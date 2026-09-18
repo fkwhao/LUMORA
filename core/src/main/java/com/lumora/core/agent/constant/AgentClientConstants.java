@@ -23,6 +23,8 @@ public final class  AgentClientConstants {
     public static final String TOOL_APPROVAL_PATH =
             "/api/v1/tool-approvals/{approvalId}";
     public static final String MCP_TEST_PATH = "/api/v1/mcp/test";
+    public static final String MCP_OAUTH_START_PATH = "/api/v1/mcp/oauth/start";
+    public static final String MCP_OAUTH_STATUS_PATH = "/api/v1/mcp/oauth/status/{flowId}";
     public static final String SSE_DATA_PREFIX = "data:";
     public static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(90);
     /** SSE 跟随任务生命周期，不设置固定读取截止时间。 */

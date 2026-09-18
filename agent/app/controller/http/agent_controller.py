@@ -31,13 +31,14 @@ class AgentHttpController:
     ) -> None:
         self.router = APIRouter(prefix=API_V1_PREFIX)
         guard = HttpRequestGuard(settings)
+        mcp_service = McpService()
         route_groups = (
             SystemRoutes(settings, planner_service, guard),
             ChatRoutes(chat_service, guard),
             ArtifactRoutes(chat_service, guard),
             ModelRoutes(chat_service, guard),
             MemoryRoutes(memory_extraction_service, guard),
-            McpRoutes(McpService(), guard),
+            McpRoutes(mcp_service, guard),
             ApprovalRoutes(chat_service, guard),
         )
         for route_group in route_groups:

@@ -1,5 +1,7 @@
+import asyncio
 import json
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -28,6 +30,7 @@ _MAX_DESCRIPTION_CHARS = 600
 # follow-up user message while still allowing genuinely idle tools to leave
 # the model-visible registry.
 DEFAULT_MCP_TOOL_IDLE_ROUNDS = 6
+McpDeferredDiscovery = Callable[[], Awaitable[tuple[str, ...]]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +68,7 @@ class McpDeferredToolStore:
         *,
         idle_rounds: int = DEFAULT_MCP_TOOL_IDLE_ROUNDS,
         state: McpDeferredToolState | None = None,
+        discover: McpDeferredDiscovery | None = None,
     ) -> None:
         if idle_rounds < 1:
             raise ValueError("MCP 工具 idle_rounds 必须大于 0")
@@ -72,6 +76,9 @@ class McpDeferredToolStore:
         self._active: dict[str, _ActiveEntry] = {}
         self._registry: ToolRegistry | None = None
         self._reminder_store: RuntimeReminderStore | None = None
+        self._discover = discover
+        self._discovery_lock = asyncio.Lock()
+        self._discovery_complete = discover is None
         self._state = state or McpDeferredToolState()
         if self._state.request_started:
             self._request_turn_base = self._state.clock + 1
@@ -210,6 +217,7 @@ class McpDeferredToolStore:
         ) -> ToolResult:
             query = str(input_data.get("query") or "").strip()
             limit = _normalized_limit(input_data.get("limit"))
+            discovery_errors = await self._ensure_discovered()
             loaded = self._load(query, limit)
             payload = {
                 "query": query,
@@ -220,11 +228,14 @@ class McpDeferredToolStore:
                     else "没有找到匹配的未加载 MCP 工具。"
                 ),
             }
+            if discovery_errors:
+                payload["discoveryErrors"] = list(discovery_errors)
             return ToolResult(
                 content=json.dumps(payload, ensure_ascii=False),
                 metadata={
                     "mcpToolSearch": True,
                     "mcpToolsLoaded": tuple(tool.name for tool in loaded),
+                    "mcpDiscoveryErrors": discovery_errors,
                 },
             )
 
@@ -263,6 +274,17 @@ class McpDeferredToolStore:
             validator=_validate_search_input,
             title_factory=lambda _input: "搜索 MCP 工具",
         )
+
+    async def _ensure_discovered(self) -> tuple[str, ...]:
+        if self._discover is None or self._discovery_complete:
+            return ()
+        async with self._discovery_lock:
+            if self._discovery_complete:
+                return ()
+            try:
+                return tuple(await self._discover())
+            finally:
+                self._discovery_complete = True
 
     def _load(self, query: str, limit: int) -> tuple[Tool, ...]:
         if self._registry is None:

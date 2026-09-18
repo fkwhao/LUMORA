@@ -4,10 +4,12 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lumora.core.agent.client.AgentRuntimeClient;
+import com.lumora.core.agent.dto.response.AgentMcpOAuthResponse;
 import com.lumora.core.mcp.api.dto.request.SaveMcpServerRequest;
 import com.lumora.core.mcp.application.service.McpService;
 import com.lumora.core.mcp.domain.model.McpAuthenticationType;
 import com.lumora.core.mcp.domain.model.McpConnectionTest;
+import com.lumora.core.mcp.domain.model.McpOAuthFlow;
 import com.lumora.core.mcp.domain.model.McpServerConfiguration;
 import com.lumora.core.mcp.domain.model.McpServerRuntimeConfiguration;
 import com.lumora.core.mcp.domain.model.McpTransportType;
@@ -106,6 +108,53 @@ public class McpServiceImpl implements McpService {
         return agentRuntimeClient.testMcpServer(server, correlationId);
     }
 
+    @Override
+    public McpOAuthFlow startOAuth(String serverId, String correlationId) {
+        String id = requireId(serverId);
+        McpServerRuntimeConfiguration server = listStoredServers().stream()
+                .filter(item -> item.serverId().equals(id))
+                .findFirst()
+                .map(this::toRuntime)
+                .orElseThrow(() -> new IllegalArgumentException("MCP Server 不存在"));
+        if (server.authType() != McpAuthenticationType.OAUTH) {
+            throw new IllegalArgumentException("当前 MCP Server 未配置 OAuth");
+        }
+        return toOAuthFlow(agentRuntimeClient.startMcpOAuth(server, correlationId));
+    }
+
+    @Override
+    public McpOAuthFlow oauthStatus(
+            String serverId,
+            String flowId,
+            String correlationId
+    ) {
+        requireId(serverId);
+        String id = requireText(flowId, "MCP OAuth flow ID");
+        return toOAuthFlow(agentRuntimeClient.getMcpOAuthStatus(id, correlationId));
+    }
+
+    private McpOAuthFlow toOAuthFlow(AgentMcpOAuthResponse response) {
+        McpConnectionTest result = response.getResult() == null
+                ? null
+                : new McpConnectionTest(
+                response.getResult().isConnected(),
+                response.getResult().getServerName(),
+                response.getResult().getServerVersion(),
+                response.getResult().getTools(),
+                response.getResult().getResources(),
+                response.getResult().getResourceTemplates(),
+                response.getResult().getPrompts(),
+                response.getResult().getEchoOutput()
+        );
+        return new McpOAuthFlow(
+                response.getFlowId(),
+                response.getStatus(),
+                response.getAuthorizationUrl(),
+                result,
+                response.getError()
+        );
+    }
+
     private List<StoredMcpServerConfiguration> listStoredServers() {
         ApplicationSetting setting = settingMapper.selectById(SETTINGS_KEY);
         if (setting == null || setting.getSettingValue() == null
@@ -153,6 +202,11 @@ public class McpServiceImpl implements McpService {
         McpAuthenticationType authType = McpAuthenticationType.fromValue(
                 request.getAuthType()
         );
+        if (authType == McpAuthenticationType.OAUTH
+                && (blankToNull(request.getHeaderName()) != null
+                || blankToNull(request.getCredential()) != null)) {
+            throw new IllegalArgumentException("OAuth 不使用静态 Header 或凭据");
+        }
         String headerName = normalizeHeaderName(authType, request.getHeaderName());
         String credentialCiphertext = resolveCredentialCiphertext(
                 authType, request.getCredential(), existing
@@ -220,7 +274,8 @@ public class McpServiceImpl implements McpService {
             String credential,
             StoredMcpServerConfiguration existing
     ) {
-        if (authType == McpAuthenticationType.NONE) return null;
+        if (authType == McpAuthenticationType.NONE
+                || authType == McpAuthenticationType.OAUTH) return null;
         String normalizedCredential = blankToNull(credential);
         if (normalizedCredential != null) {
             return secretProtector.protect(normalizedCredential);
@@ -281,7 +336,8 @@ public class McpServiceImpl implements McpService {
             String requestedHeaderName
     ) {
         if (authType == McpAuthenticationType.NONE
-                || authType == McpAuthenticationType.BEARER) {
+                || authType == McpAuthenticationType.BEARER
+                || authType == McpAuthenticationType.OAUTH) {
             return null;
         }
         String headerName = blankToNull(requestedHeaderName);
@@ -319,6 +375,7 @@ public class McpServiceImpl implements McpService {
                 stored.headerName(),
                 transportType == McpTransportType.STREAMABLE_HTTP
                         && authType != McpAuthenticationType.NONE
+                        && authType != McpAuthenticationType.OAUTH
                         && stored.credentialCiphertext() != null
                         && !stored.credentialCiphertext().isBlank(),
                 environmentKeys,
@@ -337,6 +394,7 @@ public class McpServiceImpl implements McpService {
         McpAuthenticationType authType = normalizedAuthType(stored.authType());
         String credential = transportType != McpTransportType.STREAMABLE_HTTP
                 || authType == McpAuthenticationType.NONE
+                || authType == McpAuthenticationType.OAUTH
                 ? null
                 : secretProtector.unprotect(stored.credentialCiphertext());
         return new McpServerRuntimeConfiguration(

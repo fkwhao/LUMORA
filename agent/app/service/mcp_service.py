@@ -2,9 +2,13 @@ from app.dto.request.mcp_request import McpServerRequest
 from app.dto.response.mcp_response import McpTestResponse
 from app.mcp.client import McpClient
 from app.mcp.model import McpServerConfig
+from app.mcp.oauth import McpOAuthManager
 
 
 class McpService:
+    def __init__(self, oauth_manager: McpOAuthManager | None = None) -> None:
+        self._oauth_manager = oauth_manager or McpOAuthManager()
+
     async def test(self, request: McpServerRequest) -> McpTestResponse:
         client = McpClient(to_mcp_config(request))
         try:
@@ -21,6 +25,28 @@ class McpService:
             )
         finally:
             await client.close()
+
+    async def start_oauth(self, request: McpServerRequest):
+        return await self._oauth_manager.start(to_mcp_config(request))
+
+    async def oauth_status(self, flow_id: str):
+        return await self._oauth_manager.status(flow_id)
+
+    async def oauth_callback(
+        self,
+        server_id: str,
+        code: str,
+        state: str | None,
+        issuer: str | None,
+        error: str | None,
+    ) -> str:
+        return await self._oauth_manager.callback(
+            server_id,
+            code,
+            state,
+            issuer,
+            error,
+        )
 
 
 def to_mcp_config(request: McpServerRequest) -> McpServerConfig:

@@ -3,6 +3,7 @@ package com.lumora.core.mcp.api.controller;
 import com.lumora.core.mcp.api.dto.request.SaveMcpServerRequest;
 import com.lumora.core.mcp.application.service.McpService;
 import com.lumora.core.mcp.domain.model.McpConnectionTest;
+import com.lumora.core.mcp.domain.model.McpOAuthFlow;
 import com.lumora.core.mcp.domain.model.McpServerConfiguration;
 import com.lumora.core.shared.api.constant.ApiPathConstants;
 import com.lumora.core.shared.api.constant.HttpContractConstants;
@@ -53,5 +54,24 @@ public class McpController {
             String correlationId
     ) {
         return mcpService.test(serverId, correlationId);
+    }
+
+    @PostMapping("/servers/{serverId}/oauth/start")
+    public McpOAuthFlow startOAuth(
+            @PathVariable String serverId,
+            @RequestHeader(HttpContractConstants.CORRELATION_ID_HEADER)
+            String correlationId
+    ) {
+        return mcpService.startOAuth(serverId, correlationId);
+    }
+
+    @GetMapping("/servers/{serverId}/oauth/status/{flowId}")
+    public McpOAuthFlow oauthStatus(
+            @PathVariable String serverId,
+            @PathVariable String flowId,
+            @RequestHeader(HttpContractConstants.CORRELATION_ID_HEADER)
+            String correlationId
+    ) {
+        return mcpService.oauthStatus(serverId, flowId, correlationId);
     }
 }

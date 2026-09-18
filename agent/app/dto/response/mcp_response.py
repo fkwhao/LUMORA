@@ -15,3 +15,13 @@ class McpTestResponse(BaseModel):
     )
     prompts: list[str] = Field(default_factory=list)
     echo_output: str | None = Field(default=None, alias="echoOutput")
+
+
+class McpOAuthResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    flow_id: str = Field(alias="flowId")
+    status: str
+    authorization_url: str | None = Field(default=None, alias="authorizationUrl")
+    result: McpTestResponse | None = None
+    error: str | None = None

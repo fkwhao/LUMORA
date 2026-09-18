@@ -116,6 +116,11 @@ class PromptBuilderTest(unittest.TestCase):
 
         self.assertNotIn("MCP 工具延迟发现", without_search.system_prompt)
         self.assertIn("MCP 工具延迟发现", with_search.system_prompt)
+        self.assertIn("只要 mcp_tool_search 出现在工具列表中", with_search.system_prompt)
+        self.assertIn("只搜索并加载完成当前任务所必需的最小工具集合", with_search.system_prompt)
+        self.assertIn("优先使用 select:<完整工具名> 精确加载", with_search.system_prompt)
+        self.assertIn("limit 控制在 1~3", with_search.system_prompt)
+        self.assertIn("搜索前不要断言没有 MCP", with_search.system_prompt)
 
     def test_delegate_guidance_is_tied_to_tool_visibility(self) -> None:
         with_delegate = PromptBuilder().build(PromptContext(

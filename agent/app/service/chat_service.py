@@ -78,6 +78,7 @@ from app.tool.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 _MAX_MCP_DEFERRED_STATES = 64
+_MCP_DISCOVERY_SCOPE = "__lumora_mcp_discovery__"
 
 
 class ChatService:
@@ -711,8 +712,13 @@ class ChatService:
         list[tuple[str, str]],
         McpDeferredToolStore | None,
     ]:
+        enabled_servers = tuple(
+            server
+            for server in request.prompt_context.mcp_servers
+            if server.enabled
+        )
         servers = self._selected_mcp_servers(request)
-        if not servers:
+        if not enabled_servers:
             return self._tool_registry, [], [], None
 
         if request.prompt_context.workspace_path:
@@ -751,18 +757,22 @@ class ChatService:
             self._mcp_deferred_states[task_scope] = deferred_state
             while len(self._mcp_deferred_states) > _MAX_MCP_DEFERRED_STATES:
                 self._mcp_deferred_states.popitem(last=False)
-        deferred_tools = McpDeferredToolStore(
-            idle_rounds=self._mcp_tool_idle_rounds,
-            state=deferred_state,
-        )
+        leases: list[McpSessionLease] = []
+        known_tool_names = set(registry.names())
+        connected_signatures: set[str] = set()
 
-        async def connect(server):
+        async def connect(
+            server,
+            *,
+            scope: str,
+            reuse: bool,
+        ):
             try:
                 lease = await self._mcp_session_pool.acquire(
-                    task_scope or "",
+                    scope,
                     to_mcp_config(server),
                     McpClient,
-                    reuse=task_scope is not None,
+                    reuse=reuse,
                 )
                 return server, lease, None
             except (
@@ -774,69 +784,103 @@ class ChatService:
             ) as error:
                 return server, None, error
 
-        connected = await asyncio.gather(*(connect(server) for server in servers))
-        leases.extend(
-            lease
-            for _server, lease, error in connected
-            if error is None and lease is not None
+        def register_session(server, lease: McpSessionLease) -> None:
+            server_signature = self._mcp_server_signature(server)
+            connected_signatures.add(server_signature)
+            session = lease.session
+            client = session.client
+            for definition in session.tools:
+                try:
+                    tool = create_mcp_tool(client, definition)
+                    if tool.name in known_tool_names or not deferred_tools.add(
+                        tool,
+                        server_name=server.name,
+                        remote_name=definition.name,
+                        server_signature=server_signature,
+                    ):
+                        errors.append((
+                            server.name,
+                            f"MCP 工具名称冲突，已跳过：{tool.name}",
+                        ))
+                        continue
+                    known_tool_names.add(tool.name)
+                except ValueError as definition_error:
+                    errors.append((
+                        server.name,
+                        (
+                            f"MCP 工具 {definition.name} 定义无效："
+                            f"{definition_error}"
+                        ),
+                    ))
+            if expose_capabilities:
+                for tool in create_mcp_capability_tools(client):
+                    if tool.name in known_tool_names:
+                        errors.append((
+                            server.name,
+                            f"MCP 工具名称冲突，已跳过：{tool.name}",
+                        ))
+                        continue
+                    try:
+                        registry.register(tool)
+                    except ValueError as registration_error:
+                        errors.append((
+                            server.name,
+                            (
+                                f"MCP 工具 {tool.name} 注册失败："
+                                f"{registration_error}"
+                            ),
+                        ))
+                        continue
+                    known_tool_names.add(tool.name)
+
+        async def discover_enabled_servers() -> tuple[str, ...]:
+            candidates = tuple(
+                server
+                for server in enabled_servers
+                if self._mcp_server_signature(server)
+                not in connected_signatures
+            )
+            if not candidates:
+                return ()
+            discovered = await asyncio.gather(*(
+                connect(
+                    server,
+                    scope=_MCP_DISCOVERY_SCOPE,
+                    reuse=True,
+                )
+                for server in candidates
+            ))
+            discovery_errors: list[str] = []
+            for server, lease, error in discovered:
+                if error is not None or lease is None:
+                    message = str(error or "未建立 MCP 会话")
+                    discovery_errors.append(f"{server.name}: {message}")
+                    continue
+                leases.append(lease)
+                register_session(server, lease)
+            return tuple(discovery_errors)
+
+        deferred_tools = McpDeferredToolStore(
+            idle_rounds=self._mcp_tool_idle_rounds,
+            state=deferred_state,
+            discover=discover_enabled_servers,
         )
-        errors.extend(
-            (server.name, str(error))
-            for server, _lease, error in connected
-            if error is not None
-        )
+
+        connected = await asyncio.gather(*(
+            connect(
+                server,
+                scope=task_scope or "",
+                reuse=task_scope is not None,
+            )
+            for server in servers
+        ))
         try:
             for server, lease, error in connected:
-                if error is None and lease is not None:
-                    session = lease.session
-                    client = session.client
-                    existing_names = set(registry.names())
-                    for definition in session.tools:
-                        try:
-                            tool = create_mcp_tool(client, definition)
-                            if tool.name in existing_names:
-                                errors.append((
-                                    server.name,
-                                    f"MCP 工具名称冲突，已跳过：{tool.name}",
-                                ))
-                                continue
-                            deferred_tools.add(
-                                tool,
-                                server_name=server.name,
-                                remote_name=definition.name,
-                                server_signature=self._mcp_server_signature(
-                                    server
-                                ),
-                            )
-                            existing_names.add(tool.name)
-                        except ValueError as definition_error:
-                            errors.append((
-                                server.name,
-                                (
-                                    f"MCP 工具 {definition.name} 定义无效："
-                                    f"{definition_error}"
-                                ),
-                            ))
-                    if expose_capabilities:
-                        for tool in create_mcp_capability_tools(client):
-                            if tool.name in existing_names:
-                                errors.append((
-                                    server.name,
-                                    f"MCP 工具名称冲突，已跳过：{tool.name}",
-                                ))
-                                continue
-                            try:
-                                registry.register(tool)
-                            except ValueError as registration_error:
-                                errors.append((
-                                    server.name,
-                                    (
-                                        f"MCP 工具 {tool.name} 注册失败："
-                                        f"{registration_error}"
-                                    ),
-                                ))
-                                continue
-                            existing_names.add(tool.name)
+                if error is not None or lease is None:
+                    errors.append((server.name, str(error or "未建立 MCP 会话")))
+                    continue
+                leases.append(lease)
+                register_session(server, lease)
         except BaseException:
             await asyncio.gather(
                 *(lease.release() for lease in leases),
@@ -847,9 +891,7 @@ class ChatService:
             registry,
             leases,
             errors,
-            deferred_tools
-            if deferred_tools.has_pending() or deferred_state.loaded_names
-            else None,
+            deferred_tools,
         )
 
     @staticmethod

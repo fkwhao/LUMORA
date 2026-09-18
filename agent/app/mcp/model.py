@@ -21,7 +21,7 @@ class McpServerConfig:
     def authentication_headers(self) -> dict[str, str]:
         if self.transport == "stdio":
             return {}
-        if self.auth_type == "none":
+        if self.auth_type in {"none", "oauth"}:
             return {}
         if not self.credential:
             raise ValueError(f"MCP Server {self.name} 缺少静态凭据")

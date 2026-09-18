@@ -15,6 +15,7 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.types import Implementation
 
 from app.mcp.model import McpServerConfig
+from app.mcp.oauth import create_oauth_provider
 
 _CLIENT_INFO = Implementation(name="LUMORA", version="0.1.0")
 _STDERR_TAIL_CHARS = 4_000
@@ -123,15 +124,26 @@ class StreamableHttpMcpTransport(McpTransport):
             raise ValueError("Streamable HTTP MCP Server 缺少地址")
 
         if self._http_client is None:
-            async with (
-                httpx2.AsyncClient(
-                    headers=self._config.authentication_headers(),
-                    timeout=httpx2.Timeout(30.0, read=300.0),
-                    follow_redirects=False,
-                ) as http_client,
-                self._sdk_client(http_client) as client,
-            ):
-                yield client
+            if self._config.auth_type == "oauth":
+                async with (
+                    httpx2.AsyncClient(
+                        auth=create_oauth_provider(self._config),
+                        timeout=httpx2.Timeout(30.0, read=300.0),
+                        follow_redirects=False,
+                    ) as http_client,
+                    self._sdk_client(http_client) as client,
+                ):
+                    yield client
+            else:
+                async with (
+                    httpx2.AsyncClient(
+                        headers=self._config.authentication_headers(),
+                        timeout=httpx2.Timeout(30.0, read=300.0),
+                        follow_redirects=False,
+                    ) as http_client,
+                    self._sdk_client(http_client) as client,
+                ):
+                    yield client
             return
 
         async with self._sdk_client(self._http_client) as client:

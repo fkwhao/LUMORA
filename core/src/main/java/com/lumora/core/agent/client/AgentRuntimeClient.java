@@ -26,6 +26,20 @@ public interface AgentRuntimeClient {
         throw new UnsupportedOperationException("当前 Agent Runtime 不支持 MCP");
     }
 
+    default com.lumora.core.agent.dto.response.AgentMcpOAuthResponse startMcpOAuth(
+            McpServerRuntimeConfiguration configuration,
+            String correlationId
+    ) {
+        throw new UnsupportedOperationException("当前 Agent Runtime 不支持 MCP OAuth");
+    }
+
+    default com.lumora.core.agent.dto.response.AgentMcpOAuthResponse getMcpOAuthStatus(
+            String flowId,
+            String correlationId
+    ) {
+        throw new UnsupportedOperationException("当前 Agent Runtime 不支持 MCP OAuth");
+    }
+
     void decideToolApproval(
         String approvalId,
         String decision,

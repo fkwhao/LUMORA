@@ -36,6 +36,7 @@ from app.controller.http.agent_controller import (
 from app.controller.http.errors import AgentHttpError
 from app.dto.response.error_response import ErrorResponse
 from app.harness.ports.model_provider import ModelProviderPort
+from app.mcp.oauth import configure_oauth_runtime
 from app.prompt.prompt_builder import PromptBuilder
 from app.provider.routing_provider import RoutingModelProvider
 from app.service.chat_service import ChatService
@@ -56,6 +57,7 @@ def create_app(
     chat_service: ChatService | None = None,
     memory_extraction_service: MemoryExtractionService | None = None,
 ) -> FastAPI:
+    configure_oauth_runtime(settings.host, settings.port)
     app = FastAPI(title=SERVICE_TITLE, version=SERVICE_VERSION)
     provider: ModelProviderPort = RoutingModelProvider()
     prompt_builder = PromptBuilder()

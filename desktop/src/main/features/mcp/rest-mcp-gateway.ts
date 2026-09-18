@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { McpConnectionTest, McpServer, SaveMcpServerInput } from "../../../shared/mcp-contract";
+import type { McpConnectionTest, McpOAuthStart, McpServer, SaveMcpServerInput } from "../../../shared/mcp-contract";
 import type { JavaConnection } from "../../core/java-connection";
 import { validateJavaConnection } from "../../core/java-connection";
 import type { McpGateway } from "./mcp-gateway";
@@ -29,6 +29,18 @@ export class RestMcpGateway implements McpGateway {
 
   testServer(serverId: string): Promise<McpConnectionTest> {
     return this.request(`/api/v1/mcp/servers/${encodeURIComponent(serverId)}/test`, { method: "POST" }, 30_000);
+  }
+
+  startOAuth(serverId: string): Promise<McpOAuthStart> {
+    return this.request(`/api/v1/mcp/servers/${encodeURIComponent(serverId)}/oauth/start`, { method: "POST" }, 30_000);
+  }
+
+  getOAuthStatus(serverId: string, flowId: string): Promise<McpOAuthStart> {
+    return this.request(
+      `/api/v1/mcp/servers/${encodeURIComponent(serverId)}/oauth/status/${encodeURIComponent(flowId)}`,
+      {},
+      10_000,
+    );
   }
 
   private async request<T>(path: string, init: RequestInit = {}, timeout = 10_000): Promise<T> {

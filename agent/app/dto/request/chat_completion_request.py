@@ -272,7 +272,7 @@ class McpServerRequest(BaseModel):
         max_length=64,
         repr=False,
     )
-    auth_type: Literal["none", "bearer", "api_key", "custom_header"] = Field(
+    auth_type: Literal["none", "bearer", "api_key", "custom_header", "oauth"] = Field(
         default="none", alias="authType"
     )
     header_name: str | None = Field(
@@ -332,7 +332,9 @@ class McpServerRequest(BaseModel):
                     raise ValueError(f"stdio 环境变量值无效：{key}")
         if self.auth_type in {"api_key", "custom_header"} and not self.header_name:
             raise ValueError("API Key 或自定义 Header 认证必须配置 Header 名称")
-        if self.auth_type != "none" and not self.credential:
+        if self.auth_type == "oauth" and (self.header_name or self.credential):
+            raise ValueError("OAuth 不使用静态 Header 或凭据")
+        if self.auth_type not in {"none", "oauth"} and not self.credential:
             raise ValueError("静态认证必须提供凭据")
         if self.header_name and self.header_name.casefold() in {
             "accept",

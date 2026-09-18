@@ -64,6 +64,7 @@ const workspaceGateway = new RestWorkspaceGateway({
 });
 // BrowserWindow 必须保留强引用，否则窗口可能在函数返回后被垃圾回收。
 const mainWindow = new WindowReference<BrowserWindow>();
+const mcpOAuthWindows = new Set<BrowserWindow>();
 let unregisterIpc: (() => void) | undefined;
 let unregisterModelIpc: (() => void) | undefined;
 let unregisterMemoryIpc: (() => void) | undefined;
@@ -149,7 +150,7 @@ app.whenReady().then(async () => {
   );
   unregisterModelIpc = registerModelIpc(modelGateway);
   unregisterMemoryIpc = registerMemoryIpc(memoryGateway);
-  unregisterMcpIpc = registerMcpIpc(mcpGateway);
+  unregisterMcpIpc = registerMcpIpc(mcpGateway, openMcpOAuthWindow);
   unregisterSkillIpc = registerSkillIpc();
   unregisterAppearanceIpc = registerAppearanceIpc();
   unregisterAttachmentIpc = registerAttachmentIpc();
@@ -194,5 +195,84 @@ export function createTaskGateway(config: DevConfig): TaskGateway {
   return new RestTaskGateway({
     baseUrl: config.coreUrl,
     sessionToken: config.startupToken,
+  });
+}
+
+function openMcpOAuthWindow(authorizationUrl: string): Promise<boolean> {
+  const owner = mainWindow.get();
+  if (!owner) throw new Error("LUMORA 主窗口尚未准备好");
+  const oauthWindow = new BrowserWindow({
+    parent: owner,
+    modal: true,
+    width: 920,
+    height: 760,
+    minWidth: 640,
+    minHeight: 520,
+    title: "MCP OAuth 授权",
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+      partition: "persist:lumora-mcp-oauth",
+    },
+  });
+  mcpOAuthWindows.add(oauthWindow);
+
+  return new Promise<boolean>((resolve, reject) => {
+    let settled = false;
+    let callbackReached = false;
+    const finish = (reached: boolean) => {
+      if (settled) return;
+      settled = true;
+      callbackReached = reached;
+      if (!oauthWindow.isDestroyed()) oauthWindow.close();
+      resolve(callbackReached);
+    };
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      if (!oauthWindow.isDestroyed()) oauthWindow.close();
+      reject(error);
+    };
+    const isCallbackUrl = (value: string) => {
+      try {
+        const url = new URL(value);
+        return (url.hostname === "127.0.0.1" || url.hostname === "localhost")
+          && /^\/api\/v1\/mcp\/oauth\/callback\//.test(url.pathname);
+      } catch {
+        return false;
+      }
+    };
+    const isSafeNavigation = (value: string) => {
+      try {
+        const protocol = new URL(value).protocol;
+        return protocol === "https:" || protocol === "http:";
+      } catch {
+        return false;
+      }
+    };
+    oauthWindow.webContents.setWindowOpenHandler(({ url }) => {
+      if (isSafeNavigation(url)) void oauthWindow.webContents.loadURL(url);
+      return { action: "deny" };
+    });
+    oauthWindow.webContents.on("will-navigate", (event, url) => {
+      if (!isSafeNavigation(url)) event.preventDefault();
+    });
+    oauthWindow.webContents.on("will-redirect", (event, url) => {
+      if (!isSafeNavigation(url)) event.preventDefault();
+      if (isCallbackUrl(url)) callbackReached = true;
+    });
+    oauthWindow.webContents.on("did-finish-load", () => {
+      if (isCallbackUrl(oauthWindow.webContents.getURL())) finish(true);
+    });
+    oauthWindow.on("closed", () => {
+      mcpOAuthWindows.delete(oauthWindow);
+      if (!settled) {
+        settled = true;
+        resolve(callbackReached);
+      }
+    });
+    void oauthWindow.loadURL(authorizationUrl).catch(fail);
   });
 }

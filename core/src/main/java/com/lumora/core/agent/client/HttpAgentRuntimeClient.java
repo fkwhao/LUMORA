@@ -15,6 +15,7 @@ import com.lumora.core.agent.dto.request.AgentSteerRequest;
 import com.lumora.core.agent.dto.response.AgentChatCompletionResponse;
 import com.lumora.core.agent.dto.response.AgentPlanTaskResponse;
 import com.lumora.core.agent.dto.response.AgentModelListResponse;
+import com.lumora.core.agent.dto.response.AgentMcpOAuthResponse;
 import com.lumora.core.agent.model.AgentPlanStep;
 import com.lumora.core.memory.application.model.MemoryExtractionBatch;
 import com.lumora.core.agent.model.AgentChatStreamRequest;
@@ -66,6 +67,29 @@ public class HttpAgentRuntimeClient implements AgentRuntimeClient {
             response.getResourceTemplates(),
             response.getPrompts(),
             response.getEchoOutput()
+        );
+    }
+
+    @Override
+    public AgentMcpOAuthResponse startMcpOAuth(
+        McpServerRuntimeConfiguration configuration,
+        String correlationId
+    ) {
+        return exceptionMapper.execute(
+            () -> httpApi.startMcpOAuth(
+                correlationId,
+                new AgentMcpServerRequest(configuration)
+            )
+        );
+    }
+
+    @Override
+    public AgentMcpOAuthResponse getMcpOAuthStatus(
+        String flowId,
+        String correlationId
+    ) {
+        return exceptionMapper.execute(
+            () -> httpApi.getMcpOAuthStatus(correlationId, flowId)
         );
     }
 

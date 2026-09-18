@@ -33,6 +33,7 @@ class McpClient:
         self,
         config: McpServerConfig,
         transport: McpTransport | None = None,
+        connect_timeout_seconds: float = _CONNECT_TIMEOUT_SECONDS,
     ) -> None:
         self.config = config
         self._transport = transport or create_mcp_transport(config)
@@ -40,12 +41,13 @@ class McpClient:
         self._server_name = config.name
         self._server_version = ""
         self._server_capabilities: dict[str, Any] = {}
+        self._connect_timeout_seconds = connect_timeout_seconds
 
     async def connect(self) -> None:
         if self._client is not None:
             return
         try:
-            async with asyncio.timeout(_CONNECT_TIMEOUT_SECONDS):
+            async with asyncio.timeout(self._connect_timeout_seconds):
                 client = await self._transport.connect()
         except asyncio.CancelledError:
             raise

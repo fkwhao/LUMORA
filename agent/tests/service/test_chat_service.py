@@ -561,6 +561,41 @@ def test_remote_mcp_is_available_without_workspace(monkeypatch: Any) -> None:
     assert FakeMcpClient.instances[0].closed is True
 
 
+def test_mcp_search_is_available_before_server_selection(
+    monkeypatch: Any,
+) -> None:
+    FakeMcpClient.instances.clear()
+    monkeypatch.setattr("app.service.chat_service.McpClient", FakeMcpClient)
+    harness = CapturingHarness()
+    service = ChatService(
+        ModelListProvider(),  # type: ignore[arg-type]
+        PromptBuilder(),
+        agent_harness=harness,  # type: ignore[arg-type]
+    )
+    request = _mcp_request("测试 echo 工具")
+
+    async def run() -> Any:
+        await _drain(service.stream(request, "lazy-discovery"))
+        assert harness.registry is not None
+        assert harness.tool_context is not None
+        assert MCP_TOOL_SEARCH_NAME in harness.registry.names()
+        assert FakeMcpClient.instances == []
+        result = await harness.registry.execute(
+            MCP_TOOL_SEARCH_NAME,
+            harness.tool_context,
+            {"query": "select:mcp__remote__echo", "limit": 1},
+        )
+        await service.close()
+        return result
+
+    result = asyncio.run(run())
+
+    assert "mcp__remote__echo" in result.content
+    assert harness.registry is not None
+    assert "mcp__remote__echo" in harness.registry.names()
+    assert len(FakeMcpClient.instances) == 1
+
+
 def test_pdf_tools_are_exposed_without_workspace_for_attached_pdf(
     tmp_path: Path,
 ) -> None:
@@ -746,6 +781,7 @@ def test_mcp_server_is_not_connected_for_ordinary_request(
         for name in harness.registry.names()
     )
     assert [tool["function"]["name"] for tool in harness.prompt.tools] == [
+        MCP_TOOL_SEARCH_NAME,
         *_SESSION_CONTROL_TOOLS,
     ]
     assert CapabilityMcpClient.instances == []

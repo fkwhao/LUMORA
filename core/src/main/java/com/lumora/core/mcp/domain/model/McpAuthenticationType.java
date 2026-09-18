@@ -10,7 +10,8 @@ public enum McpAuthenticationType {
     NONE("none"),
     BEARER("bearer"),
     API_KEY("api_key"),
-    CUSTOM_HEADER("custom_header");
+    CUSTOM_HEADER("custom_header"),
+    OAUTH("oauth");
 
     private final String value;
 
@@ -32,7 +33,7 @@ public enum McpAuthenticationType {
                 .filter(type -> type.value.equals(normalized))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException(
-                        "不支持的 MCP 静态认证类型: " + value
+                        "不支持的 MCP 认证类型: " + value
                 ));
     }
 }

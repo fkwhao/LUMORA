@@ -24,6 +24,7 @@ describe("MCP settings", () => {
       saveServer,
       deleteServer: vi.fn(async () => undefined),
       testServer: vi.fn(),
+      authorizeServer: vi.fn(),
     };
 
     render(<McpSettingsPage api={api} notify={vi.fn()} />);

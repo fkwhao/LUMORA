@@ -14,6 +14,7 @@ import com.lumora.core.agent.dto.response.AgentPlanTaskResponse;
 import com.lumora.core.agent.dto.response.AgentModelListResponse;
 import com.lumora.core.agent.dto.response.AgentMemoryExtractionResponse;
 import com.lumora.core.agent.dto.response.AgentMcpTestResponse;
+import com.lumora.core.agent.dto.response.AgentMcpOAuthResponse;
 import com.lumora.core.shared.api.constant.HttpContractConstants;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.service.annotation.HttpExchange;
 import org.springframework.web.service.annotation.DeleteExchange;
+import org.springframework.web.service.annotation.GetExchange;
 import org.springframework.web.service.annotation.PostExchange;
 import org.springframework.web.service.annotation.PutExchange;
 
@@ -43,6 +45,20 @@ public interface AgentRuntimeHttpApi {
             @RequestHeader(HttpContractConstants.CORRELATION_ID_HEADER)
             String correlationId,
             @RequestBody AgentMcpServerRequest request
+    );
+
+    @PostExchange(AgentClientConstants.MCP_OAUTH_START_PATH)
+    AgentMcpOAuthResponse startMcpOAuth(
+            @RequestHeader(HttpContractConstants.CORRELATION_ID_HEADER)
+            String correlationId,
+            @RequestBody AgentMcpServerRequest request
+    );
+
+    @GetExchange(AgentClientConstants.MCP_OAUTH_STATUS_PATH)
+    AgentMcpOAuthResponse getMcpOAuthStatus(
+            @RequestHeader(HttpContractConstants.CORRELATION_ID_HEADER)
+            String correlationId,
+            @PathVariable String flowId
     );
 
     @PostExchange(AgentClientConstants.TOOL_APPROVAL_PATH)
